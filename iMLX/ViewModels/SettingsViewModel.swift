@@ -2,9 +2,6 @@ import Foundation
 
 @Observable
 final class SettingsViewModel {
-    var maxTokens: Int {
-        didSet { UserDefaults.standard.set(maxTokens, forKey: "maxTokens") }
-    }
     var temperature: Double {
         didSet { UserDefaults.standard.set(temperature, forKey: "temperature") }
     }
@@ -22,9 +19,6 @@ final class SettingsViewModel {
 
     init() {
         let defaults = UserDefaults.standard
-        self.maxTokens = defaults.object(forKey: "maxTokens") != nil
-            ? defaults.integer(forKey: "maxTokens")
-            : Constants.Generation.defaultMaxTokens
         self.temperature = defaults.object(forKey: "temperature") != nil
             ? defaults.double(forKey: "temperature")
             : Double(Constants.Generation.defaultTemperature)
@@ -38,11 +32,11 @@ final class SettingsViewModel {
     }
 
     func resetToDefaults() {
-        maxTokens = Constants.Generation.defaultMaxTokens
         temperature = Double(Constants.Generation.defaultTemperature)
         topP = Double(Constants.Generation.defaultTopP)
         repetitionPenalty = Double(Constants.Generation.defaultRepetitionPenalty)
         systemPrompt = ""
+        UserDefaults.standard.removeObject(forKey: "maxTokens")
         Haptics.impactMedium()
     }
 
@@ -50,5 +44,40 @@ final class SettingsViewModel {
         let manifestService = ManifestService()
         let totalBytes = manifestService.getDownloadedModels().reduce(Int64(0)) { $0 + $1.sizeOnDiskBytes }
         return Double(totalBytes) / (1024 * 1024 * 1024)
+    }
+
+    var temperatureDescription: String {
+        switch temperature {
+        case ..<0.3:
+            "More focused and predictable"
+        case ..<0.9:
+            "Balanced between stable and creative"
+        case ..<1.4:
+            "More varied and exploratory"
+        default:
+            "Very loose and unpredictable"
+        }
+    }
+
+    var topPDescription: String {
+        switch topP {
+        case ..<0.5:
+            "Keeps only the safest token choices"
+        case ..<0.85:
+            "Allows some variety without drifting too far"
+        default:
+            "Lets the model consider a broad set of options"
+        }
+    }
+
+    var repetitionPenaltyDescription: String {
+        switch repetitionPenalty {
+        case ..<1.05:
+            "Almost no repetition control"
+        case ..<1.25:
+            "Gently discourages loops and repeated phrases"
+        default:
+            "Strongly pushes the model away from repetition"
+        }
     }
 }

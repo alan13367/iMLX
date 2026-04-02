@@ -1,8 +1,10 @@
 # iMLX
 
+![iMLX Logo](iMLX/Assets.xcassets/BrandLogo.imageset/brand-logo.png)
+
 On-device AI chat for iOS and iPadOS using MLX Swift.
 
-Status: Work in progress (WIP).
+Status: Functional and actively evolving.
 
 iMLX runs supported LLMs locally on Apple Silicon with no cloud dependency.
 
@@ -13,6 +15,19 @@ iMLX runs supported LLMs locally on Apple Silicon with no cloud dependency.
 - Model browser and download management
 - Conversation persistence and history
 - Device-aware model recommendations
+- Per-model thinking mode support (`/think` and `/no_think` where supported)
+- Branded launch/loading experience with the iMLX logo
+- Per-message generation metrics shown inline in assistant responses
+- Load and unload downloaded models directly from Chat and Models screens
+
+## Recent Updates
+
+- Startup now validates downloaded model manifests against on-disk files and prunes stale entries.
+- Model path resolution is more resilient (symlink + cache snapshot fallback) and auto-heals broken links.
+- Simulator model loading/generation now returns a clear unsupported message instead of entering an MLX load path.
+- Chat keeps context visible during model loading and shows a compact loading/status card.
+- Settings now use plain-language response style controls (Creativity, Focus, Repetition Control).
+- User-configurable max token limit was removed so compatible models can stop naturally.
 
 ## Requirements
 

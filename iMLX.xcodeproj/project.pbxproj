@@ -15,13 +15,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		E7306A002F7D21010061F6D5 /* iMLX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "iMLX.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E7306A002F7D21010061F6D5 /* iMLX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iMLX.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		E7306A022F7D21010061F6D5 /* iMLX */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "iMLX";
+			path = iMLX;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -76,7 +76,7 @@
 			fileSystemSynchronizedGroups = (
 				E7306A022F7D21010061F6D5 /* iMLX */,
 			);
-			name = "iMLX";
+			name = iMLX;
 			packageProductDependencies = (
 				E7B001012F7D30000001P001 /* MLX */,
 				E7B001012F7D30000001P002 /* MLXNN */,
@@ -84,7 +84,7 @@
 				E7B001012F7D30000001P004 /* MLXLMCommon */,
 				E7B001012F7D30000001P005 /* MLXLLM */,
 			);
-			productName = "iMLX";
+			productName = iMLX;
 			productReference = E7306A002F7D21010061F6D5 /* iMLX.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -273,6 +273,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -285,7 +286,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.alan13367.MLX-AI";
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -304,6 +305,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -316,7 +318,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.alan13367.MLX-AI";
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

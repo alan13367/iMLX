@@ -1,15 +1,36 @@
 import SwiftUI
+import MLX
 
 @main
-struct MLX_AIApp: App {
+struct iMLXApp: App {
     @State private var appState = AppState()
+    @State private var isShowingLaunchScreen = true
 
     var body: some Scene {
         WindowGroup {
-            MainTabView(appState: appState)
-                .task {
-                    appState.loadConversations()
+            ZStack {
+                MainTabView(appState: appState)
+                    .opacity(isShowingLaunchScreen ? 0 : 1)
+
+                if isShowingLaunchScreen {
+                    BrandLoadingView(
+                        title: "iMLX",
+                        subtitle: "Local AI Models"
+                    )
+                    .transition(.opacity)
                 }
+            }
+            .task {
+                appState.loadConversations()
+
+                try? await Task.sleep(for: .seconds(1.2))
+
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.35)) {
+                        isShowingLaunchScreen = false
+                    }
+                }
+            }
         }
     }
 }

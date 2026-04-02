@@ -4,13 +4,27 @@ struct ModelPickerSheet: View {
     let appState: AppState
     let chatViewModel: ChatViewModel
     @Binding var isPresented: Bool
-    @State private var viewModel = ModelManagerViewModel()
+    @State private var downloadedModels: [ModelInfo] = []
     @State private var isLoadingModelId: String?
 
     var body: some View {
         NavigationStack {
             List {
-                if viewModel.downloadedModels.isEmpty {
+                #if targetEnvironment(simulator)
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Model loading is unavailable in the iOS Simulator.")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("Use a physical iPhone/iPad or the Mac Designed for iPad destination to run MLX models.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                #endif
+
+                if downloadedModels.isEmpty {
                     Section {
                         VStack(spacing: 12) {
                             Image(systemName: "arrow.down.circle")
@@ -34,7 +48,7 @@ struct ModelPickerSheet: View {
                     }
 
                     Section("Downloaded Models") {
-                        ForEach(viewModel.downloadedModels) { model in
+                        ForEach(downloadedModels) { model in
                             if model.id != appState.loadedModelId {
                                 modelRow(model: model)
                             }
@@ -64,7 +78,25 @@ struct ModelPickerSheet: View {
                     }
                 }
             }
+            .task {
+                await refreshDownloadedModels()
+            }
         }
+    }
+
+    private func refreshDownloadedModels() async {
+        var refreshed: [ModelInfo] = []
+
+        for model in Constants.ModelRegistry.curatedModels {
+            if await appState.downloadService.isModelDownloaded(model) {
+                var updated = model
+                updated.isDownloaded = true
+                updated.localURL = await appState.downloadService.localURL(for: model)
+                refreshed.append(updated)
+            }
+        }
+
+        downloadedModels = refreshed
     }
 
     private func loadedModelRow(modelId: String) -> some View {
@@ -108,12 +140,22 @@ struct ModelPickerSheet: View {
             }
         }
         .contentShape(Rectangle())
+        #if targetEnvironment(simulator)
+        .opacity(0.6)
+        #endif
         .onTapGesture {
+            #if targetEnvironment(simulator)
+            Task {
+                await chatViewModel.unloadModel()
+                chatViewModel.errorMessage = InferenceError.simulatorUnsupported.localizedDescription
+            }
+            #else
             Task {
                 isLoadingModelId = model.id
                 await chatViewModel.loadModel(model)
                 isLoadingModelId = nil
             }
+            #endif
         }
     }
 }

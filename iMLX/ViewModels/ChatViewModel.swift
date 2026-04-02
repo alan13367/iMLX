@@ -7,36 +7,39 @@ final class ChatViewModel {
     var currentResponse: String = ""
     var isGenerating: Bool = false
     var isModelLoading: Bool = false
-    var stats: GenerationStats?
     var errorMessage: String?
-    var activeModelId: String?
     var activeConversationId: UUID?
+    var isThinkingEnabled: Bool = false
+
+    var canUseThinking: Bool {
+        resolvedCurrentModel()?.supportsThinking == true
+    }
 
     private var inferenceService: InferenceService { appState?.inferenceService ?? InferenceService() }
     private var downloadService: ModelDownloadService { appState?.downloadService ?? ModelDownloadService() }
     private var generationTask: Task<Void, Never>?
     private weak var appState: AppState?
+    private var capabilityModelId: String?
 
     func configure(with appState: AppState) {
         self.appState = appState
+        updateThinkingAvailability(for: resolvedCurrentModel())
     }
 
     func loadConversation(_ conversation: Conversation) {
         activeConversationId = conversation.id
         messages = conversation.messages
         currentResponse = ""
-        stats = nil
         errorMessage = nil
     }
 
     func sendMessage(_ text: String) {
-        guard activeModelId != nil else {
+        guard let appState else { return }
+        guard appState.loadedModelId != nil else {
             errorMessage = "No model loaded. Please select and load a model first."
             Haptics.notificationWarning()
             return
         }
-
-        guard let appState else { return }
 
         let availableMB = DeviceCapabilityService().availableMemoryMB
         if availableMB > 0 && availableMB < 200 {
@@ -45,32 +48,40 @@ final class ChatViewModel {
             return
         }
 
+        if activeConversationId == nil {
+            let id = appState.createNewConversation()
+            activeConversationId = id
+        }
+
+        let history = messages
         let userMessage = ChatMessage(role: .user, content: text)
         messages.append(userMessage)
 
         isGenerating = true
         currentResponse = ""
-        stats = nil
         errorMessage = nil
 
         Haptics.impactLight()
 
-        let maxTokens = appState.settingsViewModel.maxTokens
         let temperature = Float(appState.settingsViewModel.temperature)
         let topP = Float(appState.settingsViewModel.topP)
+        let repetitionPenalty = Float(appState.settingsViewModel.repetitionPenalty)
+        let systemPrompt = appState.settingsViewModel.systemPrompt
+        let loadedModel = resolvedCurrentModel()
+        let generationPrompt = loadedModel?.prompt(for: text, thinkingEnabled: isThinkingEnabled) ?? text
 
         generationTask = Task { @MainActor in
             let startTime = Date()
             var tokenCount = 0
 
             do {
-                let prompt = buildPrompt(systemPrompt: appState.settingsViewModel.systemPrompt)
-
                 let stream = await inferenceService.generate(
-                    prompt: prompt,
-                    maxTokens: maxTokens,
+                    prompt: generationPrompt,
+                    history: history,
+                    systemPrompt: systemPrompt,
                     temperature: temperature,
-                    topP: topP
+                    topP: topP,
+                    repetitionPenalty: repetitionPenalty
                 )
 
                 for try await token in stream {
@@ -81,13 +92,7 @@ final class ChatViewModel {
 
                 let elapsed = Date().timeIntervalSince(startTime)
                 let peakMemory = await currentMemoryUsage()
-
-                if !currentResponse.isEmpty {
-                    let assistantMessage = ChatMessage(role: .assistant, content: currentResponse)
-                    messages.append(assistantMessage)
-                }
-
-                stats = GenerationStats(
+                let generationStats = GenerationStats(
                     tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                     totalTokens: tokenCount,
                     promptTokens: messages.count - (currentResponse.isEmpty ? 1 : 2),
@@ -95,16 +100,38 @@ final class ChatViewModel {
                     peakMemoryMB: peakMemory
                 )
 
+                if !currentResponse.isEmpty {
+                    let assistantMessage = ChatMessage(
+                        role: .assistant,
+                        content: currentResponse,
+                        generationStats: generationStats
+                    )
+                    messages.append(assistantMessage)
+                }
+
                 saveCurrentConversation()
                 Haptics.impactMedium()
             } catch is CancellationError {
                 if !currentResponse.isEmpty {
-                    let partialMessage = ChatMessage(role: .assistant, content: currentResponse)
+                    let elapsed = Date().timeIntervalSince(startTime)
+                    let peakMemory = await currentMemoryUsage()
+                    let partialMessage = ChatMessage(
+                        role: .assistant,
+                        content: currentResponse,
+                        generationStats: GenerationStats(
+                            tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
+                            totalTokens: tokenCount,
+                            promptTokens: messages.count - 1,
+                            generationTime: elapsed,
+                            peakMemoryMB: peakMemory
+                        )
+                    )
                     messages.append(partialMessage)
                 }
                 saveCurrentConversation()
             } catch {
                 errorMessage = error.localizedDescription
+                saveCurrentConversation()
                 Haptics.notificationError()
             }
 
@@ -122,18 +149,29 @@ final class ChatViewModel {
         errorMessage = nil
 
         do {
+            guard await downloadService.isModelDownloaded(model) else {
+                appState?.selectModel(nil)
+                appState?.setLoadedModel(id: nil)
+                throw InferenceError.modelLoadFailed("Model files are missing for \(model.displayName). Re-download it from the Models tab.")
+            }
             let localURL = await downloadService.localURL(for: model)
             try await inferenceService.load(
                 modelId: model.id,
                 localDirectory: localURL
             )
-            activeModelId = model.id
+            var updatedModel = model
+            updatedModel.isDownloaded = true
+            updatedModel.localURL = localURL
+            appState?.selectModel(updatedModel)
             appState?.setLoadedModel(id: model.id)
+            updateThinkingAvailability(for: updatedModel)
+            saveCurrentConversation()
             Haptics.notificationSuccess()
         } catch {
             errorMessage = error.localizedDescription
-            activeModelId = nil
+            appState?.selectModel(nil)
             appState?.setLoadedModel(id: nil)
+            updateThinkingAvailability(for: nil)
             Haptics.notificationError()
         }
 
@@ -142,34 +180,37 @@ final class ChatViewModel {
 
     func unloadModel() async {
         await inferenceService.unload()
-        activeModelId = nil
+        appState?.selectModel(nil)
         appState?.setLoadedModel(id: nil)
+        updateThinkingAvailability(for: nil)
     }
 
-    func clearConversation() {
-        messages.removeAll()
-        currentResponse = ""
-        stats = nil
-        errorMessage = nil
-        activeConversationId = nil
+    @discardableResult
+    func startNewConversation() -> UUID? {
+        guard let appState else {
+            messages.removeAll()
+            currentResponse = ""
+            errorMessage = nil
+            activeConversationId = nil
+            return nil
+        }
+
+        let id = appState.createNewConversation()
+        if let conversation = appState.conversations.first(where: { $0.id == id }) {
+            loadConversation(conversation)
+        } else {
+            activeConversationId = id
+            messages.removeAll()
+            currentResponse = ""
+            errorMessage = nil
+        }
+        return id
     }
 
-    private func buildPrompt(systemPrompt: String = "") -> String {
-        var parts: [String] = []
-
-        if !systemPrompt.isEmpty {
-            parts.append("System: \(systemPrompt)")
-        }
-
-        for msg in messages {
-            switch msg.role {
-            case .user: parts.append("User: \(msg.content)")
-            case .assistant: parts.append("Assistant: \(msg.content)")
-            case .system: parts.append("System: \(msg.content)")
-            }
-        }
-
-        return parts.joined(separator: "\n") + "\nAssistant:"
+    func toggleThinking() {
+        guard canUseThinking else { return }
+        isThinkingEnabled.toggle()
+        Haptics.selectionChanged()
     }
 
     private func saveCurrentConversation() {
@@ -179,13 +220,13 @@ final class ChatViewModel {
         if let existing = appState.conversations.first(where: { $0.id == conversationId }) {
             conversation = existing
             conversation.messages = messages
-            conversation.modelId = activeModelId
+            conversation.modelId = appState.loadedModelId
             conversation.updatedAt = Date()
         } else {
             conversation = Conversation(
                 id: conversationId,
                 messages: messages,
-                modelId: activeModelId
+                modelId: appState.loadedModelId
             )
         }
 
@@ -195,5 +236,26 @@ final class ChatViewModel {
     private func currentMemoryUsage() async -> UInt64 {
         let info = DeviceCapabilityService()
         return UInt64(info.currentMemoryUsageMB)
+    }
+
+    private func resolvedCurrentModel() -> ModelInfo? {
+        if let selectedModel = appState?.selectedModel {
+            return selectedModel
+        }
+
+        guard let loadedModelId = appState?.loadedModelId else { return nil }
+        return Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelId })
+    }
+
+    private func updateThinkingAvailability(for model: ModelInfo?) {
+        let modelId = model?.id
+        if capabilityModelId != modelId {
+            capabilityModelId = modelId
+            isThinkingEnabled = model?.prefersThinkingEnabled ?? false
+        }
+
+        if model?.supportsThinking != true {
+            isThinkingEnabled = false
+        }
     }
 }

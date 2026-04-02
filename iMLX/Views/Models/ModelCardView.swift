@@ -6,6 +6,7 @@ struct ModelCardView: View {
     let isDownloading: Bool
     let isSelected: Bool
     let onLoad: () -> Void
+    let onUnload: () -> Void
     let onDownload: () -> Void
     let onDelete: () -> Void
 
@@ -42,6 +43,13 @@ struct ModelCardView: View {
                     }
                     .controlSize(.small)
                     .tint(isSelected ? .green : .accentColor)
+
+                    if isSelected {
+                        Button(action: onUnload) {
+                            Label("Unload", systemImage: "eject")
+                        }
+                        .controlSize(.small)
+                    }
 
                     Button(role: .destructive, action: onDelete) {
                         Label("Delete", systemImage: "trash")

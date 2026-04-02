@@ -1,6 +1,6 @@
 import Foundation
 
-struct GenerationStats {
+struct GenerationStats: Codable, Hashable {
     let tokensPerSecond: Double
     let totalTokens: Int
     let promptTokens: Int

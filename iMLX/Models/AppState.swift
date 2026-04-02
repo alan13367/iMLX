@@ -18,6 +18,7 @@ final class AppState {
 
     init() {
         restoreModelState()
+        reconcileDownloadedModelState()
     }
 
     func selectModel(_ model: ModelInfo?) {
@@ -31,16 +32,11 @@ final class AppState {
 
     func setLoadedModel(id: String?) {
         loadedModelId = id
-        if let id {
-            userDefaults.set(id, forKey: "loadedModelId")
-        } else {
-            userDefaults.removeObject(forKey: "loadedModelId")
-        }
     }
 
     func restoreModelState() {
         let selectedId = userDefaults.string(forKey: "selectedModelId")
-        let loadedId = userDefaults.string(forKey: "loadedModelId")
+        userDefaults.removeObject(forKey: "loadedModelId")
 
         if let selectedId,
            let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == selectedId }),
@@ -50,12 +46,43 @@ final class AppState {
             selectedModel = updated
         }
 
-        loadedModelId = loadedId
+        loadedModelId = nil
+    }
+
+    private func reconcileDownloadedModelState() {
+        Task {
+            var staleModelIds: [String] = []
+
+            for entry in manifestService.getDownloadedModels() {
+                guard let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == entry.id }) else {
+                    staleModelIds.append(entry.id)
+                    continue
+                }
+
+                if !(await downloadService.isModelDownloaded(model)) {
+                    staleModelIds.append(entry.id)
+                }
+            }
+
+            guard !staleModelIds.isEmpty else { return }
+
+            await MainActor.run {
+                for modelId in staleModelIds {
+                    self.manifestService.removeDownloaded(modelId: modelId)
+                    if self.selectedModel?.id == modelId {
+                        self.selectModel(nil)
+                    }
+                    if self.loadedModelId == modelId {
+                        self.setLoadedModel(id: nil)
+                    }
+                }
+            }
+        }
     }
 
     func clearModel() {
-        selectedModel = nil
-        loadedModelId = nil
+        selectModel(nil)
+        setLoadedModel(id: nil)
     }
 
     func loadConversations() {
@@ -95,8 +122,9 @@ final class AppState {
 
     func updateConversation(_ conversation: Conversation) {
         if let index = conversations.firstIndex(where: { $0.id == conversation.id }) {
-            conversations[index] = conversation
+            conversations.remove(at: index)
         }
+        conversations.insert(conversation, at: 0)
         conversationService.save(conversation)
     }
 }

@@ -25,37 +25,70 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Generation Parameters") {
-                Stepper("Max Tokens: \(viewModel.maxTokens)", value: Binding(
-                    get: { viewModel.maxTokens },
-                    set: { viewModel.maxTokens = $0 }
-                ), in: 64...4096, step: 64)
-
-                Slider(value: Binding(
-                    get: { viewModel.temperature },
-                    set: { viewModel.temperature = $0 }
-                ), in: 0.0...2.0, step: 0.1) {
-                    Text("Temperature: \(viewModel.temperature, specifier: "%.1f")")
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Creativity")
+                        Spacer()
+                        Text("\(viewModel.temperature, specifier: "%.1f")")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: Binding(
+                        get: { viewModel.temperature },
+                        set: { viewModel.temperature = $0 }
+                    ), in: 0.0...2.0, step: 0.1)
+                    Text(viewModel.temperatureDescription)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
-                Slider(value: Binding(
-                    get: { viewModel.topP },
-                    set: { viewModel.topP = $0 }
-                ), in: 0.0...1.0, step: 0.05) {
-                    Text("Top P: \(viewModel.topP, specifier: "%.2f")")
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Focus")
+                        Spacer()
+                        Text("\(viewModel.topP, specifier: "%.2f")")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: Binding(
+                        get: { viewModel.topP },
+                        set: { viewModel.topP = $0 }
+                    ), in: 0.0...1.0, step: 0.05)
+                    Text(viewModel.topPDescription)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
-                Slider(value: Binding(
-                    get: { viewModel.repetitionPenalty },
-                    set: { viewModel.repetitionPenalty = $0 }
-                ), in: 0.9...2.0, step: 0.1) {
-                    Text("Repetition Penalty: \(viewModel.repetitionPenalty, specifier: "%.1f")")
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Repetition Control")
+                        Spacer()
+                        Text("\(viewModel.repetitionPenalty, specifier: "%.1f")")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: Binding(
+                        get: { viewModel.repetitionPenalty },
+                        set: { viewModel.repetitionPenalty = $0 }
+                    ), in: 0.9...2.0, step: 0.1)
+                    Text(viewModel.repetitionPenaltyDescription)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Responses now stop when the model decides it is finished.")
+                    Text("If you are unsure, leave these on the defaults.")
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
 
                 Button("Reset to Defaults") {
                     viewModel.resetToDefaults()
                 }
                 .foregroundStyle(.red)
+            } header: {
+                Text("Response Style")
+            } footer: {
+                Text("Creativity changes how adventurous the wording is. Focus narrows or widens the set of candidate words. Repetition Control helps prevent loops and repeated phrasing.")
             }
 
             Section("System Prompt") {
@@ -94,9 +127,15 @@ struct SettingsView: View {
 
     private func clearAllModels() {
         let manifestService = ManifestService()
-        let downloadService = ModelDownloadService()
-        for entry in manifestService.getDownloadedModels() {
-            Task {
+        let downloadedEntries = manifestService.getDownloadedModels()
+
+        Task {
+            await appState.inferenceService.unload()
+            await MainActor.run {
+                appState.clearModel()
+            }
+
+            for entry in downloadedEntries {
                 let model = ModelInfo(
                     id: entry.id,
                     displayName: entry.displayName,
@@ -105,12 +144,16 @@ struct SettingsView: View {
                     quantization: "",
                     estimatedSizeGB: 0,
                     minDeviceRAM: 8,
-                    family: .qwen3
+                    family: .qwen3,
+                    supportsThinking: false,
+                    prefersThinkingEnabled: false
                 )
-                try? await downloadService.deleteModel(model)
+                try? await appState.downloadService.deleteModel(model)
                 manifestService.removeDownloaded(modelId: entry.id)
             }
+            await MainActor.run {
+                Haptics.notificationWarning()
+            }
         }
-        Haptics.notificationWarning()
     }
 }

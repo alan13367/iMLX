@@ -19,6 +19,41 @@ final class ModelManagerViewModel {
             return updated
         }
         self.availableModels = models
+        refreshDownloadStatusFromDisk()
+    }
+
+    func refreshDownloadStatusFromDisk() {
+        Task {
+            var refreshedModels = availableModels
+            var staleModelIds: [String] = []
+
+            for index in refreshedModels.indices {
+                let model = refreshedModels[index]
+                let isAvailableOnDisk = await downloadService.isModelDownloaded(model)
+                refreshedModels[index].isDownloaded = isAvailableOnDisk
+                refreshedModels[index].localURL = isAvailableOnDisk
+                    ? await downloadService.localURL(for: model)
+                    : nil
+
+                if !isAvailableOnDisk, manifestService.isDownloaded(modelId: model.id) {
+                    staleModelIds.append(model.id)
+                }
+            }
+
+            await MainActor.run {
+                self.availableModels = refreshedModels
+
+                for modelId in staleModelIds {
+                    self.manifestService.removeDownloaded(modelId: modelId)
+                    if self.appState?.selectedModel?.id == modelId {
+                        self.appState?.selectModel(nil)
+                    }
+                    if self.appState?.loadedModelId == modelId {
+                        self.appState?.setLoadedModel(id: nil)
+                    }
+                }
+            }
+        }
     }
 
     var downloadableModels: [ModelInfo] {
@@ -45,11 +80,11 @@ final class ModelManagerViewModel {
                     }
                 }
                 let sizeOnDisk = await downloadService.sizeOfModel(model)
+                let localURL = await downloadService.localURL(for: model)
                 await MainActor.run {
                     if let index = self.availableModels.firstIndex(where: { $0.id == model.id }) {
                         self.availableModels[index].isDownloaded = true
-                        self.availableModels[index].localURL = URL(fileURLWithPath: Constants.Storage.modelsDirectory)
-                            .appendingPathComponent(model.id)
+                        self.availableModels[index].localURL = localURL
                     }
                     self.manifestService.addDownloaded(
                         modelId: model.id,
@@ -58,12 +93,14 @@ final class ModelManagerViewModel {
                         localPath: model.id,
                         sizeOnDiskBytes: Int64(sizeOnDisk)
                     )
+                    self.downloadProgress[model.id] = 1.0
                     self.isDownloading[model.id] = false
                 }
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
                     self.isDownloading[model.id] = false
+                    self.downloadProgress.removeValue(forKey: model.id)
                 }
             }
         }
@@ -72,12 +109,16 @@ final class ModelManagerViewModel {
     func delete(model: ModelInfo) {
         Task {
             if let appState {
-                await appState.inferenceService.unload()
                 if appState.loadedModelId == model.id {
-                    appState.setLoadedModel(id: nil)
+                    await appState.inferenceService.unload()
+                    await MainActor.run {
+                        appState.setLoadedModel(id: nil)
+                    }
                 }
-                if appState.selectedModel?.id == model.id {
-                    appState.selectModel(nil)
+                await MainActor.run {
+                    if appState.selectedModel?.id == model.id {
+                        appState.selectModel(nil)
+                    }
                 }
             }
             do {

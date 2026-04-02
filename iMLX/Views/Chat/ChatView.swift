@@ -9,64 +9,69 @@ struct ChatView: View {
     let conversationId: UUID
 
     var body: some View {
-        ZStack {
-            if chatViewModel.isModelLoading {
-                loadingShimmer
-            } else if chatViewModel.messages.isEmpty && !chatViewModel.isGenerating {
-                emptyState
-            } else {
-                messageList
-            }
-            VStack(spacing: 0) {
-                Spacer()
-                if let errorMessage = chatViewModel.errorMessage {
-                    errorBanner(message: errorMessage)
-                }
-                if chatViewModel.isGenerating {
-                    generatingIndicator
-                } else if let stats = chatViewModel.stats {
-                    StatsOverlayView(stats: stats, isLive: false)
-                }
-                inputBar
-            }
-        }
+        contentView
         .navigationTitle(conversationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomAccessoryStack
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 modelStatus
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if appState.loadedModelId != nil {
+                    Button {
+                        Task {
+                            await chatViewModel.unloadModel()
+                        }
+                    } label: {
+                        Image(systemName: "eject")
+                    }
+                }
+
                 Button {
-                    chatViewModel.clearConversation()
+                    isInputFocused = false
+                    chatViewModel.startNewConversation()
+                    inputText = ""
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
             }
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    isInputFocused = false
-                }
-            }
         }
         .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isInputFocused = false
+            }
+        )
         .task(id: appState.selectedModel?.id) {
             if let model = appState.selectedModel,
                appState.loadedModelId != model.id {
                 await chatViewModel.loadModel(model)
             }
         }
-        .task(id: conversationId) {
+        .task(id: appState.activeConversationId ?? conversationId) {
             chatViewModel.configure(with: appState)
-            if let conversation = appState.conversations.first(where: { $0.id == conversationId }) {
+            let currentConversationId = appState.activeConversationId ?? conversationId
+            if let conversation = appState.conversations.first(where: { $0.id == currentConversationId }) {
                 chatViewModel.loadConversation(conversation)
             }
         }
     }
 
+    @ViewBuilder
+    private var contentView: some View {
+        if chatViewModel.messages.isEmpty && !chatViewModel.isGenerating && chatViewModel.currentResponse.isEmpty {
+            emptyState
+        } else {
+            messageList
+        }
+    }
+
     private var conversationTitle: String {
-        if let conversation = appState.conversations.first(where: { $0.id == conversationId }) {
+        let currentConversationId = appState.activeConversationId ?? conversationId
+        if let conversation = appState.conversations.first(where: { $0.id == currentConversationId }) {
             return conversation.displayTitle
         }
         return "iMLX"
@@ -77,7 +82,7 @@ struct ChatView: View {
             if chatViewModel.isModelLoading {
                 ProgressView()
                     .controlSize(.small)
-                Text("Loading...")
+                Text(appState.selectedModel?.displayName ?? "Loading...")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else if appState.loadedModelId != nil,
@@ -108,19 +113,6 @@ struct ChatView: View {
                 isPresented: $showModelPicker
             )
         }
-    }
-
-    private var loadingShimmer: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            ProgressView()
-                .controlSize(.large)
-            Text("Loading model...")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {
@@ -158,7 +150,8 @@ struct ChatView: View {
                             message: ChatMessage(
                                 role: .assistant,
                                 content: chatViewModel.currentResponse + (chatViewModel.isGenerating ? "▊" : "")
-                            )
+                            ),
+                            isStreaming: true
                         )
                         .id("streaming")
                         .transition(.opacity)
@@ -167,9 +160,6 @@ struct ChatView: View {
                 .animation(.easeOut(duration: 0.2), value: chatViewModel.messages.count)
                 .padding(.horizontal)
                 .padding(.vertical, 12)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear.frame(height: 1)
             }
             .onChange(of: chatViewModel.messages.count) {
                 withAnimation {
@@ -182,6 +172,47 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    private var bottomAccessoryStack: some View {
+        VStack(spacing: 8) {
+            if let errorMessage = chatViewModel.errorMessage {
+                errorBanner(message: errorMessage)
+            }
+
+            if chatViewModel.isModelLoading {
+                modelLoadingCard
+            }
+
+            if chatViewModel.isGenerating {
+                generatingIndicator
+            }
+
+            inputBar
+        }
+        .padding(.top, 8)
+    }
+
+    private var modelLoadingCard: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Loading Model")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text(appState.selectedModel?.displayName ?? "Preparing the selected model for local inference")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .padding(.horizontal)
     }
 
     private var generatingIndicator: some View {
@@ -241,40 +272,66 @@ struct ChatView: View {
     }
 
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message...", text: $inputText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.fill.tertiary)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .focused($isInputFocused)
-                .onSubmit {
-                    sendMessage()
+        VStack(alignment: .leading, spacing: 10) {
+            if chatViewModel.canUseThinking {
+                Button {
+                    chatViewModel.toggleThinking()
+                } label: {
+                    Label(
+                        chatViewModel.isThinkingEnabled ? "Thinking On" : "Thinking Off",
+                        systemImage: chatViewModel.isThinkingEnabled ? "sparkles" : "circle.slash"
+                    )
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(chatViewModel.isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12))
+                    .foregroundStyle(chatViewModel.isThinkingEnabled ? .orange : .secondary)
+                    .clipShape(Capsule())
                 }
+                .buttonStyle(.plain)
+            }
 
-            if chatViewModel.isGenerating {
-                Button {
-                    chatViewModel.stopGeneration()
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.red)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Message...", text: $inputText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.fill.tertiary)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .focused($isInputFocused)
+                    .onSubmit {
+                        if !chatViewModel.isModelLoading {
+                            sendMessage()
+                        }
+                    }
+
+                if chatViewModel.isGenerating {
+                    Button {
+                        chatViewModel.stopGeneration()
+                    } label: {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.red)
+                    }
+                } else {
+                    Button {
+                        sendMessage()
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(canSendMessage ? .blue : .gray)
+                    }
+                    .disabled(!canSendMessage)
                 }
-            } else {
-                Button {
-                    sendMessage()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .blue)
-                }
-                .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.bar)
+    }
+
+    private var canSendMessage: Bool {
+        !chatViewModel.isModelLoading && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

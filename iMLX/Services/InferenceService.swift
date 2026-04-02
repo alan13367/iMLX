@@ -4,54 +4,71 @@ import MLXLMCommon
 
 actor InferenceService {
     private var modelContainer: ModelContainer?
-    private var chatSession: ChatSession?
 
     var isModelLoaded: Bool {
         modelContainer != nil
     }
 
     func load(modelId: String, localDirectory: URL) async throws {
+        #if targetEnvironment(simulator)
+        throw InferenceError.simulatorUnsupported
+        #else
         if isModelLoaded {
             await unload()
         }
 
-        let container = try await MLXLMCommon.loadModelContainer(
-            directory: localDirectory
-        )
+        let container = try await withPreferredDevice {
+            try await MLXLMCommon.loadModelContainer(
+                directory: localDirectory
+            )
+        }
 
         modelContainer = container
-        chatSession = ChatSession(container)
+        #endif
     }
 
     func generate(
         prompt: String,
-        maxTokens: Int = 512,
+        history: [ChatMessage],
+        systemPrompt: String,
         temperature: Float = 0.7,
-        topP: Float = 1.0
+        topP: Float = 1.0,
+        repetitionPenalty: Float = 1.0
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            guard let chatSession = chatSession else {
+            #if targetEnvironment(simulator)
+            continuation.finish(throwing: InferenceError.simulatorUnsupported)
+            return
+            #else
+            guard let modelContainer else {
                 continuation.finish(throwing: InferenceError.noModelLoaded)
                 return
             }
 
             let task = Task {
                 do {
-                    let parameters = GenerateParameters(
-                        maxTokens: maxTokens,
-                        temperature: temperature,
-                        topP: topP
-                    )
+                    try await withPreferredDevice {
+                        let session = ChatSession(
+                            modelContainer,
+                            instructions: systemPrompt.isEmpty ? nil : systemPrompt,
+                            history: history.map(\.chatMessage)
+                        )
+                        let parameters = GenerateParameters(
+                            temperature: temperature,
+                            topP: topP,
+                            repetitionPenalty: repetitionPenalty == 1 ? nil : repetitionPenalty
+                        )
 
-                    chatSession.generateParameters = parameters
+                        session.generateParameters = parameters
 
-                    let stream = chatSession.streamResponse(to: prompt)
+                        let stream = session.streamResponse(to: prompt)
 
-                    for try await chunk in stream {
-                        guard !Task.isCancelled else {
-                            break
+                        for try await chunk in stream {
+                            guard !Task.isCancelled else {
+                                break
+                            }
+                            continuation.yield(chunk)
                         }
-                        continuation.yield(chunk)
                     }
 
                     continuation.finish()
@@ -67,14 +84,22 @@ actor InferenceService {
             continuation.onTermination = { _ in
                 task.cancel()
             }
+            #endif
         }
     }
 
     func unload() async {
+        let wasLoaded = modelContainer != nil
         modelContainer = nil
-        chatSession = nil
 
-        MLX.Memory.clearCache()
+        if wasLoaded {
+            await Task.yield()
+            MLX.Memory.clearCache()
+        }
+    }
+
+    private func withPreferredDevice<R>(_ operation: () async throws -> R) async rethrows -> R {
+        return try await operation()
     }
 
     private func mapError(_ error: Error) -> Error {
@@ -86,11 +111,25 @@ actor InferenceService {
     }
 }
 
+private extension ChatMessage {
+    var chatMessage: Chat.Message {
+        switch role {
+        case .user:
+            .user(content)
+        case .assistant:
+            .assistant(content)
+        case .system:
+            .system(content)
+        }
+    }
+}
+
 enum InferenceError: LocalizedError {
     case noModelLoaded
     case modelLoadFailed(String)
     case outOfMemory
     case generationCancelled
+    case simulatorUnsupported
 
     var errorDescription: String? {
         switch self {
@@ -98,6 +137,7 @@ enum InferenceError: LocalizedError {
         case .modelLoadFailed(let reason): "Failed to load model: \(reason)"
         case .outOfMemory: "Not enough memory to run this model"
         case .generationCancelled: "Generation was cancelled"
+        case .simulatorUnsupported: "MLX model loading is unavailable in the iOS Simulator. Run the app on a physical device or use Mac Designed for iPad."
         }
     }
 }

@@ -28,6 +28,7 @@ struct ModelBrowserView: View {
                             isDownloading: viewModel.isDownloading[model.id] ?? false,
                             isSelected: appState.loadedModelId == model.id,
                             onLoad: { selectModelForChat(model) },
+                            onUnload: { unloadModel() },
                             onDownload: {
                                 viewModel.errorMessage = nil
                                 viewModel.download(model: model)
@@ -46,6 +47,7 @@ struct ModelBrowserView: View {
                             isDownloading: false,
                             isSelected: false,
                             onLoad: {},
+                            onUnload: {},
                             onDownload: {},
                             onDelete: {}
                         )
@@ -55,6 +57,9 @@ struct ModelBrowserView: View {
             }
         }
         .navigationTitle("Models")
+        .task {
+            viewModel.refreshDownloadStatusFromDisk()
+        }
     }
 
     private func errorRow(message: String) -> some View {
@@ -80,6 +85,12 @@ struct ModelBrowserView: View {
     private func selectModelForChat(_ model: ModelInfo) {
         guard model.isDownloaded else { return }
         Task {
+            guard await appState.downloadService.isModelDownloaded(model) else {
+                await MainActor.run {
+                    viewModel.errorMessage = "Model files are missing for \(model.displayName). Re-download it from the Models tab."
+                }
+                return
+            }
             await appState.inferenceService.unload()
             appState.setLoadedModel(id: nil)
             let localURL = await appState.downloadService.localURL(for: model)
@@ -88,11 +99,32 @@ struct ModelBrowserView: View {
                     modelId: model.id,
                     localDirectory: localURL
                 )
-                appState.setLoadedModel(id: model.id)
-                appState.selectModel(model)
-                Haptics.notificationSuccess()
+                await MainActor.run {
+                    var updatedModel = model
+                    updatedModel.isDownloaded = true
+                    updatedModel.localURL = localURL
+                    appState.setLoadedModel(id: model.id)
+                    appState.selectModel(updatedModel)
+                    viewModel.errorMessage = nil
+                    Haptics.notificationSuccess()
+                }
             } catch {
-                Haptics.notificationError()
+                await MainActor.run {
+                    appState.selectModel(nil)
+                    appState.setLoadedModel(id: nil)
+                    viewModel.errorMessage = error.localizedDescription
+                    Haptics.notificationError()
+                }
+            }
+        }
+    }
+
+    private func unloadModel() {
+        Task {
+            await appState.inferenceService.unload()
+            await MainActor.run {
+                appState.clearModel()
+                viewModel.errorMessage = nil
             }
         }
     }

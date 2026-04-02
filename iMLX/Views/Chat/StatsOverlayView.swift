@@ -5,59 +5,38 @@ struct StatsOverlayView: View {
     let isLive: Bool
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 16) {
-                StatItem(
-                    icon: "gauge.with.dots.needle.33percent",
-                    label: "Speed",
-                    value: stats.formattedTokensPerSecond,
-                    isLive: isLive
-                )
-                StatItem(
-                    icon: "text.word.spacing",
-                    label: "Tokens",
-                    value: "\(stats.totalTokens)",
-                    isLive: isLive
-                )
-                StatItem(
-                    icon: "clock",
-                    label: "Time",
-                    value: stats.formattedTime,
-                    isLive: isLive
-                )
-                StatItem(
-                    icon: "memorychip",
-                    label: "RAM",
-                    value: stats.formattedMemory,
-                    isLive: isLive
-                )
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                StatItem(icon: "gauge.with.dots.needle.33percent", value: stats.formattedTokensPerSecond, isLive: isLive)
+                StatItem(icon: "text.word.spacing", value: "\(stats.totalTokens) tok", isLive: isLive)
+                StatItem(icon: "clock", value: stats.formattedTime, isLive: isLive)
+                StatItem(icon: "memorychip", value: stats.formattedMemory, isLive: isLive)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
+        .fixedSize(horizontal: false, vertical: true)
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 }
 
 struct StatItem: View {
     let icon: String
-    let label: String
     let value: String
     let isLive: Bool
 
     var body: some View {
-        VStack(spacing: 2) {
+        HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.caption)
                 .foregroundStyle(isLive ? .blue : .secondary)
             Text(value)
-                .font(.caption)
-                .fontWeight(.medium)
-            Text(label)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .fontWeight(.medium)
+                .lineLimit(1)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isLive ? Color.blue.opacity(0.10) : Color.secondary.opacity(0.12))
+        .clipShape(Capsule())
+        .fixedSize(horizontal: true, vertical: true)
     }
 }

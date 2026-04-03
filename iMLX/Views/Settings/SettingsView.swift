@@ -145,7 +145,9 @@ struct SettingsView: View {
                     estimatedSizeGB: 0,
                     minDeviceRAM: 8,
                     family: .qwen3,
+                    logoName: "",
                     supportsThinking: false,
+                    supportsVision: false,
                     prefersThinkingEnabled: false
                 )
                 try? await appState.downloadService.deleteModel(model)

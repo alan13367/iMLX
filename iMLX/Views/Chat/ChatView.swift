@@ -1,10 +1,15 @@
 import SwiftUI
+import PhotosUI
 
 struct ChatView: View {
     @State private var chatViewModel = ChatViewModel()
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
     @State private var showModelPicker = false
+    @State private var showAttachmentActionSheet = false
+    @State private var showCamera = false
+    @State private var showPhotoLibrary = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
     let appState: AppState
     let conversationId: UUID
 
@@ -58,6 +63,24 @@ struct ChatView: View {
                 chatViewModel.loadConversation(conversation)
             }
         }
+        .onChange(of: selectedPhotoItem) {
+            if let item = selectedPhotoItem {
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        await MainActor.run {
+                            chatViewModel.pendingImages.append(data)
+                        }
+                    }
+                    selectedPhotoItem = nil
+                }
+            }
+        }
+        .sheet(isPresented: $showCamera) {
+            ImagePicker(isPresented: $showCamera) { data in
+                chatViewModel.pendingImages.append(data)
+            }
+        }
+        .photosPicker(isPresented: $showPhotoLibrary, selection: $selectedPhotoItem, matching: .images)
     }
 
     @ViewBuilder
@@ -94,12 +117,18 @@ struct ChatView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             } else {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
                 Text("No model loaded")
                     .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
@@ -273,25 +302,73 @@ struct ChatView: View {
 
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if chatViewModel.canUseThinking {
-                Button {
-                    chatViewModel.toggleThinking()
-                } label: {
-                    Label(
-                        chatViewModel.isThinkingEnabled ? "Thinking On" : "Thinking Off",
-                        systemImage: chatViewModel.isThinkingEnabled ? "sparkles" : "circle.slash"
-                    )
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(chatViewModel.isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12))
-                    .foregroundStyle(chatViewModel.isThinkingEnabled ? .orange : .secondary)
-                    .clipShape(Capsule())
+            if !chatViewModel.pendingImages.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(chatViewModel.pendingImages, id: \.self) { imageData in
+                            if let uiImage = UIImage(data: imageData) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 60, height: 60)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    
+                                    Button {
+                                        if let idx = chatViewModel.pendingImages.firstIndex(of: imageData) {
+                                            chatViewModel.pendingImages.remove(at: idx)
+                                        }
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundStyle(.white, .black.opacity(0.6))
+                                            .font(.caption)
+                                    }
+                                    .offset(x: 4, y: -4)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 4)
                 }
-                .buttonStyle(.plain)
             }
 
             HStack(alignment: .bottom, spacing: 8) {
+                if chatViewModel.canUseVision {
+                    Button {
+                        showAttachmentActionSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 20, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                            .background(Color.secondary.opacity(0.12))
+                            .foregroundStyle(.secondary)
+                            .clipShape(Circle())
+                    }
+                    .padding(.bottom, 4)
+                    .confirmationDialog("Attach Image", isPresented: $showAttachmentActionSheet) {
+                        Button("Take Photo") {
+                            showCamera = true
+                        }
+                        Button("Photo Library") {
+                            showPhotoLibrary = true
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    }
+                }
+
+                if chatViewModel.canUseThinking {
+                    Button {
+                        chatViewModel.toggleThinking()
+                    } label: {
+                        Image(systemName: chatViewModel.isThinkingEnabled ? "lightbulb.fill" : "lightbulb")
+                            .font(.system(size: 18, weight: .medium))
+                            .frame(width: 32, height: 32)
+                            .background(chatViewModel.isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12))
+                            .foregroundStyle(chatViewModel.isThinkingEnabled ? .orange : .secondary)
+                            .clipShape(Circle())
+                    }
+                    .padding(.bottom, 4)
+                }
                 TextField("Message...", text: $inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
@@ -311,18 +388,22 @@ struct ChatView: View {
                         chatViewModel.stopGeneration()
                     } label: {
                         Image(systemName: "stop.circle.fill")
-                            .font(.title2)
+                            .resizable()
+                            .frame(width: 32, height: 32)
                             .foregroundStyle(.red)
                     }
+                    .padding(.bottom, 4)
                 } else {
                     Button {
                         sendMessage()
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")
-                            .font(.title2)
+                            .resizable()
+                            .frame(width: 32, height: 32)
                             .foregroundStyle(canSendMessage ? .blue : .gray)
                     }
                     .disabled(!canSendMessage)
+                    .padding(.bottom, 4)
                 }
             }
         }
@@ -332,6 +413,6 @@ struct ChatView: View {
     }
 
     private var canSendMessage: Bool {
-        !chatViewModel.isModelLoading && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !chatViewModel.isModelLoading && (!inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !chatViewModel.pendingImages.isEmpty)
     }
 }

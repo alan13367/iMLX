@@ -47,7 +47,7 @@ final class DeviceCapabilityService {
     }
 
     func canRunModel(_ model: ModelInfo) -> Bool {
-        physicalMemoryGB >= model.minDeviceRAM
+        tier.rawValue >= model.minDeviceRAM
     }
 
     var currentMemoryUsageMB: UInt64 {

@@ -81,7 +81,7 @@ actor ModelDownloadService {
                     let symlinkPath = modelsBaseURL.appendingPathComponent(model.id)
                     try? fileManager.removeItem(at: symlinkPath)
 
-                    guard isUsableModelDirectory(snapshotURL) else {
+                    guard isUsableModelDirectory(snapshotURL, for: model) else {
                         throw DownloadError.corruptedDownload(model.displayName)
                     }
 
@@ -156,7 +156,7 @@ actor ModelDownloadService {
 
     private func preferredModelDirectory(for model: ModelInfo) -> URL? {
         let symlinkPath = modelsBaseURL.appendingPathComponent(model.id)
-        if let symlinkTarget = usableSymlinkTarget(at: symlinkPath) {
+        if let symlinkTarget = usableSymlinkTarget(at: symlinkPath, for: model) {
             return symlinkTarget
         }
 
@@ -168,12 +168,12 @@ actor ModelDownloadService {
         let appSupportRepoPath = modelsBaseURL
             .appendingPathComponent("models")
             .appendingPathComponent(model.huggingFaceId)
-        if isUsableModelDirectory(appSupportRepoPath) {
+        if isUsableModelDirectory(appSupportRepoPath, for: model) {
             return appSupportRepoPath
         }
 
         let cacheDirectory = hubCacheBaseURL.appendingPathComponent(cacheDirectoryName(for: model))
-        if isUsableModelDirectory(cacheDirectory) {
+        if isUsableModelDirectory(cacheDirectory, for: model) {
             return cacheDirectory
         }
 
@@ -199,7 +199,7 @@ actor ModelDownloadService {
             return lhsDate > rhsDate
         }
 
-        for snapshot in sortedSnapshots where isUsableModelDirectory(snapshot) {
+        for snapshot in sortedSnapshots where isUsableModelDirectory(snapshot, for: model) {
             return snapshot
         }
 
@@ -210,7 +210,7 @@ actor ModelDownloadService {
         "models--" + model.huggingFaceId.replacingOccurrences(of: "/", with: "--")
     }
 
-    private func usableSymlinkTarget(at symlinkPath: URL) -> URL? {
+    private func usableSymlinkTarget(at symlinkPath: URL, for model: ModelInfo) -> URL? {
         guard let values = try? symlinkPath.resourceValues(forKeys: [.isSymbolicLinkKey]),
               values.isSymbolicLink == true,
               let destinationPath = try? fileManager.destinationOfSymbolicLink(atPath: symlinkPath.path) else {
@@ -220,7 +220,7 @@ actor ModelDownloadService {
         let destinationURL = URL(fileURLWithPath: destinationPath, relativeTo: symlinkPath.deletingLastPathComponent())
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        if isUsableModelDirectory(destinationURL) {
+        if isUsableModelDirectory(destinationURL, for: model) {
             return destinationURL
         }
 
@@ -228,7 +228,7 @@ actor ModelDownloadService {
         return nil
     }
 
-    private func isUsableModelDirectory(_ directory: URL) -> Bool {
+    private func isUsableModelDirectory(_ directory: URL, for model: ModelInfo) -> Bool {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             return false
@@ -239,11 +239,34 @@ actor ModelDownloadService {
             return false
         }
 
+        guard let configObject = try? JSONSerialization.jsonObject(with: configData),
+              let config = configObject as? [String: Any] else {
+            return false
+        }
+
         guard let contents = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return false
         }
 
-        return contents.contains { $0.pathExtension == "safetensors" }
+        let hasWeights = contents.contains { $0.pathExtension == "safetensors" }
+        guard hasWeights else {
+            return false
+        }
+
+        if model.supportsVision {
+            let hasVisionConfig = config["vision_config"] != nil
+            if !hasVisionConfig {
+                return false
+            }
+
+            let hasPreprocessor = fileManager.fileExists(atPath: directory.appendingPathComponent("preprocessor_config.json").path)
+            let hasProcessor = fileManager.fileExists(atPath: directory.appendingPathComponent("processor_config.json").path)
+            if !hasPreprocessor && !hasProcessor {
+                return false
+            }
+        }
+
+        return true
     }
 
     private func createModelSymlink(at symlinkPath: URL, targetURL: URL) throws {

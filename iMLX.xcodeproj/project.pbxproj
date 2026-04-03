@@ -12,6 +12,7 @@
 		E74248D02F7D2670003ECA6B /* MLXRandom in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P003 /* MLXRandom */; };
 		E74248D12F7D2670003ECA6B /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P004 /* MLXLMCommon */; };
 		E74248D22F7D2670003ECA6B /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P005 /* MLXLLM */; };
+		E74248D32F7D2670003ECA6B /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P006 /* MLXVLM */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +32,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E74248D32F7D2670003ECA6B /* MLXVLM in Frameworks */,
 				E74248D22F7D2670003ECA6B /* MLXLLM in Frameworks */,
 				E74248D12F7D2670003ECA6B /* MLXLMCommon in Frameworks */,
 				E74248D02F7D2670003ECA6B /* MLXRandom in Frameworks */,
@@ -83,6 +85,7 @@
 				E7B001012F7D30000001P003 /* MLXRandom */,
 				E7B001012F7D30000001P004 /* MLXLMCommon */,
 				E7B001012F7D30000001P005 /* MLXLLM */,
+				E7B001012F7D30000001P006 /* MLXVLM */,
 			);
 			productName = iMLX;
 			productReference = E7306A002F7D21010061F6D5 /* iMLX.app */;
@@ -276,7 +279,8 @@
 				DEVELOPMENT_TEAM = M77ZNJA6C8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to capture photos for visual models.";
+                                INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -308,7 +312,8 @@
 				DEVELOPMENT_TEAM = M77ZNJA6C8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to capture photos for visual models.";
+                                INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -397,6 +402,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E7B002002F7D30000002P002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXLLM;
+		};
+		E7B001012F7D30000001P006 /* MLXVLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E7B002002F7D30000002P002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = MLXVLM;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

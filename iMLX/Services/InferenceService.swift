@@ -1,9 +1,13 @@
 import Foundation
+import CoreImage
+import ImageIO
 import MLX
 import MLXLMCommon
+import MLXVLM
 
 actor InferenceService {
     private var modelContainer: ModelContainer?
+    private var loadedModelSupportsVision = false
 
     var isModelLoaded: Bool {
         modelContainer != nil
@@ -17,20 +21,33 @@ actor InferenceService {
             await unload()
         }
 
+        let shouldPreferVisionLoader = detectVisionSupport(in: localDirectory)
+
         let container = try await withPreferredDevice {
-            try await MLXLMCommon.loadModelContainer(
+            if shouldPreferVisionLoader {
+                return try await VLMModelFactory.shared.loadContainer(
+                    hub: defaultHubApi,
+                    configuration: .init(directory: localDirectory)
+                )
+            }
+
+            return try await MLXLMCommon.loadModelContainer(
                 directory: localDirectory
             )
         }
 
         modelContainer = container
+        loadedModelSupportsVision = shouldPreferVisionLoader
         #endif
     }
 
     func generate(
         prompt: String,
+        images: [Data]? = nil,
+        thinkingEnabled: Bool? = nil,
         history: [ChatMessage],
         systemPrompt: String,
+        maxTokens: Int,
         temperature: Float = 0.7,
         topP: Float = 1.0,
         repetitionPenalty: Float = 1.0
@@ -45,23 +62,41 @@ actor InferenceService {
                 return
             }
 
+            let userInputImages = userInputImages(from: images)
+            if let images, !images.isEmpty {
+                guard !userInputImages.isEmpty else {
+                    continuation.finish(throwing: InferenceError.invalidImageData)
+                    return
+                }
+                guard loadedModelSupportsVision else {
+                    continuation.finish(throwing: InferenceError.visionUnsupportedModel)
+                    return
+                }
+            }
+
             let task = Task {
                 do {
                     try await withPreferredDevice {
+                        let additionalContext: [String: any Sendable]? = thinkingEnabled.map { value in
+                            ["enable_thinking": value]
+                        }
+
                         let session = ChatSession(
                             modelContainer,
                             instructions: systemPrompt.isEmpty ? nil : systemPrompt,
-                            history: history.map(\.chatMessage)
+                            history: history.map(\.chatMessage),
+                            additionalContext: additionalContext
                         )
-                        let parameters = GenerateParameters(
+                        var parameters = GenerateParameters(
                             temperature: temperature,
                             topP: topP,
                             repetitionPenalty: repetitionPenalty == 1 ? nil : repetitionPenalty
                         )
+                        parameters.maxTokens = maxTokens
 
                         session.generateParameters = parameters
 
-                        let stream = session.streamResponse(to: prompt)
+                        let stream = session.streamResponse(to: prompt, role: .user, images: userInputImages, videos: [])
 
                         for try await chunk in stream {
                             guard !Task.isCancelled else {
@@ -91,6 +126,7 @@ actor InferenceService {
     func unload() async {
         let wasLoaded = modelContainer != nil
         modelContainer = nil
+        loadedModelSupportsVision = false
 
         if wasLoaded {
             await Task.yield()
@@ -102,7 +138,33 @@ actor InferenceService {
         return try await operation()
     }
 
+    private func detectVisionSupport(in directory: URL) -> Bool {
+        let configURL = directory.appendingPathComponent("config.json")
+        guard let configData = try? Data(contentsOf: configURL),
+              let configObject = try? JSONSerialization.jsonObject(with: configData),
+              let config = configObject as? [String: Any] else {
+            return false
+        }
+
+        if config["vision_config"] != nil {
+            return true
+        }
+
+        if let modelType = config["model_type"] as? String {
+            let normalizedType = modelType.lowercased()
+            if normalizedType.contains("_vl") || normalizedType == "qwen3_5" {
+                return true
+            }
+        }
+
+        return false
+    }
+
     private func mapError(_ error: Error) -> Error {
+        if let inferenceError = error as? InferenceError {
+            return inferenceError
+        }
+
         let nsError = error as NSError
         if nsError.domain == "MLX" || nsError.localizedDescription.contains("memory") {
             return InferenceError.outOfMemory
@@ -113,14 +175,33 @@ actor InferenceService {
 
 private extension ChatMessage {
     var chatMessage: Chat.Message {
+        let userInputImages = userInputImages(from: attachedImages)
+        
         switch role {
         case .user:
-            .user(content)
+            return .user(content, images: userInputImages)
         case .assistant:
-            .assistant(content)
+            return .assistant(content, images: userInputImages)
         case .system:
-            .system(content)
+            return .system(content, images: userInputImages)
         }
+    }
+}
+
+private func userInputImages(from images: [Data]?) -> [UserInput.Image] {
+    guard let images else { return [] }
+
+    return images.compactMap { data in
+        if let ciImage = CIImage(data: data, options: [.applyOrientationProperty: true]) {
+            return .ciImage(ciImage)
+        }
+
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+            return nil
+        }
+
+        return .ciImage(CIImage(cgImage: cgImage))
     }
 }
 
@@ -130,6 +211,8 @@ enum InferenceError: LocalizedError {
     case outOfMemory
     case generationCancelled
     case simulatorUnsupported
+    case visionUnsupportedModel
+    case invalidImageData
 
     var errorDescription: String? {
         switch self {
@@ -138,6 +221,8 @@ enum InferenceError: LocalizedError {
         case .outOfMemory: "Not enough memory to run this model"
         case .generationCancelled: "Generation was cancelled"
         case .simulatorUnsupported: "MLX model loading is unavailable in the iOS Simulator. Run the app on a physical device or use Mac Designed for iPad."
+        case .visionUnsupportedModel: "The loaded model does not expose a vision pipeline. Delete and re-download this model to get the latest vision-capable files."
+        case .invalidImageData: "Unable to decode the attached image. Try reattaching it from Photos or capture it again."
         }
     }
 }

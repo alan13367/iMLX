@@ -15,7 +15,7 @@ iMLX runs supported LLMs locally on Apple Silicon with no cloud dependency.
 - Model browser and download management
 - Conversation persistence and history
 - Device-aware model recommendations
-- Per-model thinking mode support (`/think` and `/no_think` where supported)
+- Per-model thinking mode (toggle + chat-template `enable_thinking` where supported)
 - Branded launch/loading experience with the iMLX logo
 - Per-message generation metrics shown inline in assistant responses
 - Load and unload downloaded models directly from Chat and Models screens
@@ -27,7 +27,7 @@ iMLX runs supported LLMs locally on Apple Silicon with no cloud dependency.
 - Simulator model loading/generation now returns a clear unsupported message instead of entering an MLX load path.
 - Chat keeps context visible during model loading and shows a compact loading/status card.
 - Settings now use plain-language response style controls (Creativity, Focus, Repetition Control).
-- User-configurable max token limit was removed so compatible models can stop naturally.
+- Generation now applies internal safety caps for long responses, especially when thinking is enabled, stops early under severe memory pressure to reduce iOS jetsam risk, gives compact models a larger thinking budget than 4B-class models, detects repetitive hidden-thinking loops, and automatically performs a short answer-only follow-up if a thinking run ends without a visible final response.
 
 ## Requirements
 

@@ -12,7 +12,9 @@ enum Constants {
                 estimatedSizeGB: 1.1,
                 minDeviceRAM: 8,
                 family: .qwen3,
+                logoName: "qwen_logo",
                 supportsThinking: true,
+                supportsVision: false,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -24,7 +26,9 @@ enum Constants {
                 estimatedSizeGB: 2.5,
                 minDeviceRAM: 12,
                 family: .qwen3,
+                logoName: "qwen_logo",
                 supportsThinking: true,
+                supportsVision: false,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -36,7 +40,23 @@ enum Constants {
                 estimatedSizeGB: 0.5,
                 minDeviceRAM: 8,
                 family: .qwen35,
+                logoName: "qwen_logo",
                 supportsThinking: true,
+                supportsVision: true,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
+                id: "qwen2-vl-2b-it-4bit",
+                displayName: "Qwen2-VL 2B",
+                huggingFaceId: "mlx-community/Qwen2-VL-2B-Instruct-4bit",
+                parameterCount: "2B",
+                quantization: "4-bit",
+                estimatedSizeGB: 1.5,
+                minDeviceRAM: 8,
+                family: .qwen2vl,
+                logoName: "qwen_logo",
+                supportsThinking: false,
+                supportsVision: true,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -48,7 +68,9 @@ enum Constants {
                 estimatedSizeGB: 1.3,
                 minDeviceRAM: 8,
                 family: .qwen35,
+                logoName: "qwen_logo",
                 supportsThinking: true,
+                supportsVision: true,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -60,7 +82,9 @@ enum Constants {
                 estimatedSizeGB: 2.6,
                 minDeviceRAM: 12,
                 family: .qwen35,
+                logoName: "qwen_logo",
                 supportsThinking: true,
+                supportsVision: true,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -72,7 +96,9 @@ enum Constants {
                 estimatedSizeGB: 0.8,
                 minDeviceRAM: 8,
                 family: .gemma3,
+                logoName: "gemma_logo",
                 supportsThinking: false,
+                supportsVision: true,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -84,7 +110,9 @@ enum Constants {
                 estimatedSizeGB: 2.8,
                 minDeviceRAM: 12,
                 family: .gemma3,
+                logoName: "gemma_logo",
                 supportsThinking: false,
+                supportsVision: true,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -96,7 +124,9 @@ enum Constants {
                 estimatedSizeGB: 1.0,
                 minDeviceRAM: 8,
                 family: .lfm2,
+                logoName: "lfm_logo",
                 supportsThinking: false,
+                supportsVision: false,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -108,7 +138,9 @@ enum Constants {
                 estimatedSizeGB: 0.2,
                 minDeviceRAM: 8,
                 family: .lfm25,
+                logoName: "lfm_logo",
                 supportsThinking: false,
+                supportsVision: false,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -120,7 +152,9 @@ enum Constants {
                 estimatedSizeGB: 0.8,
                 minDeviceRAM: 8,
                 family: .lfm25,
+                logoName: "lfm_logo",
                 supportsThinking: true,
+                supportsVision: false,
                 prefersThinkingEnabled: true
             ),
         ]
@@ -136,5 +170,20 @@ enum Constants {
         static let defaultTemperature: Float = 0.7
         static let defaultTopP: Float = 1.0
         static let defaultRepetitionPenalty: Float = 1.0
+        static let standardMaxTokens = 768
+        static let compactModelThinkingMaxTokens = 1024
+        static let thinkingMaxTokens = 768
+        static let memoryConstrainedThinkingMaxTokens = 512
+        static let finalAnswerMaxTokens = 256
+        static let lowMemoryAbortThresholdMB: UInt64 = 350
+        static let lowMemoryCheckInterval = 32
+        static let repetitiveThinkingCheckStartTokens = 160
+        static let repetitiveThinkingDuplicateLineThreshold = 3
+        static let conciseThinkingInstruction = """
+        When thinking is enabled, keep the hidden reasoning brief and efficient. Use a short plan only, avoid repeated self-corrections, do not repeat the same outline or numbered list, and move to the final answer quickly.
+        """
+        static let finalAnswerOnlyInstruction = """
+        Provide only the final answer to the user's last request. Do not include reasoning, planning, hidden thoughts, or meta commentary.
+        """
     }
 }

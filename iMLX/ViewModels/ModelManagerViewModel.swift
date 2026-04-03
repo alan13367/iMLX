@@ -7,12 +7,15 @@ final class ModelManagerViewModel {
     var isDownloading: [String: Bool] = [:]
     var errorMessage: String?
 
-    private let downloadService = ModelDownloadService()
+    private let appState: AppState
+    private let downloadService: ModelDownloadService
     private let deviceCapability = DeviceCapabilityService()
-    private let manifestService = ManifestService()
-    weak var appState: AppState?
+    private let manifestService: ManifestService
 
-    init() {
+    init(appState: AppState) {
+        self.appState = appState
+        self.downloadService = appState.downloadService
+        self.manifestService = appState.manifestService
         let models = Constants.ModelRegistry.curatedModels.map { model in
             var updated = model
             updated.isDownloaded = manifestService.isDownloaded(modelId: model.id)
@@ -45,11 +48,11 @@ final class ModelManagerViewModel {
 
                 for modelId in staleModelIds {
                     self.manifestService.removeDownloaded(modelId: modelId)
-                    if self.appState?.selectedModel?.id == modelId {
-                        self.appState?.selectModel(nil)
+                    if self.appState.selectedModel?.id == modelId {
+                        self.appState.selectModel(nil)
                     }
-                    if self.appState?.loadedModelId == modelId {
-                        self.appState?.setLoadedModel(id: nil)
+                    if self.appState.loadedModelId == modelId {
+                        self.appState.setLoadedModel(id: nil)
                     }
                 }
             }
@@ -108,17 +111,15 @@ final class ModelManagerViewModel {
 
     func delete(model: ModelInfo) {
         Task {
-            if let appState {
-                if appState.loadedModelId == model.id {
-                    await appState.inferenceService.unload()
-                    await MainActor.run {
-                        appState.setLoadedModel(id: nil)
-                    }
-                }
+            if appState.loadedModelId == model.id {
+                await appState.inferenceService.unload()
                 await MainActor.run {
-                    if appState.selectedModel?.id == model.id {
-                        appState.selectModel(nil)
-                    }
+                    appState.setLoadedModel(id: nil)
+                }
+            }
+            await MainActor.run {
+                if appState.selectedModel?.id == model.id {
+                    appState.selectModel(nil)
                 }
             }
             do {

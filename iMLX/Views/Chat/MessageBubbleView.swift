@@ -7,6 +7,7 @@ struct MessageBubbleView: View {
     let isStreaming: Bool
     @State private var showCopyFeedback = false
     @State private var isThinkingExpanded = false
+    @State private var userBubbleWidth: CGFloat = 0
 
     init(message: ChatMessage, isStreaming: Bool = false) {
         self.message = message
@@ -17,35 +18,57 @@ struct MessageBubbleView: View {
         HStack {
             if message.role == .user { Spacer(minLength: 60) }
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                if let attachedImages = message.attachedImages, !attachedImages.isEmpty {
-                    HStack {
-                        if message.role == .user { Spacer(minLength: 0) }
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(attachedImages, id: \.self) { imageData in
-                                    if let uiImage = UIImage(data: imageData) {
-                                        Image(uiImage: uiImage)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 80, height: 80)
-                                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    }
-                                }
-                            }
-                        }
-                        if message.role == .assistant { Spacer(minLength: 0) }
-                    }
-                }
+                attachmentStrip
 
                 if message.role == .assistant {
                     assistantContent
-                } else {
-                    bubble(text: message.content, foregroundStyle: .white)
+                } else if !message.content.isEmpty {
+                    bubble(text: message.content, foregroundStyle: .white, measureWidth: true)
                 }
             }
             if message.role == .assistant { Spacer(minLength: 36) }
         }
         .overlay(copyFeedback, alignment: .bottom)
+    }
+
+    @ViewBuilder
+    private var attachmentStrip: some View {
+        if let attachedImages = message.attachedImages, !attachedImages.isEmpty {
+            if message.role == .user, attachedImages.count == 1 {
+                attachmentStripContent(attachedImages)
+                    .frame(width: max(userBubbleWidth, 80), alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                HStack {
+                    if message.role == .assistant {
+                        attachmentStripContent(attachedImages)
+                        Spacer(minLength: 0)
+                    } else {
+                        Spacer(minLength: 0)
+                        attachmentStripContent(attachedImages)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func attachmentStripContent(_ attachedImages: [Data]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Array(attachedImages.enumerated()), id: \.offset) { _, imageData in
+                    if let uiImage = UIImage(data: imageData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 80, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+        }
+        .frame(maxWidth: 220)
     }
 
     private var assistantContent: some View {
@@ -77,7 +100,13 @@ struct MessageBubbleView: View {
             }
 
             if !parsedContent.response.isEmpty {
-                bubble(text: parsedContent.response, foregroundStyle: .primary)
+                HStack(alignment: .bottom, spacing: 8) {
+                    bubble(text: parsedContent.response, foregroundStyle: .primary)
+                    if !isStreaming {
+                        copyButton(copyText: parsedContent.copyableText)
+                            .padding(.bottom, 4)
+                    }
+                }
             }
 
             if !isStreaming {
@@ -86,9 +115,11 @@ struct MessageBubbleView: View {
                         StatsOverlayView(stats: generationStats, isLive: false)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    HStack {
-                        Spacer()
-                        copyButton(copyText: parsedContent.copyableText)
+                    if parsedContent.response.isEmpty {
+                        HStack {
+                            Spacer()
+                            copyButton(copyText: parsedContent.copyableText)
+                        }
                     }
                 }
             }
@@ -96,7 +127,7 @@ struct MessageBubbleView: View {
     }
 
     @ViewBuilder
-    private func bubble(text: String, foregroundStyle: Color) -> some View {
+    private func bubble(text: String, foregroundStyle: Color, measureWidth: Bool = false) -> some View {
         assistantText(text)
             .foregroundStyle(foregroundStyle)
             .padding(.horizontal, 14)
@@ -107,11 +138,27 @@ struct MessageBubbleView: View {
                     : AnyShapeStyle(.fill.tertiary)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            .background {
+                if measureWidth {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear {
+                                userBubbleWidth = proxy.size.width
+                            }
+                            .onChange(of: proxy.size.width) {
+                                userBubbleWidth = proxy.size.width
+                            }
+                    }
+                }
+            }
     }
 
     @ViewBuilder
     private func assistantText(_ text: String) -> some View {
-        if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+        if isStreaming {
+            Text(text)
+                .font(.body)
+        } else if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             Text(attributed)
                 .font(.body)
                 .tint(.blue)
@@ -126,7 +173,7 @@ struct MessageBubbleView: View {
             UIPasteboard.general.setValue(copyText, forPasteboardType: UTType.plainText.identifier)
             showCopyFeedback = true
             Haptics.impactLight()
-            Task {
+            Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.5))
                 showCopyFeedback = false
             }

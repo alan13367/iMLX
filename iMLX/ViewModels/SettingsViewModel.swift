@@ -40,12 +40,6 @@ final class SettingsViewModel {
         Haptics.impactMedium()
     }
 
-    var totalStorageUsedGB: Double {
-        let manifestService = ManifestService()
-        let totalBytes = manifestService.getDownloadedModels().reduce(Int64(0)) { $0 + $1.sizeOnDiskBytes }
-        return Double(totalBytes) / (1024 * 1024 * 1024)
-    }
-
     var temperatureDescription: String {
         switch temperature {
         case ..<0.3:

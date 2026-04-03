@@ -2,7 +2,7 @@ import SwiftUI
 import PhotosUI
 
 struct ChatView: View {
-    @State private var chatViewModel = ChatViewModel()
+    @State private var chatViewModel: ChatViewModel
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
     @State private var showModelPicker = false
@@ -11,8 +11,15 @@ struct ChatView: View {
     @State private var showPhotoLibrary = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showConversationHistory = false
+    @State private var streamingScrollTask: Task<Void, Never>?
     let appState: AppState
     let conversationId: UUID
+
+    init(appState: AppState, conversationId: UUID) {
+        self.appState = appState
+        self.conversationId = conversationId
+        self._chatViewModel = State(initialValue: ChatViewModel(appState: appState))
+    }
 
     var body: some View {
         contentView
@@ -66,7 +73,6 @@ struct ChatView: View {
             }
         }
         .task(id: appState.activeConversationId ?? conversationId) {
-            chatViewModel.configure(with: appState)
             let currentConversationId = appState.activeConversationId ?? conversationId
             if let conversation = appState.conversations.first(where: { $0.id == currentConversationId }) {
                 chatViewModel.loadConversation(conversation)
@@ -78,9 +84,13 @@ struct ChatView: View {
                     if let data = try? await item.loadTransferable(type: Data.self) {
                         await MainActor.run {
                             chatViewModel.pendingImages.append(data)
+                            selectedPhotoItem = nil
+                        }
+                    } else {
+                        await MainActor.run {
+                            selectedPhotoItem = nil
                         }
                     }
-                    selectedPhotoItem = nil
                 }
             }
         }
@@ -104,6 +114,9 @@ struct ChatView: View {
                 }
             }
         }
+        .onDisappear {
+            streamingScrollTask?.cancel()
+        }
     }
 
     @ViewBuilder
@@ -124,40 +137,56 @@ struct ChatView: View {
     }
 
     private var modelStatus: some View {
-        HStack(spacing: 6) {
-            if chatViewModel.isModelLoading {
-                ProgressView()
-                    .controlSize(.small)
-                Text(appState.selectedModel?.displayName ?? "Loading...")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else if appState.loadedModelId != nil,
-                      let loadedModel = Constants.ModelRegistry.curatedModels.first(where: { $0.id == appState.loadedModelId }) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-                Text(loadedModel.displayName)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                Text("No model loaded")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .onTapGesture {
+        Button {
             showModelPicker = true
+        } label: {
+            HStack(spacing: 6) {
+                if chatViewModel.isModelLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(appState.selectedModel?.displayName ?? "Loading model")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                } else if appState.loadedModelId != nil,
+                          let loadedModel = Constants.ModelRegistry.curatedModels.first(where: { $0.id == appState.loadedModelId }) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                    Text(loadedModel.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Text("Select model")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.thinMaterial)
+            .overlay {
+                Capsule()
+                    .strokeBorder(.secondary.opacity(0.18), lineWidth: 1)
+            }
+            .clipShape(Capsule())
+            .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(appState.loadedModelId == nil ? "Select model" : "Change model")
+        .accessibilityHint("Opens the model picker")
         .sheet(isPresented: $showModelPicker) {
             ModelPickerSheet(
                 appState: appState,
@@ -214,12 +243,17 @@ struct ChatView: View {
                 .padding(.vertical, 12)
             }
             .onChange(of: chatViewModel.messages.count) {
+                streamingScrollTask?.cancel()
                 withAnimation {
                     proxy.scrollTo(chatViewModel.messages.last?.id, anchor: .bottom)
                 }
             }
             .onChange(of: chatViewModel.currentResponse) {
-                withAnimation {
+                guard !chatViewModel.currentResponse.isEmpty else { return }
+                streamingScrollTask?.cancel()
+                streamingScrollTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(80))
+                    guard !Task.isCancelled else { return }
                     proxy.scrollTo("streaming", anchor: .bottom)
                 }
             }
@@ -314,7 +348,7 @@ struct ChatView: View {
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard canSendMessage else { return }
         inputText = ""
         chatViewModel.sendMessage(text)
     }
@@ -328,7 +362,7 @@ struct ChatView: View {
             if !chatViewModel.pendingImages.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(chatViewModel.pendingImages, id: \.self) { imageData in
+                        ForEach(Array(chatViewModel.pendingImages.enumerated()), id: \.offset) { index, imageData in
                             if let uiImage = UIImage(data: imageData) {
                                 ZStack(alignment: .topTrailing) {
                                     Image(uiImage: uiImage)
@@ -338,9 +372,7 @@ struct ChatView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                     
                                     Button {
-                                        if let idx = chatViewModel.pendingImages.firstIndex(of: imageData) {
-                                            chatViewModel.pendingImages.remove(at: idx)
-                                        }
+                                        chatViewModel.pendingImages.remove(at: index)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .foregroundStyle(.white, .black.opacity(0.6))
@@ -401,7 +433,7 @@ struct ChatView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .focused($isInputFocused)
                     .onSubmit {
-                        if !chatViewModel.isModelLoading {
+                        if canSendMessage {
                             sendMessage()
                         }
                     }
@@ -436,6 +468,6 @@ struct ChatView: View {
     }
 
     private var canSendMessage: Bool {
-        !chatViewModel.isModelLoading && (!inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !chatViewModel.pendingImages.isEmpty)
+        !chatViewModel.isModelLoading && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

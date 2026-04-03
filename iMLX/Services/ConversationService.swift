@@ -6,7 +6,7 @@ final class ConversationService {
     private let conversationsDirectory: URL
 
     init() {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
         self.conversationsDirectory = appSupport.appendingPathComponent(Constants.Storage.conversationsDirectory)
         try? fileManager.createDirectory(at: conversationsDirectory, withIntermediateDirectories: true)
     }

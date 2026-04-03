@@ -6,9 +6,7 @@ struct ModelBrowserView: View {
 
     init(appState: AppState) {
         self.appState = appState
-        let vm = ModelManagerViewModel()
-        vm.appState = appState
-        self._viewModel = State(initialValue: vm)
+        self._viewModel = State(initialValue: ModelManagerViewModel(appState: appState))
     }
 
     var body: some View {

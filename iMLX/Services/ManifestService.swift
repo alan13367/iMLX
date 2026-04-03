@@ -6,10 +6,11 @@ final class ManifestService {
     private(set) var manifest: DownloadedModelManifest
     
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
         let modelsDir = appSupport.appendingPathComponent(Constants.Storage.modelsDirectory)
         
-        try? FileManager.default.createDirectory(at: modelsDir, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(at: modelsDir, withIntermediateDirectories: true)
         
         self.manifestURL = appSupport.appendingPathComponent(Constants.Storage.downloadedModelsManifest)
         
@@ -51,10 +52,15 @@ final class ManifestService {
     func getEntry(for modelId: String) -> DownloadedModelEntry? {
         manifest.downloadedModels.first { $0.id == modelId }
     }
+
+    var totalStorageUsedGB: Double {
+        let totalBytes = manifest.downloadedModels.reduce(Int64(0)) { $0 + $1.sizeOnDiskBytes }
+        return Double(totalBytes) / (1024 * 1024 * 1024)
+    }
     
     private func save() {
         if let encoded = try? JSONEncoder().encode(manifest) {
-            try? encoded.write(to: manifestURL)
+            try? encoded.write(to: manifestURL, options: [.atomic])
         }
     }
 }

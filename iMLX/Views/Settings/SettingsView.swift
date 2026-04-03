@@ -101,7 +101,7 @@ struct SettingsView: View {
 
             Section("Storage") {
                 LabeledContent("Models Storage") {
-                    Text(String(format: "%.2f GB", viewModel.totalStorageUsedGB))
+                    Text(String(format: "%.2f GB", appState.manifestService.totalStorageUsedGB))
                 }
                 Button("Clear All Downloaded Models", role: .destructive) {
                     showClearModelsAlert = true
@@ -126,8 +126,7 @@ struct SettingsView: View {
     }
 
     private func clearAllModels() {
-        let manifestService = ManifestService()
-        let downloadedEntries = manifestService.getDownloadedModels()
+        let downloadedEntries = appState.manifestService.getDownloadedModels()
 
         Task {
             await appState.inferenceService.unload()
@@ -151,7 +150,9 @@ struct SettingsView: View {
                     prefersThinkingEnabled: false
                 )
                 try? await appState.downloadService.deleteModel(model)
-                manifestService.removeDownloaded(modelId: entry.id)
+                await MainActor.run {
+                    appState.manifestService.removeDownloaded(modelId: entry.id)
+                }
             }
             await MainActor.run {
                 Haptics.notificationWarning()

@@ -10,8 +10,9 @@ actor ModelDownloadService {
     private let hubApi: HubApi
 
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
+        let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
         self.modelsBaseURL = appSupport.appendingPathComponent("Models")
         self.hubCacheBaseURL = caches
             .appendingPathComponent("huggingface")
@@ -65,16 +66,17 @@ actor ModelDownloadService {
 
                     let repo = Hub.Repo(id: model.huggingFaceId)
                     let modelFiles = ["*.safetensors", "*.json", "*.jinja", "*.txt", "*.model"]
-                    var lastEmittedProgress: Float = 0
+                    let progressState = DownloadProgressState()
 
                     let snapshotURL = try await hubApi.snapshot(
                         from: repo,
                         matching: modelFiles,
                         progressHandler: { progress in
-                            let fraction = Float(progress.fractionCompleted)
-                            let clamped = min(max(fraction, lastEmittedProgress), 1.0)
-                            lastEmittedProgress = clamped
-                            continuation.yield(clamped)
+                            Task {
+                                let fraction = Float(progress.fractionCompleted)
+                                let clamped = await progressState.clampedValue(for: fraction)
+                                continuation.yield(clamped)
+                            }
                         }
                     )
 
@@ -310,5 +312,15 @@ private enum DownloadError: Error, LocalizedError {
         case .corruptedDownload(let modelName):
             "Downloaded files for \(modelName) look incomplete. Delete the model and download it again."
         }
+    }
+}
+
+private actor DownloadProgressState {
+    private var lastEmittedProgress: Float = 0
+
+    func clampedValue(for progress: Float) -> Float {
+        let clamped = min(max(progress, lastEmittedProgress), 1.0)
+        lastEmittedProgress = clamped
+        return clamped
     }
 }

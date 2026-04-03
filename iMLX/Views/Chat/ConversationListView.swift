@@ -9,6 +9,7 @@ struct ConversationListView: View {
     let appState: AppState
     var presentation: ConversationListPresentation = .rootNavigation
     var onSelect: (UUID) -> Void
+    @State private var conversationPendingDeletion: Conversation?
 
     private var navigationTitle: String {
         presentation == .modalSheet ? "Chats" : "Conversations"
@@ -20,7 +21,14 @@ struct ConversationListView: View {
                 emptyContent
             } else {
                 ForEach(appState.conversations) { conversation in
-                    ConversationRow(conversation: conversation, isActive: appState.activeConversationId == conversation.id)
+                    ConversationRow(
+                        conversation: conversation,
+                        isActive: appState.activeConversationId == conversation.id,
+                        showsDeleteControl: true,
+                        onDelete: {
+                            conversationPendingDeletion = conversation
+                        }
+                    )
                         .contentShape(Rectangle())
                         .onTapGesture {
                             appState.selectConversation(conversation.id)
@@ -28,7 +36,14 @@ struct ConversationListView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
-                                appState.deleteConversation(conversation.id)
+                                conversationPendingDeletion = conversation
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                conversationPendingDeletion = conversation
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -37,6 +52,31 @@ struct ConversationListView: View {
             }
         }
         .navigationTitle(navigationTitle)
+        .confirmationDialog(
+            "Delete Chat?",
+            isPresented: Binding(
+                get: { conversationPendingDeletion != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        conversationPendingDeletion = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                guard let conversation = conversationPendingDeletion else { return }
+                appState.deleteConversation(conversation.id)
+                conversationPendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) {
+                conversationPendingDeletion = nil
+            }
+        } message: {
+            if let conversationPendingDeletion {
+                Text("Delete \"\(conversationPendingDeletion.displayTitle)\"?")
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -67,6 +107,8 @@ struct ConversationListView: View {
 struct ConversationRow: View {
     let conversation: Conversation
     let isActive: Bool
+    let showsDeleteControl: Bool
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -76,16 +118,9 @@ struct ConversationRow: View {
                     .fontWeight(isActive ? .semibold : .regular)
                     .lineLimit(1)
 
-                HStack(spacing: 6) {
-                    if let modelId = conversation.modelId {
-                        Text(modelId)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(conversation.formattedDate)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                Text(conversation.formattedDate)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             Spacer()
@@ -97,6 +132,18 @@ struct ConversationRow: View {
                 .padding(.vertical, 2)
                 .background(.fill.tertiary)
                 .clipShape(Capsule())
+
+            if showsDeleteControl {
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(.fill.tertiary)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.borderless)
+            }
         }
         .padding(.vertical, 4)
     }

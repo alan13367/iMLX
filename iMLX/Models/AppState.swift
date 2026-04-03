@@ -10,11 +10,11 @@ final class AppState {
     let conversationService = ConversationService()
     let inferenceService = InferenceService()
     let downloadService = ModelDownloadService()
+    let manifestService = ManifestService()
     var conversations: [Conversation] = []
     var activeConversationId: UUID?
 
     private let userDefaults = UserDefaults.standard
-    private let manifestService = ManifestService()
 
     init() {
         restoreModelState()

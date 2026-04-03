@@ -32,17 +32,20 @@ final class ChatViewModel {
 
     var pendingImages: [Data] = []
 
-    private var inferenceService: InferenceService { appState?.inferenceService ?? InferenceService() }
-    private var downloadService: ModelDownloadService { appState?.downloadService ?? ModelDownloadService() }
+    private var inferenceService: InferenceService { appState.inferenceService }
+    private var downloadService: ModelDownloadService { appState.downloadService }
     private var generationTask: Task<Void, Never>?
-    private weak var appState: AppState?
+    private let appState: AppState
+    private let deviceCapabilityService: DeviceCapabilityService
     private var capabilityModelId: String?
 
-    func configure(with appState: AppState) {
+    init(appState: AppState, deviceCapabilityService: DeviceCapabilityService = DeviceCapabilityService()) {
         self.appState = appState
+        self.deviceCapabilityService = deviceCapabilityService
         updateThinkingAvailability(for: resolvedCurrentModel())
     }
 
+    @MainActor
     func loadConversation(_ conversation: Conversation) {
         activeConversationId = conversation.id
         messages = conversation.messages
@@ -50,15 +53,16 @@ final class ChatViewModel {
         errorMessage = nil
     }
 
+    @MainActor
     func sendMessage(_ text: String) {
-        guard let appState else { return }
+        guard !isGenerating else { return }
         guard appState.loadedModelId != nil else {
             errorMessage = "No model loaded. Please select and load a model first."
             Haptics.notificationWarning()
             return
         }
 
-        let availableMB = DeviceCapabilityService().availableMemoryMB
+        let availableMB = deviceCapabilityService.availableMemoryMB
         if availableMB > 0 && availableMB < 200 {
             errorMessage = "Low memory (\(availableMB) MB available). Close other apps or try a smaller model."
             Haptics.notificationWarning()
@@ -99,7 +103,7 @@ final class ChatViewModel {
             var shouldForceFinalAnswerFollowUp = false
 
             func enforceMemorySafety() throws {
-                let availableMB = DeviceCapabilityService().availableMemoryMB
+                let availableMB = deviceCapabilityService.availableMemoryMB
                 if availableMB > 0 && availableMB < Constants.Generation.lowMemoryAbortThresholdMB {
                     throw ChatGenerationAbort.lowMemory(availableMB)
                 }
@@ -229,18 +233,21 @@ final class ChatViewModel {
         }
     }
 
+    @MainActor
     func stopGeneration() {
         generationTask?.cancel()
+        generationTask = nil
     }
 
+    @MainActor
     func loadModel(_ model: ModelInfo) async {
         isModelLoading = true
         errorMessage = nil
 
         do {
             guard await downloadService.isModelDownloaded(model) else {
-                appState?.selectModel(nil)
-                appState?.setLoadedModel(id: nil)
+                appState.selectModel(nil)
+                appState.setLoadedModel(id: nil)
                 throw InferenceError.modelLoadFailed("Model files are missing for \(model.displayName). Re-download it from the Models tab.")
             }
             let localURL = await downloadService.localURL(for: model)
@@ -251,15 +258,15 @@ final class ChatViewModel {
             var updatedModel = model
             updatedModel.isDownloaded = true
             updatedModel.localURL = localURL
-            appState?.selectModel(updatedModel)
-            appState?.setLoadedModel(id: model.id)
+            appState.selectModel(updatedModel)
+            appState.setLoadedModel(id: model.id)
             updateThinkingAvailability(for: updatedModel)
             saveCurrentConversation()
             Haptics.notificationSuccess()
         } catch {
             errorMessage = error.localizedDescription
-            appState?.selectModel(nil)
-            appState?.setLoadedModel(id: nil)
+            appState.selectModel(nil)
+            appState.setLoadedModel(id: nil)
             updateThinkingAvailability(for: nil)
             Haptics.notificationError()
         }
@@ -267,23 +274,17 @@ final class ChatViewModel {
         isModelLoading = false
     }
 
+    @MainActor
     func unloadModel() async {
         await inferenceService.unload()
-        appState?.selectModel(nil)
-        appState?.setLoadedModel(id: nil)
+        appState.selectModel(nil)
+        appState.setLoadedModel(id: nil)
         updateThinkingAvailability(for: nil)
     }
 
     @discardableResult
+    @MainActor
     func startNewConversation() -> UUID? {
-        guard let appState else {
-            messages.removeAll()
-            currentResponse = ""
-            errorMessage = nil
-            activeConversationId = nil
-            return nil
-        }
-
         let id = appState.createNewConversation()
         if let conversation = appState.conversations.first(where: { $0.id == id }) {
             loadConversation(conversation)
@@ -296,14 +297,16 @@ final class ChatViewModel {
         return id
     }
 
+    @MainActor
     func toggleThinking() {
         guard canUseThinking else { return }
         isThinkingEnabled.toggle()
         Haptics.selectionChanged()
     }
 
+    @MainActor
     private func saveCurrentConversation() {
-        guard let appState, let conversationId = activeConversationId else { return }
+        guard let conversationId = activeConversationId else { return }
 
         var conversation: Conversation
         if let existing = appState.conversations.first(where: { $0.id == conversationId }) {
@@ -323,16 +326,15 @@ final class ChatViewModel {
     }
 
     private func currentMemoryUsage() async -> UInt64 {
-        let info = DeviceCapabilityService()
-        return UInt64(info.currentMemoryUsageMB)
+        UInt64(deviceCapabilityService.currentMemoryUsageMB)
     }
 
     private func resolvedCurrentModel() -> ModelInfo? {
-        if let selectedModel = appState?.selectedModel {
+        if let selectedModel = appState.selectedModel {
             return selectedModel
         }
 
-        guard let loadedModelId = appState?.loadedModelId else { return nil }
+        guard let loadedModelId = appState.loadedModelId else { return nil }
         return Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelId })
     }
 
@@ -350,7 +352,7 @@ final class ChatViewModel {
 
     private func generationTokenLimit(for model: ModelInfo?, thinkingEnabled: Bool) -> Int {
         guard thinkingEnabled else { return Constants.Generation.standardMaxTokens }
-        let deviceTier = DeviceCapabilityService().tier
+        let deviceTier = deviceCapabilityService.tier
         let estimatedSizeGB = model?.estimatedSizeGB ?? 0
         let isLargeModel = (model?.minDeviceRAM ?? 0) >= 12 || (model?.estimatedSizeGB ?? 0) >= 2.5
         if estimatedSizeGB > 0 && estimatedSizeGB <= 1.0 {

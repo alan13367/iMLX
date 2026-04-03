@@ -96,7 +96,9 @@ struct ModelPickerSheet: View {
             }
         }
 
-        downloadedModels = refreshed
+        await MainActor.run {
+            downloadedModels = refreshed
+        }
     }
 
     private func loadedModelRow(modelId: String) -> some View {
@@ -120,6 +122,9 @@ struct ModelPickerSheet: View {
                             .foregroundStyle(.green)
                     }
                 }
+            } else {
+                Text(modelId)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -145,12 +150,12 @@ struct ModelPickerSheet: View {
         #endif
         .onTapGesture {
             #if targetEnvironment(simulator)
-            Task {
+            Task { @MainActor in
                 await chatViewModel.unloadModel()
                 chatViewModel.errorMessage = InferenceError.simulatorUnsupported.localizedDescription
             }
             #else
-            Task {
+            Task { @MainActor in
                 isLoadingModelId = model.id
                 await chatViewModel.loadModel(model)
                 isLoadingModelId = nil

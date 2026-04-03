@@ -13,7 +13,7 @@ iMLX runs supported LLMs locally on Apple Silicon with no cloud dependency.
 - Fully on-device inference with MLX
 - Streaming token output in chat UI
 - Model browser and download management
-- Conversation persistence and history
+- Conversation persistence and history (chat-first launch; open history from the chat toolbar)
 - Device-aware model recommendations
 - Per-model thinking mode (toggle + chat-template `enable_thinking` where supported)
 - Branded launch/loading experience with the iMLX logo
@@ -22,6 +22,7 @@ iMLX runs supported LLMs locally on Apple Silicon with no cloud dependency.
 
 ## Recent Updates
 
+- Chat tab opens straight into the current conversation on iPhone and iPad; use the top-left list button to browse or switch chats.
 - Startup now validates downloaded model manifests against on-disk files and prunes stale entries.
 - Model path resolution is more resilient (symlink + cache snapshot fallback) and auto-heals broken links.
 - Simulator model loading/generation now returns a clear unsupported message instead of entering an MLX load path.

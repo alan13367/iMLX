@@ -1,8 +1,18 @@
 import SwiftUI
 
+enum ConversationListPresentation {
+    case rootNavigation
+    case modalSheet
+}
+
 struct ConversationListView: View {
     let appState: AppState
+    var presentation: ConversationListPresentation = .rootNavigation
     var onSelect: (UUID) -> Void
+
+    private var navigationTitle: String {
+        presentation == .modalSheet ? "Chats" : "Conversations"
+    }
 
     var body: some View {
         List {
@@ -26,7 +36,7 @@ struct ConversationListView: View {
                 }
             }
         }
-        .navigationTitle("Conversations")
+        .navigationTitle(navigationTitle)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {

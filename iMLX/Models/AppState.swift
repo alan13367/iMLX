@@ -87,8 +87,20 @@ final class AppState {
 
     func loadConversations() {
         conversations = conversationService.listAll()
-        if activeConversationId == nil, let first = conversations.first {
-            activeConversationId = first.id
+        reconcileActiveConversationForChat()
+    }
+
+    private func reconcileActiveConversationForChat() {
+        if conversations.isEmpty {
+            _ = createNewConversation()
+            return
+        }
+        if activeConversationId == nil {
+            activeConversationId = conversations.first?.id
+            return
+        }
+        if !conversations.contains(where: { $0.id == activeConversationId }) {
+            activeConversationId = conversations.first?.id
         }
     }
 

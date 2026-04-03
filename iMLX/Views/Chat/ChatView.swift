@@ -10,6 +10,7 @@ struct ChatView: View {
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showConversationHistory = false
     let appState: AppState
     let conversationId: UUID
 
@@ -21,6 +22,14 @@ struct ChatView: View {
             bottomAccessoryStack
         }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    isInputFocused = false
+                    showConversationHistory = true
+                } label: {
+                    Image(systemName: "line.3.horizontal")
+                }
+            }
             ToolbarItem(placement: .principal) {
                 modelStatus
             }
@@ -81,6 +90,20 @@ struct ChatView: View {
             }
         }
         .photosPicker(isPresented: $showPhotoLibrary, selection: $selectedPhotoItem, matching: .images)
+        .sheet(isPresented: $showConversationHistory) {
+            NavigationStack {
+                ConversationListView(appState: appState, presentation: .modalSheet) { _ in
+                    showConversationHistory = false
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") {
+                            showConversationHistory = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder

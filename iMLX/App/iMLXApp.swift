@@ -15,11 +15,12 @@ struct iMLXApp: App {
                 if isShowingLaunchScreen {
                     BrandLoadingView(
                         title: "iMLX",
-                        subtitle: "Local AI Models"
+                        subtitle: String.appLocalized("brand.subtitle")
                     )
                     .transition(.opacity)
                 }
             }
+            .environment(\.locale, appState.effectiveLocale)
             .task {
                 appState.loadConversations()
 
@@ -39,16 +40,17 @@ struct MainTabView: View {
     let appState: AppState
 
     var body: some View {
+        let _ = appState.preferredAppLanguageCode
         TabView {
-            Tab("Chat", systemImage: "bubble.left.and.bubble.right") {
+            Tab(String.appLocalized("tab.chat"), systemImage: "bubble.left.and.bubble.right") {
                 ChatRootView(appState: appState)
             }
-            Tab("Models", systemImage: "arrow.down.circle") {
+            Tab(String.appLocalized("tab.models"), systemImage: "arrow.down.circle") {
                 NavigationStack {
                     ModelBrowserView(appState: appState)
                 }
             }
-            Tab("Settings", systemImage: "gearshape") {
+            Tab(String.appLocalized("tab.settings"), systemImage: "gearshape") {
                 NavigationStack {
                     SettingsView(appState: appState)
                 }

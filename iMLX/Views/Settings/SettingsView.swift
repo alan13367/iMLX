@@ -3,125 +3,73 @@ import SwiftUI
 struct SettingsView: View {
     let appState: AppState
     @State private var showClearModelsAlert = false
-
-    private var viewModel: SettingsViewModel {
-        appState.settingsViewModel
-    }
+    private let deviceCapability = DeviceCapabilityService()
 
     var body: some View {
         Form {
-            Section("Device") {
-                LabeledContent("Physical RAM") {
-                    Text("\(viewModel.deviceCapability.physicalMemoryGB) GB")
+            Section(String.appLocalized("settings.section.language")) {
+                Picker(String.appLocalized("settings.section.language"), selection: Binding(
+                    get: { AppLanguageOption.from(storageCode: appState.preferredAppLanguageCode) },
+                    set: { appState.setPreferredAppLanguage($0.storageCode) }
+                )) {
+                    ForEach(AppLanguageOption.allCases) { option in
+                        Text(String.appLocalized(option.titleLocalizationKey)).tag(option)
+                    }
                 }
-                LabeledContent("Device Tier") {
-                    Text(viewModel.deviceCapability.tier.displayName)
+                .pickerStyle(.menu)
+            }
+
+            Section(String.appLocalized("settings.section.device")) {
+                LabeledContent(String.appLocalized("settings.physical_ram")) {
+                    Text("\(deviceCapability.physicalMemoryGB) GB")
+                }
+                LabeledContent(String.appLocalized("settings.device_tier")) {
+                    Text(deviceCapability.tier.displayName)
                 }
                 if let modelId = appState.loadedModelId {
-                    LabeledContent("Active Model") {
+                    LabeledContent(String.appLocalized("settings.active_model")) {
                         Text(modelId)
                             .foregroundStyle(.green)
                     }
                 }
             }
 
-            Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Creativity")
-                        Spacer()
-                        Text("\(viewModel.temperature, specifier: "%.1f")")
+            Section(String.appLocalized("settings.section.personas")) {
+                NavigationLink {
+                    PersonaLibraryView(appState: appState)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(String.appLocalized("settings.manage_personas"))
+                        Text(String.appLocalized("settings.manage_personas_detail"))
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    Slider(value: Binding(
-                        get: { viewModel.temperature },
-                        set: { viewModel.temperature = $0 }
-                    ), in: 0.0...2.0, step: 0.1)
-                    Text(viewModel.temperatureDescription)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Focus")
-                        Spacer()
-                        Text("\(viewModel.topP, specifier: "%.2f")")
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { viewModel.topP },
-                        set: { viewModel.topP = $0 }
-                    ), in: 0.0...1.0, step: 0.05)
-                    Text(viewModel.topPDescription)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Repetition Control")
-                        Spacer()
-                        Text("\(viewModel.repetitionPenalty, specifier: "%.1f")")
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { viewModel.repetitionPenalty },
-                        set: { viewModel.repetitionPenalty = $0 }
-                    ), in: 0.9...2.0, step: 0.1)
-                    Text(viewModel.repetitionPenaltyDescription)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Responses now stop when the model decides it is finished.")
-                    Text("If you are unsure, leave these on the defaults.")
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-                Button("Reset to Defaults") {
-                    viewModel.resetToDefaults()
-                }
-                .foregroundStyle(.red)
-            } header: {
-                Text("Response Style")
-            } footer: {
-                Text("Creativity changes how adventurous the wording is. Focus narrows or widens the set of candidate words. Repetition Control helps prevent loops and repeated phrasing.")
             }
 
-            Section("System Prompt") {
-                TextField("Enter system prompt...", text: Binding(
-                    get: { viewModel.systemPrompt },
-                    set: { viewModel.systemPrompt = $0 }
-                ), axis: .vertical)
-                .lineLimit(3...8)
-            }
-
-            Section("Storage") {
-                LabeledContent("Models Storage") {
+            Section(String.appLocalized("settings.section.storage")) {
+                LabeledContent(String.appLocalized("settings.models_storage")) {
                     Text(String(format: "%.2f GB", appState.manifestService.totalStorageUsedGB))
                 }
-                Button("Clear All Downloaded Models", role: .destructive) {
+                Button(String.appLocalized("settings.clear_models"), role: .destructive) {
                     showClearModelsAlert = true
                 }
             }
 
-            Section("About") {
-                LabeledContent("Version") {
+            Section(String.appLocalized("settings.section.about")) {
+                LabeledContent(String.appLocalized("common.version")) {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
                 }
             }
         }
-        .navigationTitle("Settings")
-        .alert("Clear All Models?", isPresented: $showClearModelsAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear All", role: .destructive) {
+        .navigationTitle(String.appLocalized("settings.title"))
+        .alert(String.appLocalized("settings.clear_alert_title"), isPresented: $showClearModelsAlert) {
+            Button(String.appLocalized("common.cancel"), role: .cancel) {}
+            Button(String.appLocalized("settings.clear_confirm"), role: .destructive) {
                 clearAllModels()
             }
         } message: {
-            Text("This will delete all downloaded models. This cannot be undone.")
+            Text(String.appLocalized("settings.clear_alert_message"))
         }
     }
 

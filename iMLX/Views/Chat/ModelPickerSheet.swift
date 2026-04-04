@@ -13,10 +13,10 @@ struct ModelPickerSheet: View {
                 #if targetEnvironment(simulator)
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Model loading is unavailable in the iOS Simulator.")
+                        Text(String.appLocalized("models.picker.simulator_title"))
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                        Text("Use a physical iPhone/iPad or the Mac Designed for iPad destination to run MLX models.")
+                        Text(String.appLocalized("models.picker.simulator_detail"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -30,10 +30,10 @@ struct ModelPickerSheet: View {
                             Image(systemName: "arrow.down.circle")
                                 .font(.system(size: 40))
                                 .foregroundStyle(.secondary.opacity(0.5))
-                            Text("No downloaded models")
+                            Text(String.appLocalized("models.picker.none"))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Text("Go to the Models tab to download one")
+                            Text(String.appLocalized("models.picker.hint_download"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -42,12 +42,12 @@ struct ModelPickerSheet: View {
                     }
                 } else {
                     if let loadedId = appState.loadedModelId {
-                        Section("Currently Loaded") {
+                        Section(String.appLocalized("models.picker.currently_loaded")) {
                             loadedModelRow(modelId: loadedId)
                         }
                     }
 
-                    Section("Downloaded Models") {
+                    Section(String.appLocalized("models.picker.downloaded")) {
                         ForEach(downloadedModels) { model in
                             if model.id != appState.loadedModelId {
                                 modelRow(model: model)
@@ -63,17 +63,17 @@ struct ModelPickerSheet: View {
                                 await chatViewModel.unloadModel()
                             }
                         } label: {
-                            Label("Unload Model", systemImage: "eject")
+                            Label(String.appLocalized("models.picker.unload"), systemImage: "eject")
                                 .frame(maxWidth: .infinity)
                         }
                     }
                 }
             }
-            .navigationTitle("Models")
+            .navigationTitle(String.appLocalized("models.picker.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
+                    Button(String.appLocalized("common.done")) {
                         isPresented = false
                     }
                 }
@@ -105,7 +105,8 @@ struct ModelPickerSheet: View {
         let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == modelId })
         return Group {
             if let model {
-                HStack {
+                HStack(spacing: 12) {
+                    modelLogo(for: model)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.displayName)
                             .font(.headline)
@@ -130,7 +131,8 @@ struct ModelPickerSheet: View {
     }
 
     private func modelRow(model: ModelInfo) -> some View {
-        HStack {
+        HStack(spacing: 12) {
+            modelLogo(for: model)
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.displayName)
                     .font(.headline)
@@ -162,5 +164,14 @@ struct ModelPickerSheet: View {
             }
             #endif
         }
+    }
+
+    private func modelLogo(for model: ModelInfo) -> some View {
+        Image(model.logoName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 40, height: 40)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }

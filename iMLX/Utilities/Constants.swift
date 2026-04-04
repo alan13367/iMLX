@@ -163,6 +163,10 @@ enum Constants {
     enum Storage {
         static let modelsDirectory = "Models"
         static let conversationsDirectory = "Conversations"
+        static let personasDirectory = "Personas"
+        static let documentsDirectory = "Documents"
+        static let documentMetadataDirectory = "DocumentMetadata"
+        static let documentIndexesDirectory = "DocumentIndexes"
         static let downloadedModelsManifest = "downloaded_models.json"
     }
 
@@ -185,5 +189,13 @@ enum Constants {
         static let finalAnswerOnlyInstruction = """
         Provide only the final answer to the user's last request. Do not include reasoning, planning, hidden thoughts, or meta commentary.
         """
+    }
+
+    enum RAG {
+        static let chunkWordTarget = 220
+        static let chunkWordOverlap = 50
+        static let maxRetrievedChunks = 4
+        static let maxContextCharacters = 4_000
+        static let maxPreviewCharacters = 220
     }
 }

@@ -1,14 +1,17 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct ChatView: View {
     @State private var chatViewModel: ChatViewModel
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
     @State private var showModelPicker = false
+    @State private var showPersonaPicker = false
     @State private var showAttachmentActionSheet = false
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
+    @State private var showDocumentImporter = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showConversationHistory = false
     @State private var streamingScrollTask: Task<Void, Never>?
@@ -41,6 +44,13 @@ struct ChatView: View {
                 modelStatus
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    isInputFocused = false
+                    showPersonaPicker = true
+                } label: {
+                    Image(systemName: "person.crop.circle")
+                }
+
                 if appState.loadedModelId != nil {
                     Button {
                         Task {
@@ -100,6 +110,21 @@ struct ChatView: View {
             }
         }
         .photosPicker(isPresented: $showPhotoLibrary, selection: $selectedPhotoItem, matching: .images)
+        .fileImporter(
+            isPresented: $showDocumentImporter,
+            allowedContentTypes: supportedDocumentTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task {
+                    await chatViewModel.importDocument(from: url)
+                }
+            case .failure(let error):
+                chatViewModel.errorMessage = error.localizedDescription
+            }
+        }
         .sheet(isPresented: $showConversationHistory) {
             NavigationStack {
                 ConversationListView(appState: appState, presentation: .modalSheet) { _ in
@@ -107,12 +132,19 @@ struct ChatView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Done") {
+                        Button(String.appLocalized("common.done")) {
                             showConversationHistory = false
                         }
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showPersonaPicker) {
+            PersonaPickerSheet(
+                appState: appState,
+                chatViewModel: chatViewModel,
+                isPresented: $showPersonaPicker
+            )
         }
         .onDisappear {
             streamingScrollTask?.cancel()
@@ -144,7 +176,7 @@ struct ChatView: View {
                 if chatViewModel.isModelLoading {
                     ProgressView()
                         .controlSize(.small)
-                    Text(appState.selectedModel?.displayName ?? "Loading model")
+                    Text(appState.selectedModel?.displayName ?? String.appLocalized("chat.loading_model"))
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .lineLimit(1)
@@ -164,7 +196,7 @@ struct ChatView: View {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
-                    Text("Select model")
+                    Text(String.appLocalized("chat.select_model"))
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .lineLimit(1)
@@ -185,8 +217,12 @@ struct ChatView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(appState.loadedModelId == nil ? "Select model" : "Change model")
-        .accessibilityHint("Opens the model picker")
+        .accessibilityLabel(
+            appState.loadedModelId == nil
+                ? String.appLocalized("chat.select_model")
+                : String.appLocalized("chat.change_model_a11y")
+        )
+        .accessibilityHint(String.appLocalized("chat.model_picker_hint"))
         .sheet(isPresented: $showModelPicker) {
             ModelPickerSheet(
                 appState: appState,
@@ -203,10 +239,10 @@ struct ChatView: View {
                 .font(.system(size: 56))
                 .foregroundStyle(.secondary.opacity(0.4))
             VStack(spacing: 8) {
-                Text("Start a conversation")
+                Text(String.appLocalized("chat.start_conversation"))
                     .font(.title2)
                     .fontWeight(.semibold)
-                Text("Select a model from the Models tab,\nthen type a message.")
+                Text(String.appLocalized("chat.empty_hint"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -274,9 +310,36 @@ struct ChatView: View {
                 generatingIndicator
             }
 
+            personaBadge
             inputBar
         }
         .padding(.top, 8)
+    }
+
+    private var personaBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: chatViewModel.activePersona.symbolName)
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(chatViewModel.activePersona.localizedName)
+                    .font(.caption.weight(.semibold))
+                Text(chatViewModel.activePersona.localizedDisplaySummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(String.appLocalized("common.change")) {
+                isInputFocused = false
+                showPersonaPicker = true
+            }
+            .font(.caption)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
     }
 
     private var modelLoadingCard: some View {
@@ -284,10 +347,10 @@ struct ChatView: View {
             ProgressView()
                 .controlSize(.small)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Loading Model")
+                Text(String.appLocalized("chat.loading_model_title"))
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                Text(appState.selectedModel?.displayName ?? "Preparing the selected model for local inference")
+                Text(appState.selectedModel?.displayName ?? String.appLocalized("chat.preparing_model"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -305,7 +368,7 @@ struct ChatView: View {
         HStack(spacing: 12) {
             ProgressView()
                 .controlSize(.small)
-            Text("Generating")
+            Text(String.appLocalized("chat.generating"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -320,12 +383,12 @@ struct ChatView: View {
                 .foregroundStyle(isOOMError(message) ? .red : .orange)
             VStack(alignment: .leading, spacing: 2) {
                 if isOOMError(message) {
-                    Text("Out of Memory")
+                    Text(String.appLocalized("chat.out_of_memory"))
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundStyle(.red)
                 }
-                Text(isOOMError(message) ? "Close other apps or try a smaller model." : message)
+                Text(isOOMError(message) ? String.appLocalized("chat.oom_suggestion") : message)
                     .font(.caption)
                     .foregroundStyle(.primary)
                     .lineLimit(2)
@@ -354,11 +417,47 @@ struct ChatView: View {
     }
 
     private func isOOMError(_ message: String) -> Bool {
-        message.contains("memory") || message.contains("Memory") || message.contains("Low memory")
+        let lower = message.lowercased()
+        if lower.contains("memory") || lower.contains("memoria") || lower.contains("内存") {
+            return true
+        }
+        return lower.contains("low memory") || lower.contains("poca memoria") || lower.contains("内存偏低")
     }
 
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !chatViewModel.pendingDocuments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(chatViewModel.pendingDocuments) { document in
+                            HStack(spacing: 6) {
+                                Image(systemName: iconName(for: document.kind))
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(document.displayName)
+                                        .font(.caption.weight(.semibold))
+                                        .lineLimit(1)
+                                    Text(document.kind.displayName)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Button {
+                                    chatViewModel.removeDocument(document)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(.fill.tertiary)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+            }
+
             if !chatViewModel.pendingImages.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -388,27 +487,30 @@ struct ChatView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                if chatViewModel.canUseVision {
-                    Button {
-                        showAttachmentActionSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 20, weight: .semibold))
-                            .frame(width: 32, height: 32)
-                            .background(Color.secondary.opacity(0.12))
-                            .foregroundStyle(.secondary)
-                            .clipShape(Circle())
+                Button {
+                    showAttachmentActionSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                        .background(Color.secondary.opacity(0.12))
+                        .foregroundStyle(.secondary)
+                        .clipShape(Circle())
+                }
+                .padding(.bottom, 4)
+                .confirmationDialog(String.appLocalized("chat.add_to_conversation"), isPresented: $showAttachmentActionSheet) {
+                    Button(String.appLocalized("chat.import_document")) {
+                        showDocumentImporter = true
                     }
-                    .padding(.bottom, 4)
-                    .confirmationDialog("Attach Image", isPresented: $showAttachmentActionSheet) {
-                        Button("Take Photo") {
+                    if chatViewModel.canUseVision {
+                        Button(String.appLocalized("chat.take_photo")) {
                             showCamera = true
                         }
-                        Button("Photo Library") {
+                        Button(String.appLocalized("chat.photo_library")) {
                             showPhotoLibrary = true
                         }
-                        Button("Cancel", role: .cancel) {}
                     }
+                    Button(String.appLocalized("common.cancel"), role: .cancel) {}
                 }
 
                 if chatViewModel.canUseThinking {
@@ -424,7 +526,7 @@ struct ChatView: View {
                     }
                     .padding(.bottom, 4)
                 }
-                TextField("Message...", text: $inputText, axis: .vertical)
+                TextField(String.appLocalized("chat.message_placeholder"), text: $inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
                     .padding(.horizontal, 14)
@@ -469,5 +571,24 @@ struct ChatView: View {
 
     private var canSendMessage: Bool {
         !chatViewModel.isModelLoading && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var supportedDocumentTypes: [UTType] {
+        var types: [UTType] = [.pdf, .plainText, .commaSeparatedText]
+        if let markdown = UTType(filenameExtension: "md") {
+            types.append(markdown)
+        }
+        return types
+    }
+
+    private func iconName(for kind: ConversationDocumentKind) -> String {
+        switch kind {
+        case .pdf:
+            "doc.richtext"
+        case .csv:
+            "tablecells"
+        case .text:
+            "doc.text"
+        }
     }
 }

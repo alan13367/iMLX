@@ -5,6 +5,8 @@ struct Conversation: Identifiable, Codable, Hashable {
     var title: String
     var messages: [ChatMessage]
     var modelId: String?
+    var personaId: String?
+    var documents: [ConversationDocumentReference]
     let createdAt: Date
     var updatedAt: Date
 
@@ -13,6 +15,8 @@ struct Conversation: Identifiable, Codable, Hashable {
         title: String = "New Conversation",
         messages: [ChatMessage] = [],
         modelId: String? = nil,
+        personaId: String? = Persona.defaultID,
+        documents: [ConversationDocumentReference] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -20,6 +24,8 @@ struct Conversation: Identifiable, Codable, Hashable {
         self.title = title
         self.messages = messages
         self.modelId = modelId
+        self.personaId = personaId
+        self.documents = documents
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

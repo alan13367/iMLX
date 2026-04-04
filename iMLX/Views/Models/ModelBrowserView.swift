@@ -18,7 +18,7 @@ struct ModelBrowserView: View {
             }
 
             if !viewModel.downloadableModels.isEmpty {
-                Section("Available Models") {
+                Section(String.appLocalized("models.section.available")) {
                     ForEach(viewModel.downloadableModels) { model in
                         ModelCardView(
                             model: model,
@@ -35,7 +35,7 @@ struct ModelBrowserView: View {
                 }
             }
             if !viewModel.incompatibleModels.isEmpty {
-                Section("Not Enough Memory") {
+                Section(String.appLocalized("models.section.low_memory")) {
                     ForEach(viewModel.incompatibleModels) { model in
                         ModelCardView(
                             model: model,
@@ -50,7 +50,7 @@ struct ModelBrowserView: View {
                 }
             }
         }
-        .navigationTitle("Models")
+        .navigationTitle(String.appLocalized("models.browser.title"))
         .task {
             viewModel.refreshDownloadStatusFromDisk()
         }

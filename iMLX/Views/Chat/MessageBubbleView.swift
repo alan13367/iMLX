@@ -33,23 +33,35 @@ struct MessageBubbleView: View {
 
     @ViewBuilder
     private var attachmentStrip: some View {
-        if let attachedImages = message.attachedImages, !attachedImages.isEmpty {
-            if message.role == .user, attachedImages.count == 1 {
-                attachmentStripContent(attachedImages)
-                    .frame(width: max(userBubbleWidth, 80), alignment: .center)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            } else {
-                HStack {
-                    if message.role == .assistant {
-                        attachmentStripContent(attachedImages)
-                        Spacer(minLength: 0)
-                    } else {
-                        Spacer(minLength: 0)
-                        attachmentStripContent(attachedImages)
-                    }
+        if hasAttachments {
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
+                if let attachedDocuments = message.attachedDocuments, !attachedDocuments.isEmpty {
+                    documentAttachmentStrip(attachedDocuments)
                 }
-                .frame(maxWidth: .infinity)
+                if let attachedImages = message.attachedImages, !attachedImages.isEmpty {
+                    imageAttachmentStrip(attachedImages)
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func imageAttachmentStrip(_ attachedImages: [Data]) -> some View {
+        if message.role == .user, attachedImages.count == 1 {
+            attachmentStripContent(attachedImages)
+                .frame(width: max(userBubbleWidth, 80), alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            HStack {
+                if message.role == .assistant {
+                    attachmentStripContent(attachedImages)
+                    Spacer(minLength: 0)
+                } else {
+                    Spacer(minLength: 0)
+                    attachmentStripContent(attachedImages)
+                }
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -71,6 +83,46 @@ struct MessageBubbleView: View {
         .frame(maxWidth: 220)
     }
 
+    private func documentAttachmentStrip(_ attachedDocuments: [ConversationDocumentReference]) -> some View {
+        HStack {
+            if message.role == .assistant {
+                documentAttachmentContent(attachedDocuments)
+                Spacer(minLength: 0)
+            } else {
+                Spacer(minLength: 0)
+                documentAttachmentContent(attachedDocuments)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func documentAttachmentContent(_ attachedDocuments: [ConversationDocumentReference]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachedDocuments) { document in
+                    HStack(spacing: 8) {
+                        Image(systemName: iconName(for: document.kind))
+                            .foregroundStyle(message.role == .user ? .white : .blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(document.displayName)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                            Text(document.kind.displayName)
+                                .font(.caption2)
+                                .foregroundStyle(message.role == .user ? .white.opacity(0.8) : .secondary)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(message.role == .user ? Color.blue.opacity(0.82) : Color(.tertiarySystemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+        }
+        .frame(maxWidth: 260)
+    }
+
     private var assistantContent: some View {
         let parsedContent = ParsedAssistantContent(message.content, isStreaming: isStreaming)
 
@@ -83,11 +135,11 @@ struct MessageBubbleView: View {
                         .padding(.top, 4)
                 } label: {
                     HStack(spacing: 8) {
-                        Label("Thinking", systemImage: "brain.head.profile")
+                        Label(String.appLocalized("message.thinking"), systemImage: "brain.head.profile")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         if isStreaming && parsedContent.response.isEmpty {
-                            Text("Waiting for final response")
+                            Text(String.appLocalized("message.waiting_final"))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
@@ -111,6 +163,9 @@ struct MessageBubbleView: View {
 
             if !isStreaming {
                 VStack(alignment: .leading, spacing: 6) {
+                    if let sources = message.retrievedSources, !sources.isEmpty {
+                        sourcesSection(sources)
+                    }
                     if let generationStats = message.generationStats {
                         StatsOverlayView(stats: generationStats, isLive: false)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,6 +177,29 @@ struct MessageBubbleView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private func sourcesSection(_ sources: [RetrievedDocumentSource]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(String.appLocalized("message.sources"), systemImage: "doc.text.magnifyingglass")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(sources) { source in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(sourceTitle(for: source))
+                        .font(.caption.weight(.semibold))
+                    Text(source.excerpt)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.fill.quaternary)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
     }
@@ -190,7 +268,7 @@ struct MessageBubbleView: View {
     private var copyFeedback: some View {
         Group {
             if showCopyFeedback {
-                Text("Copied")
+                Text(String.appLocalized("message.copied"))
                     .font(.caption2)
                     .foregroundStyle(.green)
                     .padding(.horizontal, 8)
@@ -199,6 +277,28 @@ struct MessageBubbleView: View {
                     .clipShape(Capsule())
             }
         }
+    }
+
+    private var hasAttachments: Bool {
+        (message.attachedDocuments?.isEmpty == false) || (message.attachedImages?.isEmpty == false)
+    }
+
+    private func iconName(for kind: ConversationDocumentKind) -> String {
+        switch kind {
+        case .pdf:
+            "doc.richtext"
+        case .csv:
+            "tablecells"
+        case .text:
+            "doc.text"
+        }
+    }
+
+    private func sourceTitle(for source: RetrievedDocumentSource) -> String {
+        if let location = source.location, !location.isEmpty {
+            return "\(source.documentName) | \(location)"
+        }
+        return source.documentName
     }
 }
 

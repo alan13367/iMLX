@@ -7,7 +7,7 @@ private enum ChatGenerationAbort: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .lowMemory(let availableMB):
-            "Generation was stopped to avoid a memory crash (\(availableMB) MB available). Try disabling thinking or using a smaller model."
+            String(format: String.appLocalized("error.chat.generation_memory_abort"), availableMB)
         }
     }
 }
@@ -31,6 +31,17 @@ final class ChatViewModel {
     }
 
     var pendingImages: [Data] = []
+    var pendingDocuments: [ConversationDocumentReference] = []
+    var attachedDocuments: [ConversationDocumentReference] = []
+    var activePersonaId: String?
+
+    var activePersona: Persona {
+        appState.persona(id: activePersonaId) ?? appState.defaultPersona()
+    }
+
+    var availablePersonas: [Persona] {
+        appState.personas
+    }
 
     private var inferenceService: InferenceService { appState.inferenceService }
     private var downloadService: ModelDownloadService { appState.downloadService }
@@ -49,22 +60,31 @@ final class ChatViewModel {
     func loadConversation(_ conversation: Conversation) {
         activeConversationId = conversation.id
         messages = conversation.messages
+        pendingDocuments = []
+        attachedDocuments = conversation.documents
+        activePersonaId = appState.persona(id: conversation.personaId)?.id ?? appState.defaultPersona().id
         currentResponse = ""
         errorMessage = nil
+        updateThinkingAvailability(for: resolvedCurrentModel())
     }
 
     @MainActor
     func sendMessage(_ text: String) {
         guard !isGenerating else { return }
+        guard !isModelLoading else {
+            errorMessage = String.appLocalized("error.chat.model_still_loading")
+            Haptics.notificationWarning()
+            return
+        }
         guard appState.loadedModelId != nil else {
-            errorMessage = "No model loaded. Please select and load a model first."
+            errorMessage = String.appLocalized("error.chat.no_model_loaded")
             Haptics.notificationWarning()
             return
         }
 
         let availableMB = deviceCapabilityService.availableMemoryMB
         if availableMB > 0 && availableMB < 200 {
-            errorMessage = "Low memory (\(availableMB) MB available). Close other apps or try a smaller model."
+            errorMessage = String(format: String.appLocalized("error.chat.low_memory"), availableMB)
             Haptics.notificationWarning()
             return
         }
@@ -75,32 +95,44 @@ final class ChatViewModel {
         }
 
         let history = messages
-        let userMessage = ChatMessage(role: .user, content: text, attachedImages: pendingImages.isEmpty ? nil : pendingImages)
+        let userMessage = ChatMessage(
+            role: .user,
+            content: text,
+            attachedImages: pendingImages.isEmpty ? nil : pendingImages,
+            attachedDocuments: pendingDocuments.isEmpty ? nil : pendingDocuments
+        )
         messages.append(userMessage)
 
         isGenerating = true
         currentResponse = ""
         errorMessage = nil
         pendingImages.removeAll()
+        pendingDocuments.removeAll()
 
         Haptics.impactLight()
 
-        let temperature = Float(appState.settingsViewModel.temperature)
-        let topP = Float(appState.settingsViewModel.topP)
-        let repetitionPenalty = Float(appState.settingsViewModel.repetitionPenalty)
-        let systemPrompt = appState.settingsViewModel.systemPrompt
+        let persona = activePersona
+        let temperature = Float(persona.temperature)
+        let topP = Float(persona.topP)
+        let repetitionPenalty = safeRepetitionPenalty(Float(persona.repetitionPenalty))
+        let systemPrompt = persona.effectiveSystemPrompt
         let loadedModel = resolvedCurrentModel()
         let thinkingEnabled = loadedModel?.supportsThinking == true ? isThinkingEnabled : false
         let generationMaxTokens = generationTokenLimit(for: loadedModel, thinkingEnabled: thinkingEnabled)
-        let effectiveSystemPrompt = mergedSystemPrompt(
-            base: systemPrompt,
-            thinkingEnabled: thinkingEnabled
-        )
 
         generationTask = Task { @MainActor in
             let startTime = Date()
             var tokenCount = 0
             var shouldForceFinalAnswerFollowUp = false
+            let retrievalResult = await appState.documentLibraryService.retrieveContext(
+                for: text,
+                documents: attachedDocuments
+            )
+            let effectiveSystemPrompt = mergedSystemPrompt(
+                base: systemPrompt,
+                documentContext: retrievalResult.contextBlock,
+                thinkingEnabled: thinkingEnabled
+            )
 
             func enforceMemorySafety() throws {
                 let availableMB = deviceCapabilityService.availableMemoryMB
@@ -145,7 +177,10 @@ final class ChatViewModel {
                         images: userMessage.attachedImages,
                         thinkingEnabled: false,
                         history: history,
-                        systemPrompt: finalAnswerSystemPrompt(base: systemPrompt),
+                        systemPrompt: finalAnswerSystemPrompt(
+                            base: systemPrompt,
+                            documentContext: retrievalResult.contextBlock
+                        ),
                         maxTokens: Constants.Generation.finalAnswerMaxTokens,
                         temperature: temperature,
                         topP: topP,
@@ -181,6 +216,7 @@ final class ChatViewModel {
                     let assistantMessage = ChatMessage(
                         role: .assistant,
                         content: currentResponse,
+                        retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: generationStats
                     )
                     messages.append(assistantMessage)
@@ -195,6 +231,7 @@ final class ChatViewModel {
                     let partialMessage = ChatMessage(
                         role: .assistant,
                         content: currentResponse,
+                        retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                             totalTokens: tokenCount,
@@ -213,6 +250,7 @@ final class ChatViewModel {
                     let partialMessage = ChatMessage(
                         role: .assistant,
                         content: currentResponse,
+                        retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                             totalTokens: tokenCount,
@@ -248,7 +286,9 @@ final class ChatViewModel {
             guard await downloadService.isModelDownloaded(model) else {
                 appState.selectModel(nil)
                 appState.setLoadedModel(id: nil)
-                throw InferenceError.modelLoadFailed("Model files are missing for \(model.displayName). Re-download it from the Models tab.")
+                throw InferenceError.modelLoadFailed(
+                    String(format: String.appLocalized("error.chat.model_files_missing"), model.displayName)
+                )
             }
             let localURL = await downloadService.localURL(for: model)
             try await inferenceService.load(
@@ -291,8 +331,11 @@ final class ChatViewModel {
         } else {
             activeConversationId = id
             messages.removeAll()
+            pendingDocuments.removeAll()
+            attachedDocuments.removeAll()
             currentResponse = ""
             errorMessage = nil
+            activePersonaId = appState.defaultPersona().id
         }
         return id
     }
@@ -305,6 +348,49 @@ final class ChatViewModel {
     }
 
     @MainActor
+    func selectPersona(_ persona: Persona) {
+        activePersonaId = persona.id
+        saveCurrentConversation()
+        updateThinkingAvailability(for: resolvedCurrentModel())
+        Haptics.selectionChanged()
+    }
+
+    @MainActor
+    func importDocument(from url: URL) async {
+        if activeConversationId == nil {
+            let id = appState.createNewConversation()
+            activeConversationId = id
+        }
+
+        guard let conversationId = activeConversationId else { return }
+
+        do {
+            let reference = try await appState.documentLibraryService.importDocument(
+                from: url,
+                conversationId: conversationId
+            )
+            attachedDocuments.append(reference)
+            pendingDocuments.append(reference)
+            saveCurrentConversation()
+            Haptics.notificationSuccess()
+        } catch {
+            errorMessage = error.localizedDescription
+            Haptics.notificationError()
+        }
+    }
+
+    @MainActor
+    func removeDocument(_ reference: ConversationDocumentReference) {
+        pendingDocuments.removeAll { $0.id == reference.id }
+        attachedDocuments.removeAll { $0.id == reference.id }
+        Task {
+            await appState.documentLibraryService.removeDocument(id: reference.id)
+        }
+        saveCurrentConversation()
+        Haptics.impactLight()
+    }
+
+    @MainActor
     private func saveCurrentConversation() {
         guard let conversationId = activeConversationId else { return }
 
@@ -313,12 +399,16 @@ final class ChatViewModel {
             conversation = existing
             conversation.messages = messages
             conversation.modelId = appState.loadedModelId
+            conversation.personaId = activePersonaId ?? appState.defaultPersona().id
+            conversation.documents = attachedDocuments
             conversation.updatedAt = Date()
         } else {
             conversation = Conversation(
                 id: conversationId,
                 messages: messages,
-                modelId: appState.loadedModelId
+                modelId: appState.loadedModelId,
+                personaId: activePersonaId ?? appState.defaultPersona().id,
+                documents: attachedDocuments
             )
         }
 
@@ -330,12 +420,16 @@ final class ChatViewModel {
     }
 
     private func resolvedCurrentModel() -> ModelInfo? {
+        if let loadedModelId = appState.loadedModelId,
+           let loadedModel = Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelId }) {
+            return loadedModel
+        }
+
         if let selectedModel = appState.selectedModel {
             return selectedModel
         }
 
-        guard let loadedModelId = appState.loadedModelId else { return nil }
-        return Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelId })
+        return nil
     }
 
     private func updateThinkingAvailability(for model: ModelInfo?) {
@@ -364,11 +458,19 @@ final class ChatViewModel {
         return Constants.Generation.thinkingMaxTokens
     }
 
-    private func mergedSystemPrompt(base: String, thinkingEnabled: Bool) -> String {
+    private func safeRepetitionPenalty(_ requested: Float) -> Float {
+        1.0
+    }
+
+    private func mergedSystemPrompt(base: String, documentContext: String, thinkingEnabled: Bool) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
             parts.append(trimmedBase)
+        }
+        let trimmedDocumentContext = documentContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedDocumentContext.isEmpty {
+            parts.append(trimmedDocumentContext)
         }
         if thinkingEnabled {
             parts.append(Constants.Generation.conciseThinkingInstruction)
@@ -376,11 +478,15 @@ final class ChatViewModel {
         return parts.joined(separator: "\n\n")
     }
 
-    private func finalAnswerSystemPrompt(base: String) -> String {
+    private func finalAnswerSystemPrompt(base: String, documentContext: String) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
             parts.append(trimmedBase)
+        }
+        let trimmedDocumentContext = documentContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedDocumentContext.isEmpty {
+            parts.append(trimmedDocumentContext)
         }
         parts.append(Constants.Generation.finalAnswerOnlyInstruction)
         return parts.joined(separator: "\n\n")

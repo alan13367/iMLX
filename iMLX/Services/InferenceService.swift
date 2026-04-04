@@ -216,13 +216,20 @@ enum InferenceError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noModelLoaded: "No model is currently loaded"
-        case .modelLoadFailed(let reason): "Failed to load model: \(reason)"
-        case .outOfMemory: "Not enough memory to run this model"
-        case .generationCancelled: "Generation was cancelled"
-        case .simulatorUnsupported: "MLX model loading is unavailable in the iOS Simulator. Run the app on a physical device or use Mac Designed for iPad."
-        case .visionUnsupportedModel: "The loaded model does not expose a vision pipeline. Delete and re-download this model to get the latest vision-capable files."
-        case .invalidImageData: "Unable to decode the attached image. Try reattaching it from Photos or capture it again."
+        case .noModelLoaded:
+            String.appLocalized("error.inference.no_model_loaded")
+        case .modelLoadFailed(let reason):
+            String(format: String.appLocalized("error.inference.model_load_failed"), reason)
+        case .outOfMemory:
+            String.appLocalized("error.inference.out_of_memory")
+        case .generationCancelled:
+            String.appLocalized("error.inference.generation_cancelled")
+        case .simulatorUnsupported:
+            String.appLocalized("error.inference.simulator")
+        case .visionUnsupportedModel:
+            String.appLocalized("error.inference.vision_unsupported")
+        case .invalidImageData:
+            String.appLocalized("error.inference.invalid_image")
         }
     }
 }

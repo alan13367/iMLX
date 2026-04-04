@@ -8,14 +8,18 @@ struct GenerationStats: Codable, Hashable {
     let peakMemoryMB: UInt64
 
     var formattedTokensPerSecond: String {
-        String(format: "%.1f tok/s", tokensPerSecond)
+        String(format: String.appLocalized("stats.tok_per_s"), tokensPerSecond)
     }
 
     var formattedMemory: String {
-        "\(peakMemoryMB) MB"
+        String(format: String.appLocalized("stats.mb"), peakMemoryMB)
     }
 
     var formattedTime: String {
-        String(format: "%.1fs", generationTime)
+        String(format: String.appLocalized("stats.seconds"), generationTime)
+    }
+
+    var formattedTokenCount: String {
+        String(format: String.appLocalized("stats.tok_count"), Int64(totalTokens))
     }
 }

@@ -1,45 +1,54 @@
-# iMLX
+<p align="center">
+  <img src="iMLX/Assets.xcassets/BrandLogo.imageset/brand-logo.png" alt="iMLX" width="72" height="72" />
+</p>
 
-![iMLX Logo](iMLX/Assets.xcassets/BrandLogo.imageset/brand-logo.png)
+<p align="center"><strong>iMLX</strong></p>
+<p align="center">On-device AI chat for <strong>iOS</strong> and <strong>iPadOS</strong> using MLX Swift.</p>
+<p align="center"><sub>Runs supported LLMs locally on Apple Silicon · no cloud dependency · actively evolving</sub></p>
 
-On-device AI chat for iOS and iPadOS using MLX Swift.
+---
 
-Status: Functional and actively evolving.
+## Overview
 
-iMLX runs supported LLMs locally on Apple Silicon with no cloud dependency.
+iMLX is a native app for streaming, multi-turn chat with curated MLX models: download what you need, load from Chat or the Models tab, and keep conversations on device.
+
+---
 
 ## Features
 
-- Fully on-device inference with MLX
-- Streaming token output in chat UI
-- Model browser and download management
-- Conversation persistence and history (chat-first launch; open history from the chat toolbar)
-- Device-aware model recommendations
-- Per-model thinking mode (toggle + chat-template `enable_thinking` where supported)
-- Branded launch/loading experience with the iMLX logo
-- Per-message generation metrics shown inline in assistant responses
-- Load and unload downloaded models directly from Chat and Models screens
+| Area | What you get |
+|------|----------------|
+| **Inference** | On-device MLX, streaming tokens, inline generation metrics |
+| **Models** | Browser, downloads, device-aware picks, load/unload from Chat and Models |
+| **Personas** | Reusable roles (goal, tone, optional default model); editor under **Settings → Personas**; per-chat persona + picker; starters + custom personas |
+| **Chat** | Saved conversations, history from the toolbar, chat-first launch |
+| **Thinking** | Per-model toggle where the model supports `enable_thinking` |
+| **UX** | Branded launch/loading; EN / ES / zh-Hans + optional in-app language |
 
-## Recent Updates
+---
 
-- Chat tab opens straight into the current conversation on iPhone and iPad; use the top-left list button to browse or switch chats.
-- Startup now validates downloaded model manifests against on-disk files and prunes stale entries.
-- Model path resolution is more resilient (symlink + cache snapshot fallback) and auto-heals broken links.
-- Simulator model loading/generation now returns a clear unsupported message instead of entering an MLX load path.
-- Chat keeps context visible during model loading and shows a compact loading/status card.
-- Settings now use plain-language response style controls (Creativity, Focus, Repetition Control).
-- Generation now applies internal safety caps for long responses, especially when thinking is enabled, stops early under severe memory pressure to reduce iOS jetsam risk, gives compact models a larger thinking budget than 4B-class models, detects repetitive hidden-thinking loops, and automatically performs a short answer-only follow-up if a thinking run ends without a visible final response.
+## Recent updates
+
+- **Personas** replace a single global system prompt: choose or create a persona per chat; manage under **Settings → Personas** (guided fields or advanced sampling).
+- Chat opens into the current conversation; use the top-left list control for history.
+- Manifest validation prunes stale download entries; model paths tolerate symlinks and cache snapshots; broken links auto-heal.
+- Simulator shows a clear “unsupported” path instead of failing inside MLX load.
+- Generation uses safety caps, memory-aware stops, thinking budgets by model size, repetitive-thinking detection, and an answer-only follow-up when needed.
+
+---
 
 ## Requirements
 
-- macOS with Xcode 16+
-- iOS 18.0+ deployment target
-- Apple Silicon device for best performance
-- Metal Toolchain installed for CLI builds
+- macOS with **Xcode 16+**
+- **iOS 18.0+** deployment target
+- **Apple Silicon** device for realistic performance
+- **Metal Toolchain** for CLI builds (see below)
 
-## Quick Start
+---
 
-### 1) Resolve Swift packages
+## Quick start
+
+**1. Resolve Swift packages**
 
 ```bash
 xcodebuild -resolvePackageDependencies \
@@ -47,13 +56,13 @@ xcodebuild -resolvePackageDependencies \
   -scheme "iMLX"
 ```
 
-### 2) Install Metal Toolchain
+**2. Install Metal Toolchain**
 
 ```bash
 xcodebuild -downloadComponent MetalToolchain
 ```
 
-### 3) Build for iOS Simulator
+**3. Build for iOS Simulator**
 
 ```bash
 xcodebuild build \
@@ -63,7 +72,7 @@ xcodebuild build \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO
 ```
 
-### 4) Build for physical device
+**4. Build for a physical device**
 
 ```bash
 xcodebuild build \
@@ -72,29 +81,37 @@ xcodebuild build \
   -destination 'generic/platform=iOS'
 ```
 
-## Project Structure
+---
+
+## Project layout
 
 ```text
 iMLX/
 ├── App/
-├── Models/
-├── Services/
+├── Models/          # Persona, Conversation, ChatMessage, …
+├── Services/        # PersonaService, InferenceService, …
 ├── Utilities/
 ├── ViewModels/
 └── Views/
+    ├── Chat/        # e.g. PersonaPickerSheet
+    └── Settings/    # e.g. PersonaLibraryView, PersonaEditorView
 ```
 
-## Technical Notes
+---
 
-- MLX array operations are serialized through an actor-based inference service.
-- Simulator builds may run on CPU fallback and are not representative of real-device performance.
-- Inference is intended for foreground app usage.
+## Technical notes
+
+- MLX work is serialized through an **actor**-based inference service.
+- The Simulator is not a reliable stand-in for GPU behavior on device.
+- Inference is intended for **foreground** use.
+
+---
 
 ## License
 
-This project is dual-licensed under either of the following, at your option:
+Dual-licensed at your option:
 
-- Apache License 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
+- [Apache License 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
 
 Copyright (c) 2026 Alan Beltran Pozo

@@ -12,7 +12,9 @@ struct ConversationListView: View {
     @State private var conversationPendingDeletion: Conversation?
 
     private var navigationTitle: String {
-        presentation == .modalSheet ? "Chats" : "Conversations"
+        presentation == .modalSheet
+            ? String.appLocalized("conversation.title.chats")
+            : String.appLocalized("conversation.title.list")
     }
 
     var body: some View {
@@ -38,14 +40,14 @@ struct ConversationListView: View {
                             Button(role: .destructive) {
                                 conversationPendingDeletion = conversation
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label(String.appLocalized("common.delete"), systemImage: "trash")
                             }
                         }
                         .contextMenu {
                             Button(role: .destructive) {
                                 conversationPendingDeletion = conversation
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label(String.appLocalized("common.delete"), systemImage: "trash")
                             }
                         }
                 }
@@ -53,7 +55,7 @@ struct ConversationListView: View {
         }
         .navigationTitle(navigationTitle)
         .confirmationDialog(
-            "Delete Chat?",
+            String.appLocalized("conversation.delete_title"),
             isPresented: Binding(
                 get: { conversationPendingDeletion != nil },
                 set: { isPresented in
@@ -64,17 +66,17 @@ struct ConversationListView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(String.appLocalized("common.delete"), role: .destructive) {
                 guard let conversation = conversationPendingDeletion else { return }
                 appState.deleteConversation(conversation.id)
                 conversationPendingDeletion = nil
             }
-            Button("Cancel", role: .cancel) {
+            Button(String.appLocalized("common.cancel"), role: .cancel) {
                 conversationPendingDeletion = nil
             }
         } message: {
             if let conversationPendingDeletion {
-                Text("Delete \"\(conversationPendingDeletion.displayTitle)\"?")
+                Text(String(format: String.appLocalized("conversation.delete_message"), conversationPendingDeletion.displayTitle))
             }
         }
         .toolbar {
@@ -94,7 +96,7 @@ struct ConversationListView: View {
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary.opacity(0.4))
-            Text("No conversations yet")
+            Text(String.appLocalized("conversation.empty"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

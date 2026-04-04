@@ -8,7 +8,7 @@ struct StatsOverlayView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 StatItem(icon: "gauge.with.dots.needle.33percent", value: stats.formattedTokensPerSecond, isLive: isLive)
-                StatItem(icon: "text.word.spacing", value: "\(stats.totalTokens) tok", isLive: isLive)
+                StatItem(icon: "text.word.spacing", value: stats.formattedTokenCount, isLive: isLive)
                 StatItem(icon: "clock", value: stats.formattedTime, isLive: isLive)
                 StatItem(icon: "memorychip", value: stats.formattedMemory, isLive: isLive)
             }

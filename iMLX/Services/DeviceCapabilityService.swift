@@ -12,10 +12,10 @@ enum DeviceTier: Int, Comparable {
 
     var displayName: String {
         switch self {
-        case .tier8GB: "\(rawValue)GB"
-        case .tier12GB: "\(rawValue)GB"
-        case .tier16GB: "\(rawValue)GB"
-        case .tier24GB: "\(rawValue)GB+"
+        case .tier8GB, .tier12GB, .tier16GB:
+            String(format: String.appLocalized("device.tier.gb"), Int64(rawValue))
+        case .tier24GB:
+            String(format: String.appLocalized("device.tier.gb_plus"), Int64(rawValue))
         }
     }
 }

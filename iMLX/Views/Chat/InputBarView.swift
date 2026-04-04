@@ -8,7 +8,7 @@ struct InputBarView: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message...", text: $text, axis: .vertical)
+            TextField(String.appLocalized("chat.message_placeholder"), text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .padding(.horizontal, 12)

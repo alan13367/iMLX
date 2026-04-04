@@ -174,10 +174,10 @@ enum Constants {
         static let defaultTemperature: Float = 0.7
         static let defaultTopP: Float = 1.0
         static let defaultRepetitionPenalty: Float = 1.0
-        static let standardMaxTokens = 768
-        static let compactModelThinkingMaxTokens = 1024
-        static let thinkingMaxTokens = 768
-        static let memoryConstrainedThinkingMaxTokens = 512
+        static let standardMaxTokens = 4096
+        static let compactModelThinkingMaxTokens = 8192
+        static let thinkingMaxTokens = 4096
+        static let memoryConstrainedThinkingMaxTokens = 2048
         static let finalAnswerMaxTokens = 256
         static let lowMemoryAbortThresholdMB: UInt64 = 350
         static let lowMemoryCheckInterval = 32

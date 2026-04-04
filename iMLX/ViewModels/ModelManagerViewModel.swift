@@ -74,16 +74,17 @@ final class ModelManagerViewModel {
         downloadProgress[model.id] = 0
         errorMessage = nil
 
-        Task {
-            let stream = await downloadService.downloadModel(model)
+        Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.downloadService.downloadModel(model)
             do {
                 for try await progress in stream {
                     await MainActor.run {
                         self.downloadProgress[model.id] = progress
                     }
                 }
-                let sizeOnDisk = await downloadService.sizeOfModel(model)
-                let localURL = await downloadService.localURL(for: model)
+                let sizeOnDisk = await self.downloadService.sizeOfModel(model)
+                let localURL = await self.downloadService.localURL(for: model)
                 await MainActor.run {
                     if let index = self.availableModels.firstIndex(where: { $0.id == model.id }) {
                         self.availableModels[index].isDownloaded = true

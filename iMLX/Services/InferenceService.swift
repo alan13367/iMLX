@@ -75,6 +75,9 @@ actor InferenceService {
             }
 
             let task = Task {
+                defer {
+                    MLX.Memory.clearCache()
+                }
                 do {
                     try await withPreferredDevice {
                         let additionalContext: [String: any Sendable]? = thinkingEnabled.map { value in

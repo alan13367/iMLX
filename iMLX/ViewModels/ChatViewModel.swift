@@ -120,29 +120,30 @@ final class ChatViewModel {
         let thinkingEnabled = loadedModel?.supportsThinking == true ? isThinkingEnabled : false
         let generationMaxTokens = generationTokenLimit(for: loadedModel, thinkingEnabled: thinkingEnabled)
 
-        generationTask = Task { @MainActor in
+        generationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             let startTime = Date()
             var tokenCount = 0
             var shouldForceFinalAnswerFollowUp = false
-            let retrievalResult = await appState.documentLibraryService.retrieveContext(
+            let retrievalResult = await self.appState.documentLibraryService.retrieveContext(
                 for: text,
-                documents: attachedDocuments
+                documents: self.attachedDocuments
             )
-            let effectiveSystemPrompt = mergedSystemPrompt(
+            let effectiveSystemPrompt = self.mergedSystemPrompt(
                 base: systemPrompt,
                 documentContext: retrievalResult.contextBlock,
                 thinkingEnabled: thinkingEnabled
             )
 
             func enforceMemorySafety() throws {
-                let availableMB = deviceCapabilityService.availableMemoryMB
+                let availableMB = self.deviceCapabilityService.availableMemoryMB
                 if availableMB > 0 && availableMB < Constants.Generation.lowMemoryAbortThresholdMB {
                     throw ChatGenerationAbort.lowMemory(availableMB)
                 }
             }
 
             do {
-                let stream = await inferenceService.generate(
+                let stream = await self.inferenceService.generate(
                     prompt: text,
                     images: userMessage.attachedImages,
                     thinkingEnabled: loadedModel?.supportsThinking == true ? thinkingEnabled : nil,
@@ -156,12 +157,12 @@ final class ChatViewModel {
 
                 for try await token in stream {
                     guard !Task.isCancelled else { break }
-                    currentResponse += token
+                    self.currentResponse += token
                     tokenCount += 1
                     if tokenCount.isMultiple(of: Constants.Generation.lowMemoryCheckInterval) {
                         try enforceMemorySafety()
-                        if shouldInterruptRepetitiveThinking(
-                            in: currentResponse,
+                        if self.shouldInterruptRepetitiveThinking(
+                            in: self.currentResponse,
                             thinkingEnabled: thinkingEnabled,
                             tokenCount: tokenCount
                         ) {
@@ -171,13 +172,13 @@ final class ChatViewModel {
                     }
                 }
 
-                if shouldForceFinalAnswerFollowUp || shouldRunFinalAnswerFollowUp(for: currentResponse, thinkingEnabled: thinkingEnabled) {
-                    let followUpStream = await inferenceService.generate(
+                if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: self.currentResponse, thinkingEnabled: thinkingEnabled) {
+                    let followUpStream = await self.inferenceService.generate(
                         prompt: text,
                         images: userMessage.attachedImages,
                         thinkingEnabled: false,
                         history: history,
-                        systemPrompt: finalAnswerSystemPrompt(
+                        systemPrompt: self.finalAnswerSystemPrompt(
                             base: systemPrompt,
                             documentContext: retrievalResult.contextBlock
                         ),
@@ -191,10 +192,10 @@ final class ChatViewModel {
                     for try await token in followUpStream {
                         guard !Task.isCancelled else { break }
                         if !startedFollowUpOutput {
-                            currentResponse += "\n\nFinal Answer:\n"
+                            self.currentResponse += "\n\nFinal Answer:\n"
                             startedFollowUpOutput = true
                         }
-                        currentResponse += token
+                        self.currentResponse += token
                         tokenCount += 1
                         if tokenCount.isMultiple(of: Constants.Generation.lowMemoryCheckInterval) {
                             try enforceMemorySafety()
@@ -203,71 +204,71 @@ final class ChatViewModel {
                 }
 
                 let elapsed = Date().timeIntervalSince(startTime)
-                let peakMemory = await currentMemoryUsage()
+                let peakMemory = await self.currentMemoryUsage()
                 let generationStats = GenerationStats(
                     tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                     totalTokens: tokenCount,
-                    promptTokens: messages.count - (currentResponse.isEmpty ? 1 : 2),
+                    promptTokens: self.messages.count - (self.currentResponse.isEmpty ? 1 : 2),
                     generationTime: elapsed,
                     peakMemoryMB: peakMemory
                 )
 
-                if !currentResponse.isEmpty {
+                if !self.currentResponse.isEmpty {
                     let assistantMessage = ChatMessage(
                         role: .assistant,
-                        content: currentResponse,
+                        content: self.currentResponse,
                         retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: generationStats
                     )
-                    messages.append(assistantMessage)
+                    self.messages.append(assistantMessage)
                 }
 
-                saveCurrentConversation()
+                self.saveCurrentConversation()
                 Haptics.impactMedium()
             } catch is CancellationError {
-                if !currentResponse.isEmpty {
+                if !self.currentResponse.isEmpty {
                     let elapsed = Date().timeIntervalSince(startTime)
-                    let peakMemory = await currentMemoryUsage()
+                    let peakMemory = await self.currentMemoryUsage()
                     let partialMessage = ChatMessage(
                         role: .assistant,
-                        content: currentResponse,
+                        content: self.currentResponse,
                         retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                             totalTokens: tokenCount,
-                            promptTokens: messages.count - 1,
+                            promptTokens: self.messages.count - 1,
                             generationTime: elapsed,
                             peakMemoryMB: peakMemory
                         )
                     )
-                    messages.append(partialMessage)
+                    self.messages.append(partialMessage)
                 }
-                saveCurrentConversation()
+                self.saveCurrentConversation()
             } catch {
-                if !currentResponse.isEmpty {
+                if !self.currentResponse.isEmpty {
                     let elapsed = Date().timeIntervalSince(startTime)
-                    let peakMemory = await currentMemoryUsage()
+                    let peakMemory = await self.currentMemoryUsage()
                     let partialMessage = ChatMessage(
                         role: .assistant,
-                        content: currentResponse,
+                        content: self.currentResponse,
                         retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                             totalTokens: tokenCount,
-                            promptTokens: messages.count - 1,
+                            promptTokens: self.messages.count - 1,
                             generationTime: elapsed,
                             peakMemoryMB: peakMemory
                         )
                     )
-                    messages.append(partialMessage)
+                    self.messages.append(partialMessage)
                 }
-                errorMessage = error.localizedDescription
-                saveCurrentConversation()
+                self.errorMessage = error.localizedDescription
+                self.saveCurrentConversation()
                 Haptics.notificationError()
             }
 
-            currentResponse = ""
-            isGenerating = false
+            self.currentResponse = ""
+            self.isGenerating = false
         }
     }
 

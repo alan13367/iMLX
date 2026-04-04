@@ -23,7 +23,10 @@ final class AppState {
         preferredAppLanguageCode = userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
         loadPersonas()
         restoreModelState()
-        reconcileDownloadedModelState()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            _ = await self.reconcileModelCatalogState()
+        }
     }
 
     var effectiveLocale: Locale {
@@ -67,35 +70,62 @@ final class AppState {
         loadedModelId = nil
     }
 
-    private func reconcileDownloadedModelState() {
-        Task {
-            var staleModelIds: [String] = []
+    @MainActor
+    @discardableResult
+    func reconcileModelCatalogState() async -> [ModelInfo] {
+        var downloadedById: [String: ModelInfo] = [:]
 
-            for entry in manifestService.getDownloadedModels() {
-                guard let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == entry.id }) else {
-                    staleModelIds.append(entry.id)
-                    continue
-                }
+        for model in Constants.ModelRegistry.curatedModels {
+            let isDownloaded = await downloadService.isModelDownloaded(model)
+            guard isDownloaded else { continue }
 
-                if !(await downloadService.isModelDownloaded(model)) {
-                    staleModelIds.append(entry.id)
-                }
-            }
+            var updated = model
+            updated.isDownloaded = true
+            updated.localURL = await downloadService.localURL(for: model)
+            downloadedById[model.id] = updated
 
-            guard !staleModelIds.isEmpty else { return }
-
-            await MainActor.run {
-                for modelId in staleModelIds {
-                    self.manifestService.removeDownloaded(modelId: modelId)
-                    if self.selectedModel?.id == modelId {
-                        self.selectModel(nil)
-                    }
-                    if self.loadedModelId == modelId {
-                        self.setLoadedModel(id: nil)
-                    }
-                }
+            if !manifestService.isDownloaded(modelId: model.id) {
+                let sizeOnDisk = await downloadService.sizeOfModel(model)
+                manifestService.addDownloaded(
+                    modelId: model.id,
+                    displayName: model.displayName,
+                    huggingFaceId: model.huggingFaceId,
+                    localPath: model.id,
+                    sizeOnDiskBytes: sizeOnDisk
+                )
             }
         }
+
+        let staleModelIds = Set(
+            manifestService.getDownloadedModels()
+                .map(\.id)
+                .filter { downloadedById[$0] == nil }
+        )
+
+        for modelId in staleModelIds {
+            manifestService.removeDownloaded(modelId: modelId)
+            if selectedModel?.id == modelId {
+                selectModel(nil)
+            }
+            if loadedModelId == modelId {
+                setLoadedModel(id: nil)
+            }
+        }
+
+        if let selectedId = selectedModel?.id,
+           let updatedSelectedModel = downloadedById[selectedId] {
+            selectedModel = updatedSelectedModel
+        } else if let selectedId = selectedModel?.id,
+                  downloadedById[selectedId] == nil {
+            selectModel(nil)
+        }
+
+        if let loadedModelId,
+           downloadedById[loadedModelId] == nil {
+            setLoadedModel(id: nil)
+        }
+
+        return Constants.ModelRegistry.curatedModels.compactMap { downloadedById[$0.id] }
     }
 
     func clearModel() {
@@ -103,10 +133,32 @@ final class AppState {
         setLoadedModel(id: nil)
     }
 
-    func loadConversations() {
-        conversations = conversationService.listAll()
+    @MainActor
+    func clearAllDownloadedModels() async {
+        let downloadedEntries = manifestService.getDownloadedModels()
+        let idsToRemove = Set(downloadedEntries.map(\.id))
+
+        await inferenceService.unload()
+        clearModel()
+
+        for entry in downloadedEntries {
+            try? await downloadService.deleteModel(modelId: entry.id, huggingFaceId: entry.huggingFaceId)
+        }
+        manifestService.removeDownloaded(modelIds: idsToRemove)
+    }
+
+    @MainActor
+    func loadConversations() async {
+        let loaded = await fetchConversationsInBackground()
+        conversations = loaded
         migrateConversationsWithoutPersona()
         reconcileActiveConversationForChat()
+    }
+
+    nonisolated private func fetchConversationsInBackground() async -> [Conversation] {
+        return await Task.detached {
+            self.conversationService.listAll()
+        }.value
     }
 
     func loadPersonas() {

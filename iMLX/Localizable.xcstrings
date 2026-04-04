@@ -23,6 +23,9 @@
     "%lld GB" : {
 
     },
+    "Add attachment" : {
+
+    },
     "brand.subtitle" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -414,6 +417,9 @@
         }
       }
     },
+    "Choose persona" : {
+
+    },
     "common.cancel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -667,6 +673,15 @@
         }
       }
     },
+    "Copy response" : {
+
+    },
+    "Delete conversation" : {
+
+    },
+    "Delete model" : {
+
+    },
     "device.tier.gb" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -712,6 +727,12 @@
           }
         }
       }
+    },
+    "Disable thinking" : {
+
+    },
+    "Dismiss error" : {
+
     },
     "document.kind.csv" : {
       "extractionState" : "manual",
@@ -781,6 +802,12 @@
           }
         }
       }
+    },
+    "Download model" : {
+
+    },
+    "Enable thinking" : {
+
     },
     "error.chat.generation_memory_abort" : {
       "extractionState" : "manual",
@@ -1057,6 +1084,12 @@
           }
         }
       }
+    },
+    "Load %@" : {
+
+    },
+    "Loads this model for chat" : {
+
     },
     "message.copied" : {
       "extractionState" : "manual",
@@ -1563,6 +1596,15 @@
           }
         }
       }
+    },
+    "New conversation" : {
+
+    },
+    "Open conversation" : {
+
+    },
+    "Open conversations" : {
+
     },
     "persona.code-reviewer.goal" : {
       "extractionState" : "manual",
@@ -2553,6 +2595,15 @@
         }
       }
     },
+    "Remove document" : {
+
+    },
+    "Remove image" : {
+
+    },
+    "Send message" : {
+
+    },
     "settings.active_model" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2691,6 +2742,98 @@
         }
       }
     },
+    "settings.language.english" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "English"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inglés"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "英语"
+          }
+        }
+      }
+    },
+    "settings.language.simplified_chinese" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simplified Chinese"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chino simplificado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "简体中文"
+          }
+        }
+      }
+    },
+    "settings.language.spanish" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spanish"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Español"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "西班牙语"
+          }
+        }
+      }
+    },
+    "settings.language.system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sistema"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随系统"
+          }
+        }
+      }
+    },
     "settings.manage_personas" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2806,121 +2949,6 @@
         }
       }
     },
-    "settings.section.language" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Language"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Idioma"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "语言"
-          }
-        }
-      }
-    },
-    "settings.language.english" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "English"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inglés"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "英语"
-          }
-        }
-      }
-    },
-    "settings.language.simplified_chinese" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Simplified Chinese"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chino simplificado"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "简体中文"
-          }
-        }
-      }
-    },
-    "settings.language.spanish" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Spanish"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Español"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "西班牙语"
-          }
-        }
-      }
-    },
-    "settings.language.system" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "System"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sistema"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "跟随系统"
-          }
-        }
-      }
-    },
     "settings.section.device" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2940,6 +2968,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设备"
+          }
+        }
+      }
+    },
+    "settings.section.language" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Idioma"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语言"
           }
         }
       }
@@ -3104,6 +3155,9 @@
           }
         }
       }
+    },
+    "Stop generating" : {
+
     },
     "tab.chat" : {
       "extractionState" : "manual",
@@ -3288,6 +3342,12 @@
           }
         }
       }
+    },
+    "Unload model" : {
+
+    },
+    "Unload model from memory" : {
+
     }
   },
   "version" : "1.0"

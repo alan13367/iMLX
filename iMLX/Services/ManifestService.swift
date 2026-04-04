@@ -41,6 +41,11 @@ final class ManifestService {
         save()
     }
     
+    func removeDownloaded(modelIds: Set<String>) {
+        manifest.downloadedModels.removeAll { modelIds.contains($0.id) }
+        save()
+    }
+    
     func isDownloaded(modelId: String) -> Bool {
         manifest.downloadedModels.contains { $0.id == modelId }
     }

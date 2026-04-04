@@ -74,34 +74,8 @@ struct SettingsView: View {
     }
 
     private func clearAllModels() {
-        let downloadedEntries = appState.manifestService.getDownloadedModels()
-
         Task {
-            await appState.inferenceService.unload()
-            await MainActor.run {
-                appState.clearModel()
-            }
-
-            for entry in downloadedEntries {
-                let model = ModelInfo(
-                    id: entry.id,
-                    displayName: entry.displayName,
-                    huggingFaceId: entry.huggingFaceId,
-                    parameterCount: "",
-                    quantization: "",
-                    estimatedSizeGB: 0,
-                    minDeviceRAM: 8,
-                    family: .qwen3,
-                    logoName: "",
-                    supportsThinking: false,
-                    supportsVision: false,
-                    prefersThinkingEnabled: false
-                )
-                try? await appState.downloadService.deleteModel(model)
-                await MainActor.run {
-                    appState.manifestService.removeDownloaded(modelId: entry.id)
-                }
-            }
+            await appState.clearAllDownloadedModels()
             await MainActor.run {
                 Haptics.notificationWarning()
             }

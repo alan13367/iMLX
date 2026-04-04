@@ -123,26 +123,30 @@ actor ModelDownloadService {
     }
 
     func deleteModel(_ model: ModelInfo) async throws {
-        let symlinkPath = modelsBaseURL.appendingPathComponent(model.id)
+        try await deleteModel(modelId: model.id, huggingFaceId: model.huggingFaceId)
+    }
+
+    func deleteModel(modelId: String, huggingFaceId: String) async throws {
+        let symlinkPath = modelsBaseURL.appendingPathComponent(modelId)
         if fileManager.fileExists(atPath: symlinkPath.path) {
             try fileManager.removeItem(at: symlinkPath)
         }
 
         let appSupportRepoPath = modelsBaseURL
             .appendingPathComponent("models")
-            .appendingPathComponent(model.huggingFaceId)
+            .appendingPathComponent(huggingFaceId)
         if fileManager.fileExists(atPath: appSupportRepoPath.path) {
             try fileManager.removeItem(at: appSupportRepoPath)
         }
 
-        let cachePath = hubCacheBaseURL.appendingPathComponent(cacheDirectoryName(for: model))
+        let cachePath = hubCacheBaseURL.appendingPathComponent(cacheDirectoryName(for: huggingFaceId))
         if fileManager.fileExists(atPath: cachePath.path) {
             try fileManager.removeItem(at: cachePath)
         }
 
         let lockPath = hubCacheBaseURL
             .appendingPathComponent(".locks")
-            .appendingPathComponent(cacheDirectoryName(for: model))
+            .appendingPathComponent(cacheDirectoryName(for: huggingFaceId))
         if fileManager.fileExists(atPath: lockPath.path) {
             try fileManager.removeItem(at: lockPath)
         }
@@ -209,7 +213,11 @@ actor ModelDownloadService {
     }
 
     private func cacheDirectoryName(for model: ModelInfo) -> String {
-        "models--" + model.huggingFaceId.replacingOccurrences(of: "/", with: "--")
+        cacheDirectoryName(for: model.huggingFaceId)
+    }
+
+    private func cacheDirectoryName(for huggingFaceId: String) -> String {
+        "models--" + huggingFaceId.replacingOccurrences(of: "/", with: "--")
     }
 
     private func usableSymlinkTarget(at symlinkPath: URL, for model: ModelInfo) -> URL? {

@@ -63,7 +63,7 @@ struct ModelBrowserView: View {
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(4)
             Spacer()
             Button {
                 viewModel.errorMessage = nil
@@ -72,6 +72,8 @@ struct ModelBrowserView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .accessibilityLabel("Dismiss error")
         }
         .padding(.vertical, 4)
     }

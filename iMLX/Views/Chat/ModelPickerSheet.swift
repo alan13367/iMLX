@@ -66,6 +66,7 @@ struct ModelPickerSheet: View {
                             Label(String.appLocalized("models.picker.unload"), systemImage: "eject")
                                 .frame(maxWidth: .infinity)
                         }
+                        .accessibilityLabel("Unload model from memory")
                     }
                 }
             }
@@ -85,20 +86,8 @@ struct ModelPickerSheet: View {
     }
 
     private func refreshDownloadedModels() async {
-        var refreshed: [ModelInfo] = []
-
-        for model in Constants.ModelRegistry.curatedModels {
-            if await appState.downloadService.isModelDownloaded(model) {
-                var updated = model
-                updated.isDownloaded = true
-                updated.localURL = await appState.downloadService.localURL(for: model)
-                refreshed.append(updated)
-            }
-        }
-
-        await MainActor.run {
-            downloadedModels = refreshed
-        }
+        let refreshed = await appState.reconcileModelCatalogState()
+        downloadedModels = refreshed
     }
 
     private func loadedModelRow(modelId: String) -> some View {
@@ -131,26 +120,7 @@ struct ModelPickerSheet: View {
     }
 
     private func modelRow(model: ModelInfo) -> some View {
-        HStack(spacing: 12) {
-            modelLogo(for: model)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.displayName)
-                    .font(.headline)
-                Text("\(model.parameterCount) · \(model.quantization)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if isLoadingModelId == model.id {
-                ProgressView()
-                    .controlSize(.small)
-            }
-        }
-        .contentShape(Rectangle())
-        #if targetEnvironment(simulator)
-        .opacity(0.6)
-        #endif
-        .onTapGesture {
+        Button {
             #if targetEnvironment(simulator)
             Task { @MainActor in
                 await chatViewModel.unloadModel()
@@ -163,7 +133,30 @@ struct ModelPickerSheet: View {
                 isLoadingModelId = nil
             }
             #endif
+        } label: {
+            HStack(spacing: 12) {
+                modelLogo(for: model)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.displayName)
+                        .font(.headline)
+                    Text("\(model.parameterCount) · \(model.quantization)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isLoadingModelId == model.id {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
         }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        #if targetEnvironment(simulator)
+        .opacity(0.6)
+        #endif
+        .accessibilityLabel("Load \(model.displayName)")
+        .accessibilityHint("Loads this model for chat")
     }
 
     private func modelLogo(for model: ModelInfo) -> some View {

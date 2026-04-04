@@ -75,11 +75,15 @@ struct ModelCardView: View {
                         Label(String.appLocalized("common.delete"), systemImage: "trash")
                     }
                     .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .accessibilityLabel("Delete model")
                 } else if !isDownloading {
                     Button(action: onDownload) {
                         Label(String.appLocalized("models.card.download"), systemImage: "arrow.down.circle")
                     }
                     .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .accessibilityLabel("Download model")
                 }
             }
         }

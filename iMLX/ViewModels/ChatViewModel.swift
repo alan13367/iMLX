@@ -56,6 +56,10 @@ final class ChatViewModel {
         updateThinkingAvailability(for: resolvedCurrentModel())
     }
 
+    deinit {
+        generationTask?.cancel()
+    }
+
     @MainActor
     func loadConversation(_ conversation: Conversation) {
         activeConversationId = conversation.id
@@ -205,10 +209,11 @@ final class ChatViewModel {
 
                 let elapsed = Date().timeIntervalSince(startTime)
                 let peakMemory = await self.currentMemoryUsage()
+                let promptMessageCount = self.messages.count - (self.currentResponse.isEmpty ? 1 : 2)
                 let generationStats = GenerationStats(
                     tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                     totalTokens: tokenCount,
-                    promptTokens: self.messages.count - (self.currentResponse.isEmpty ? 1 : 2),
+                    promptTokens: promptMessageCount,
                     generationTime: elapsed,
                     peakMemoryMB: peakMemory
                 )
@@ -460,7 +465,7 @@ final class ChatViewModel {
     }
 
     private func safeRepetitionPenalty(_ requested: Float) -> Float {
-        1.0
+        max(1.0, min(requested, 2.0))
     }
 
     private func mergedSystemPrompt(base: String, documentContext: String, thinkingEnabled: Bool) -> String {

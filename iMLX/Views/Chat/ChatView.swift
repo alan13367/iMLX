@@ -39,6 +39,7 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "line.3.horizontal")
                 }
+                .accessibilityLabel("Open conversations")
             }
             ToolbarItem(placement: .principal) {
                 modelStatus
@@ -50,6 +51,7 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "person.crop.circle")
                 }
+                .accessibilityLabel("Choose persona")
 
                 if appState.loadedModelId != nil {
                     Button {
@@ -59,6 +61,7 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: "eject")
                     }
+                    .accessibilityLabel("Unload model")
                 }
 
                 Button {
@@ -68,6 +71,7 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
+                .accessibilityLabel("New conversation")
             }
         }
         .scrollDismissesKeyboard(.interactively)
@@ -391,7 +395,7 @@ struct ChatView: View {
                 Text(isOOMError(message) ? String.appLocalized("chat.oom_suggestion") : message)
                     .font(.caption)
                     .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .lineLimit(4)
             }
             Spacer()
             Button {
@@ -401,6 +405,8 @@ struct ChatView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .accessibilityLabel("Dismiss error")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -447,6 +453,8 @@ struct ChatView: View {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundStyle(.secondary)
                                 }
+                                .frame(width: 44, height: 44)
+                                .accessibilityLabel("Remove document")
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 8)
@@ -477,6 +485,8 @@ struct ChatView: View {
                                             .foregroundStyle(.white, .black.opacity(0.6))
                                             .font(.caption)
                                     }
+                                    .frame(width: 44, height: 44)
+                                    .accessibilityLabel("Remove image")
                                     .offset(x: 4, y: -4)
                                 }
                             }
@@ -497,6 +507,8 @@ struct ChatView: View {
                         .foregroundStyle(.secondary)
                         .clipShape(Circle())
                 }
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Add attachment")
                 .padding(.bottom, 4)
                 .confirmationDialog(String.appLocalized("chat.add_to_conversation"), isPresented: $showAttachmentActionSheet) {
                     Button(String.appLocalized("chat.import_document")) {
@@ -524,44 +536,19 @@ struct ChatView: View {
                             .foregroundStyle(chatViewModel.isThinkingEnabled ? .orange : .secondary)
                             .clipShape(Circle())
                     }
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel(chatViewModel.isThinkingEnabled ? "Disable thinking" : "Enable thinking")
                     .padding(.bottom, 4)
                 }
-                TextField(String.appLocalized("chat.message_placeholder"), text: $inputText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...5)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.fill.tertiary)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .focused($isInputFocused)
-                    .onSubmit {
-                        if canSendMessage {
-                            sendMessage()
-                        }
-                    }
 
-                if chatViewModel.isGenerating {
-                    Button {
-                        chatViewModel.stopGeneration()
-                    } label: {
-                        Image(systemName: "stop.circle.fill")
-                            .resizable()
-                            .frame(width: 32, height: 32)
-                            .foregroundStyle(.red)
-                    }
-                    .padding(.bottom, 4)
-                } else {
-                    Button {
-                        sendMessage()
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .resizable()
-                            .frame(width: 32, height: 32)
-                            .foregroundStyle(canSendMessage ? .blue : .gray)
-                    }
-                    .disabled(!canSendMessage)
-                    .padding(.bottom, 4)
-                }
+                InputBarView(
+                    text: $inputText,
+                    isGenerating: chatViewModel.isGenerating,
+                    isSendEnabled: canSendMessage,
+                    isFocused: $isInputFocused,
+                    onSend: sendMessage,
+                    onStop: chatViewModel.stopGeneration
+                )
             }
         }
         .padding(.horizontal)

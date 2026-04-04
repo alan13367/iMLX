@@ -23,33 +23,50 @@ struct ConversationListView: View {
                 emptyContent
             } else {
                 ForEach(appState.conversations) { conversation in
-                    ConversationRow(
-                        conversation: conversation,
-                        isActive: appState.activeConversationId == conversation.id,
-                        showsDeleteControl: true,
-                        onDelete: {
-                            conversationPendingDeletion = conversation
-                        }
-                    )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
+                    HStack(spacing: 8) {
+                        Button {
                             appState.selectConversation(conversation.id)
                             onSelect(conversation.id)
+                        } label: {
+                            ConversationRow(
+                                conversation: conversation,
+                                isActive: appState.activeConversationId == conversation.id,
+                                showsDeleteControl: false,
+                                onDelete: {}
+                            )
                         }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                conversationPendingDeletion = conversation
-                            } label: {
-                                Label(String.appLocalized("common.delete"), systemImage: "trash")
-                            }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(conversation.displayTitle)
+                        .accessibilityHint("Open conversation")
+
+                        Button(role: .destructive) {
+                            conversationPendingDeletion = conversation
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                                .background(.fill.tertiary)
+                                .clipShape(Circle())
                         }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                conversationPendingDeletion = conversation
-                            } label: {
-                                Label(String.appLocalized("common.delete"), systemImage: "trash")
-                            }
+                        .buttonStyle(.borderless)
+                        .frame(width: 44, height: 44)
+                        .accessibilityLabel("Delete conversation")
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            conversationPendingDeletion = conversation
+                        } label: {
+                            Label(String.appLocalized("common.delete"), systemImage: "trash")
                         }
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            conversationPendingDeletion = conversation
+                        } label: {
+                            Label(String.appLocalized("common.delete"), systemImage: "trash")
+                        }
+                    }
                 }
             }
         }
@@ -87,6 +104,7 @@ struct ConversationListView: View {
                 } label: {
                     Image(systemName: "plus")
                 }
+                .accessibilityLabel("New conversation")
             }
         }
     }
@@ -145,8 +163,10 @@ struct ConversationRow: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.borderless)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Delete conversation")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 }

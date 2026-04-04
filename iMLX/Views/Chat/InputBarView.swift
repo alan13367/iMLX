@@ -3,6 +3,8 @@ import SwiftUI
 struct InputBarView: View {
     @Binding var text: String
     let isGenerating: Bool
+    let isSendEnabled: Bool
+    var isFocused: FocusState<Bool>.Binding
     let onSend: () -> Void
     let onStop: () -> Void
 
@@ -15,6 +17,7 @@ struct InputBarView: View {
                 .padding(.vertical, 10)
                 .background(.fill.tertiary)
                 .clipShape(RoundedRectangle(cornerRadius: 20))
+                .focused(isFocused)
                 .onSubmit {
                     onSend()
                 }
@@ -25,17 +28,18 @@ struct InputBarView: View {
                         .font(.title2)
                         .foregroundStyle(.red)
                 }
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Stop generating")
             } else {
                 Button(action: onSend) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .blue)
+                        .foregroundStyle(isSendEnabled ? .blue : .gray)
                 }
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!isSendEnabled)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Send message")
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 }

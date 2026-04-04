@@ -26,35 +26,24 @@ final class ModelManagerViewModel {
     }
 
     func refreshDownloadStatusFromDisk() {
-        Task {
-            var refreshedModels = availableModels
-            var staleModelIds: [String] = []
-
-            for index in refreshedModels.indices {
-                let model = refreshedModels[index]
-                let isAvailableOnDisk = await downloadService.isModelDownloaded(model)
-                refreshedModels[index].isDownloaded = isAvailableOnDisk
-                refreshedModels[index].localURL = isAvailableOnDisk
-                    ? await downloadService.localURL(for: model)
-                    : nil
-
-                if !isAvailableOnDisk, manifestService.isDownloaded(modelId: model.id) {
-                    staleModelIds.append(model.id)
-                }
-            }
+        Task { [weak self] in
+            guard let self else { return }
+            let downloadedModels = await appState.reconcileModelCatalogState()
+            let downloadedById = Dictionary(uniqueKeysWithValues: downloadedModels.map { ($0.id, $0) })
 
             await MainActor.run {
-                self.availableModels = refreshedModels
-
-                for modelId in staleModelIds {
-                    self.manifestService.removeDownloaded(modelId: modelId)
-                    if self.appState.selectedModel?.id == modelId {
-                        self.appState.selectModel(nil)
-                    }
-                    if self.appState.loadedModelId == modelId {
-                        self.appState.setLoadedModel(id: nil)
+                var refreshedModels = self.availableModels
+                for index in refreshedModels.indices {
+                    let modelId = refreshedModels[index].id
+                    if let downloaded = downloadedById[modelId] {
+                        refreshedModels[index].isDownloaded = true
+                        refreshedModels[index].localURL = downloaded.localURL
+                    } else {
+                        refreshedModels[index].isDownloaded = false
+                        refreshedModels[index].localURL = nil
                     }
                 }
+                self.availableModels = refreshedModels
             }
         }
     }

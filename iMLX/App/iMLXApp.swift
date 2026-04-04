@@ -22,9 +22,14 @@ struct iMLXApp: App {
             }
             .environment(\.locale, appState.effectiveLocale)
             .task {
-                appState.loadConversations()
+                let minimumBrandDuration: Duration = .seconds(1.2)
+                let launchStart = ContinuousClock.now
+                await appState.loadConversations()
 
-                try? await Task.sleep(for: .seconds(1.2))
+                let elapsed = launchStart.duration(to: ContinuousClock.now)
+                if elapsed < minimumBrandDuration {
+                    try? await Task.sleep(for: minimumBrandDuration - elapsed)
+                }
 
                 await MainActor.run {
                     withAnimation(.easeOut(duration: 0.35)) {

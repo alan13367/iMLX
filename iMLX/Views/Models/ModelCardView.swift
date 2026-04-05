@@ -4,7 +4,7 @@ struct ModelCardView: View {
     let model: ModelInfo
     let progress: Float
     let isDownloading: Bool
-    let isSelected: Bool
+    let anyModelDownloading: Bool
     let onDownload: () -> Void
     let onDelete: () -> Void
 
@@ -64,13 +64,6 @@ struct ModelCardView: View {
 
             HStack {
                 if model.isDownloaded {
-                    if isSelected {
-                        Label(String.appLocalized("models.card.loaded"), systemImage: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                            .padding(.trailing, 8)
-                    }
-
                     Button(role: .destructive, action: onDelete) {
                         Label(String.appLocalized("common.delete"), systemImage: "trash")
                     }
@@ -83,7 +76,9 @@ struct ModelCardView: View {
                     }
                     .controlSize(.small)
                     .frame(minHeight: 44)
-                    .accessibilityLabel("Download model")
+                    .disabled(anyModelDownloading)
+                    .opacity(anyModelDownloading ? 0.4 : 1.0)
+                    .accessibilityLabel(anyModelDownloading ? "Download unavailable — another model is downloading" : "Download model")
                 }
             }
         }

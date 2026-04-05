@@ -806,6 +806,9 @@
     "Download model" : {
 
     },
+    "Download unavailable — another model is downloading" : {
+
+    },
     "Enable thinking" : {
 
     },
@@ -1547,6 +1550,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "卸载模型"
+          }
+        }
+      }
+    },
+    "models.family.downloaded_count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d of %d downloaded"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d de %d descargados"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下载 %d/%d"
+          }
+        }
+      }
+    },
+    "models.family.model_count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d models"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d modelos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d 个模型"
           }
         }
       }

@@ -48,8 +48,19 @@ final class ModelManagerViewModel {
         }
     }
 
+    var isAnyDownloading: Bool {
+        isDownloading.values.contains(true)
+    }
+
     var downloadableModels: [ModelInfo] {
         availableModels.filter { deviceCapability.canRunModel($0) }
+    }
+
+    var downloadableModelsGroupedByFamily: [(family: ModelInfo.ModelFamily, models: [ModelInfo])] {
+        let grouped = Dictionary(grouping: downloadableModels, by: { $0.family })
+        return grouped
+            .map { (family: $0.key, models: $0.value.sorted { $0.estimatedSizeGB < $1.estimatedSizeGB }) }
+            .sorted { $0.family.sortOrder < $1.family.sortOrder }
     }
 
     var incompatibleModels: [ModelInfo] {
@@ -57,6 +68,7 @@ final class ModelManagerViewModel {
     }
 
     func download(model: ModelInfo) {
+        guard !isAnyDownloading else { return }
         guard isDownloading[model.id] != true else { return }
         guard !manifestService.isDownloaded(modelId: model.id) else { return }
         isDownloading[model.id] = true

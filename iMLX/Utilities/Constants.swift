@@ -41,7 +41,7 @@ enum Constants {
                 minDeviceRAM: 8,
                 family: .qwen35,
                 logoName: "qwen_logo",
-                supportsThinking: true,
+                supportsThinking: false,
                 supportsVision: true,
                 prefersThinkingEnabled: false
             ),

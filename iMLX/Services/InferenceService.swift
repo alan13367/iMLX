@@ -93,7 +93,7 @@ actor InferenceService {
                         var parameters = GenerateParameters(
                             temperature: temperature,
                             topP: topP,
-                            repetitionPenalty: repetitionPenalty == 1 ? nil : repetitionPenalty
+                            //repetitionPenalty: repetitionPenalty == 1 ? nil : repetitionPenalty
                         )
                         parameters.maxTokens = maxTokens
 

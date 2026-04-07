@@ -313,16 +313,18 @@ struct ParsedAssistantContent {
         let normalizedContent = Self.normalizedContent(rawContent)
 
         if let tagged = Self.parseTaggedThinking(normalizedContent) {
+            let cleanedResponse = Self.stripAnswerHeading(tagged.response)
             self.thinking = tagged.thinking
-            self.response = tagged.response
-            self.copyableText = tagged.response.isEmpty ? tagged.thinking : tagged.response
+            self.response = cleanedResponse
+            self.copyableText = cleanedResponse.isEmpty ? tagged.thinking : cleanedResponse
             return
         }
 
         if let trailingTagged = Self.parseTrailingClosingTag(normalizedContent) {
+            let cleanedResponse = Self.stripAnswerHeading(trailingTagged.response)
             self.thinking = trailingTagged.thinking
-            self.response = trailingTagged.response
-            self.copyableText = trailingTagged.response.isEmpty ? trailingTagged.thinking : trailingTagged.response
+            self.response = cleanedResponse
+            self.copyableText = cleanedResponse.isEmpty ? trailingTagged.thinking : cleanedResponse
             return
         }
 
@@ -396,6 +398,20 @@ struct ParsedAssistantContent {
     private static func parseInferredThinking(_ rawContent: String, isStreaming: Bool) -> (thinking: String, response: String)? {
         let trimmed = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+
+        let allLines = trimmed.components(separatedBy: .newlines)
+        if let answerLineIndex = firstExplicitAnswerLineIndex(in: allLines), answerLineIndex > 0 {
+            let thinking = allLines[..<answerLineIndex]
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let response = allLines[answerLineIndex...]
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !thinking.isEmpty {
+                return (thinking, stripAnswerHeading(response))
+            }
+        }
+
         let paragraphs = paragraphs(in: trimmed)
         guard let firstParagraph = paragraphs.first, paragraphLooksLikeReasoning(firstParagraph) else { return nil }
 
@@ -544,10 +560,19 @@ struct ParsedAssistantContent {
     }
 
     private static func isAnswerSectionStart(_ line: String) -> Bool {
-        let normalized = line
+        var normalized = line
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
+            .replacingOccurrences(of: "：", with: ":")
+            .replacingOccurrences(of: #"^\s*#{1,6}\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\s*(?:>\s*)+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\s*[-*]\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\s*\d+[\.)]\s+"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .lowercased()
+
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
 
         let headings = [
@@ -565,10 +590,10 @@ struct ParsedAssistantContent {
     private static func stripAnswerHeading(_ response: String) -> String {
         var cleaned = response.trimmingCharacters(in: .whitespacesAndNewlines)
         let headingPatterns = [
-            "^\\*{0,2}final answer:?\\*{0,2}\\s*",
-            "^\\*{0,2}suggested answer:?\\*{0,2}\\s*",
-            "^\\*{0,2}answer:?\\*{0,2}\\s*",
-            "^\\*{0,2}response:?\\*{0,2}\\s*"
+            "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})final answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
+            "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})suggested answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
+            "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
+            "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})response(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*"
         ]
 
         for pattern in headingPatterns {

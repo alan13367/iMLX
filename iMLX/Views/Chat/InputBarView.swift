@@ -24,17 +24,23 @@ struct InputBarView: View {
 
             if isGenerating {
                 Button(action: onStop) {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.red)
+                    Image(systemName: "stop.fill")
+                        .font(.title2.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                        .background(Color.red)
+                        .foregroundStyle(.white)
+                        .clipShape(Circle())
                 }
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Stop generating")
             } else {
                 Button(action: onSend) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(isSendEnabled ? .blue : .gray)
+                    Image(systemName: "arrow.up")
+                        .font(.title2.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                        .background(isSendEnabled ? Color.blue : Color.secondary.opacity(0.12))
+                        .foregroundStyle(isSendEnabled ? Color.white : Color.secondary)
+                        .clipShape(Circle())
                 }
                 .disabled(!isSendEnabled)
                 .frame(width: 44, height: 44)

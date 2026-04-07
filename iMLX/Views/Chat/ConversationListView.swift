@@ -11,6 +11,10 @@ struct ConversationListView: View {
     var onSelect: (UUID) -> Void
     @State private var conversationPendingDeletion: Conversation?
 
+    private var showsInlineDeleteButton: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
     private var navigationTitle: String {
         presentation == .modalSheet
             ? String.appLocalized("conversation.title.chats")
@@ -39,19 +43,21 @@ struct ConversationListView: View {
                         .accessibilityLabel(conversation.displayTitle)
                         .accessibilityHint("Open conversation")
 
-                        Button(role: .destructive) {
-                            conversationPendingDeletion = conversation
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 28, height: 28)
-                                .background(.fill.tertiary)
-                                .clipShape(Circle())
+                        if showsInlineDeleteButton {
+                            Button(role: .destructive) {
+                                conversationPendingDeletion = conversation
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 28, height: 28)
+                                    .background(.fill.tertiary)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.borderless)
+                            .frame(width: 44, height: 44)
+                            .accessibilityLabel("Delete conversation")
                         }
-                        .buttonStyle(.borderless)
-                        .frame(width: 44, height: 44)
-                        .accessibilityLabel("Delete conversation")
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {

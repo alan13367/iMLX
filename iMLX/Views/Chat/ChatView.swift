@@ -15,6 +15,8 @@ struct ChatView: View {
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showConversationHistory = false
     @State private var streamingScrollTask: Task<Void, Never>?
+    @State private var streamingAutoscrollEnabled = true
+    @State private var scrollPinnedToBottom = true
     let appState: AppState
     let conversationId: UUID
 
@@ -45,14 +47,6 @@ struct ChatView: View {
                 modelStatus
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    isInputFocused = false
-                    showPersonaPicker = true
-                } label: {
-                    Image(systemName: "person.crop.circle")
-                }
-                .accessibilityLabel("Choose persona")
-
                 if appState.loadedModelId != nil {
                     Button {
                         Task {
@@ -60,17 +54,26 @@ struct ChatView: View {
                         }
                     } label: {
                         Image(systemName: "eject")
+                            .font(.body)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Unload model")
                 }
 
                 Button {
                     isInputFocused = false
+                    streamingAutoscrollEnabled = true
                     chatViewModel.startNewConversation()
                     inputText = ""
                 } label: {
                     Image(systemName: "square.and.pencil")
+                        .font(.body)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("New conversation")
             }
         }
@@ -91,6 +94,9 @@ struct ChatView: View {
             if let conversation = appState.conversations.first(where: { $0.id == currentConversationId }) {
                 chatViewModel.loadConversation(conversation)
             }
+        }
+        .onChange(of: appState.activeConversationId) { _, _ in
+            streamingAutoscrollEnabled = true
         }
         .onChange(of: selectedPhotoItem) {
             if let item = selectedPhotoItem {
@@ -259,42 +265,92 @@ struct ChatView: View {
 
     private var messageList: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(chatViewModel.messages) { message in
-                        MessageBubbleView(message: message)
-                            .id(message.id)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(chatViewModel.messages) { message in
+                            MessageBubbleView(message: message)
+                                .id(message.id)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                        if !chatViewModel.currentResponse.isEmpty {
+                            MessageBubbleView(
+                                message: ChatMessage(
+                                    role: .assistant,
+                                    content: chatViewModel.currentResponse + (chatViewModel.isGenerating ? "▊" : "")
+                                ),
+                                isStreaming: true
+                            )
+                            .id("streaming")
+                            .transition(.opacity)
+                        }
+                        Color.clear
+                            .frame(height: 1)
+                            .id("chatBottomAnchor")
                     }
-                    if !chatViewModel.currentResponse.isEmpty {
-                        MessageBubbleView(
-                            message: ChatMessage(
-                                role: .assistant,
-                                content: chatViewModel.currentResponse + (chatViewModel.isGenerating ? "▊" : "")
-                            ),
-                            isStreaming: true
-                        )
-                        .id("streaming")
-                        .transition(.opacity)
+                    .animation(.easeOut(duration: 0.2), value: chatViewModel.messages.count)
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
+                }
+                .onScrollGeometryChange(for: Bool.self, of: { geometry in
+                    let offsetY = geometry.contentOffset.y
+                    let contentHeight = geometry.contentSize.height
+                    let visibleHeight = geometry.visibleRect.height
+                    let maxOffset = max(0, contentHeight - visibleHeight)
+                    return offsetY >= maxOffset - 32
+                }, action: { _, pinned in
+                    scrollPinnedToBottom = pinned
+                })
+                .onScrollPhaseChange { _, newPhase in
+                    guard newPhase == .tracking || newPhase == .interacting else { return }
+                    guard chatViewModel.isGenerating else { return }
+                    guard streamingAutoscrollEnabled else { return }
+                    streamingScrollTask?.cancel()
+                    streamingScrollTask = nil
+                    streamingAutoscrollEnabled = false
+                }
+                .onChange(of: chatViewModel.messages.count) {
+                    guard streamingAutoscrollEnabled else { return }
+                    streamingScrollTask?.cancel()
+                    withAnimation {
+                        proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
                     }
                 }
-                .animation(.easeOut(duration: 0.2), value: chatViewModel.messages.count)
-                .padding(.horizontal)
-                .padding(.vertical, 12)
-            }
-            .onChange(of: chatViewModel.messages.count) {
-                streamingScrollTask?.cancel()
-                withAnimation {
-                    proxy.scrollTo(chatViewModel.messages.last?.id, anchor: .bottom)
+                .onChange(of: chatViewModel.currentResponse.count) {
+                    guard streamingAutoscrollEnabled else { return }
+                    guard chatViewModel.isGenerating else { return }
+                    guard streamingScrollTask == nil else { return }
+                    streamingScrollTask = Task { @MainActor in
+                        defer { streamingScrollTask = nil }
+                        try? await Task.sleep(for: .milliseconds(50))
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
+                        }
+                    }
                 }
-            }
-            .onChange(of: chatViewModel.currentResponse) {
-                guard !chatViewModel.currentResponse.isEmpty else { return }
-                streamingScrollTask?.cancel()
-                streamingScrollTask = Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(80))
-                    guard !Task.isCancelled else { return }
-                    proxy.scrollTo("streaming", anchor: .bottom)
+
+                if !scrollPinnedToBottom || !streamingAutoscrollEnabled {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Button {
+                            streamingAutoscrollEnabled = true
+                            withAnimation {
+                                proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
+                            }
+                        } label: {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.title2)
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(Color.blue, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Scroll to bottom")
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.bottom, 12)
                 }
             }
         }
@@ -321,14 +377,15 @@ struct ChatView: View {
     }
 
     private var personaBadge: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: chatViewModel.activePersona.symbolName)
+                .font(.title3)
                 .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(chatViewModel.activePersona.localizedName)
-                    .font(.caption.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                 Text(chatViewModel.activePersona.localizedDisplaySummary)
-                    .font(.caption2)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -337,12 +394,12 @@ struct ChatView: View {
                 isInputFocused = false
                 showPersonaPicker = true
             }
-            .font(.caption)
+            .font(.subheadline.weight(.semibold))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
         .padding(.horizontal)
     }
 
@@ -419,6 +476,7 @@ struct ChatView: View {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSendMessage else { return }
         inputText = ""
+        streamingAutoscrollEnabled = true
         chatViewModel.sendMessage(text)
     }
 
@@ -501,15 +559,14 @@ struct ChatView: View {
                     showAttachmentActionSheet = true
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 32, height: 32)
+                        .font(.title2.weight(.semibold))
+                        .frame(width: 34, height: 34)
                         .background(Color.secondary.opacity(0.12))
                         .foregroundStyle(.secondary)
                         .clipShape(Circle())
                 }
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Add attachment")
-                .padding(.bottom, 4)
                 .confirmationDialog(String.appLocalized("chat.add_to_conversation"), isPresented: $showAttachmentActionSheet) {
                     Button(String.appLocalized("chat.import_document")) {
                         showDocumentImporter = true
@@ -530,15 +587,14 @@ struct ChatView: View {
                         chatViewModel.toggleThinking()
                     } label: {
                         Image(systemName: chatViewModel.isThinkingEnabled ? "lightbulb.fill" : "lightbulb")
-                            .font(.system(size: 18, weight: .medium))
-                            .frame(width: 32, height: 32)
+                            .font(.title2)
+                            .frame(width: 34, height: 34)
                             .background(chatViewModel.isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12))
                             .foregroundStyle(chatViewModel.isThinkingEnabled ? .orange : .secondary)
                             .clipShape(Circle())
                     }
                     .frame(width: 44, height: 44)
                     .accessibilityLabel(chatViewModel.isThinkingEnabled ? "Disable thinking" : "Enable thinking")
-                    .padding(.bottom, 4)
                 }
 
                 InputBarView(

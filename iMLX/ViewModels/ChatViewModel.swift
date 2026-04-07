@@ -98,7 +98,8 @@ final class ChatViewModel {
             activeConversationId = id
         }
 
-        let history = messages
+        let loadedModel = resolvedCurrentModel()
+        let history = promptHistory(from: messages, for: loadedModel)
         let userMessage = ChatMessage(
             role: .user,
             content: text,
@@ -120,7 +121,6 @@ final class ChatViewModel {
         let topP = Float(persona.topP)
         let repetitionPenalty = safeRepetitionPenalty(Float(persona.repetitionPenalty))
         let systemPrompt = persona.effectiveSystemPrompt
-        let loadedModel = resolvedCurrentModel()
         let thinkingEnabled = loadedModel?.supportsThinking == true ? isThinkingEnabled : false
         let generationMaxTokens = generationTokenLimit(for: loadedModel, thinkingEnabled: thinkingEnabled)
 
@@ -133,9 +133,13 @@ final class ChatViewModel {
                 for: text,
                 documents: self.attachedDocuments
             )
+            let documentContext = self.promptDocumentContext(
+                retrievalResult.contextBlock,
+                for: loadedModel
+            )
             let effectiveSystemPrompt = self.mergedSystemPrompt(
                 base: systemPrompt,
-                documentContext: retrievalResult.contextBlock,
+                documentContext: documentContext,
                 thinkingEnabled: thinkingEnabled
             )
 
@@ -184,7 +188,7 @@ final class ChatViewModel {
                         history: history,
                         systemPrompt: self.finalAnswerSystemPrompt(
                             base: systemPrompt,
-                            documentContext: retrievalResult.contextBlock
+                            documentContext: documentContext
                         ),
                         maxTokens: Constants.Generation.finalAnswerMaxTokens,
                         temperature: temperature,
@@ -451,17 +455,60 @@ final class ChatViewModel {
     }
 
     private func generationTokenLimit(for model: ModelInfo?, thinkingEnabled: Bool) -> Int {
-        guard thinkingEnabled else { return Constants.Generation.standardMaxTokens }
-        let deviceTier = deviceCapabilityService.tier
+        let baseLimit: Int
+        if thinkingEnabled {
+            let estimatedSizeGB = model?.estimatedSizeGB ?? 0
+            if estimatedSizeGB > 0 && estimatedSizeGB <= 1.0 {
+                baseLimit = Constants.Generation.compactModelThinkingMaxTokens
+            } else if isMemoryConstrainedLargeModel(model) {
+                baseLimit = Constants.Generation.memoryConstrainedThinkingMaxTokens
+            } else {
+                baseLimit = Constants.Generation.thinkingMaxTokens
+            }
+        } else {
+            baseLimit = Constants.Generation.standardMaxTokens
+        }
+
+        guard isMemoryConstrainedLargeModel(model) else { return baseLimit }
+        if model?.supportsVision == true {
+            return min(baseLimit, memoryConstrainedVisionTokenLimit())
+        }
+        return min(baseLimit, Constants.Generation.memoryConstrainedStandardMaxTokens)
+    }
+
+    private func memoryConstrainedVisionTokenLimit() -> Int {
+        let availableMB = deviceCapabilityService.availableMemoryMB
+        if availableMB >= Constants.Generation.highMemoryHeadroomMB {
+            return Constants.Generation.memoryConstrainedVisionMaxTokens
+        }
+        if availableMB >= Constants.Generation.mediumMemoryHeadroomMB {
+            return Constants.Generation.mediumHeadroomVisionMaxTokens
+        }
+        return Constants.Generation.lowHeadroomVisionMaxTokens
+    }
+
+    private func promptHistory(from history: [ChatMessage], for model: ModelInfo?) -> [ChatMessage] {
+        guard isMemoryConstrainedLargeModel(model) else { return history }
+        return history
+            .suffix(Constants.Generation.memoryConstrainedHistoryMessageLimit)
+            .map { message in
+                var promptMessage = message
+                promptMessage.attachedImages = nil
+                return promptMessage
+            }
+    }
+
+    private func promptDocumentContext(_ context: String, for model: ModelInfo?) -> String {
+        guard isMemoryConstrainedLargeModel(model) else { return context }
+        let characterLimit = Constants.Generation.memoryConstrainedDocumentContextCharacters
+        guard context.count > characterLimit else { return context }
+        return String(context.prefix(characterLimit))
+    }
+
+    private func isMemoryConstrainedLargeModel(_ model: ModelInfo?) -> Bool {
         let estimatedSizeGB = model?.estimatedSizeGB ?? 0
         let isLargeModel = (model?.minDeviceRAM ?? 0) >= 12 || (model?.estimatedSizeGB ?? 0) >= 2.5
-        if estimatedSizeGB > 0 && estimatedSizeGB <= 1.0 {
-            return Constants.Generation.compactModelThinkingMaxTokens
-        }
-        if deviceTier <= .tier12GB && isLargeModel {
-            return Constants.Generation.memoryConstrainedThinkingMaxTokens
-        }
-        return Constants.Generation.thinkingMaxTokens
+        return deviceCapabilityService.tier <= .tier12GB && isLargeModel
     }
 
     private func safeRepetitionPenalty(_ requested: Float) -> Float {

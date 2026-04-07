@@ -198,7 +198,9 @@ final class AppState {
         Task {
             await documentLibraryService.deleteDocuments(for: id)
         }
-        if activeConversationId == id {
+        if conversations.isEmpty {
+            _ = createNewConversation()
+        } else if activeConversationId == id {
             activeConversationId = conversations.first?.id
         }
         Haptics.impactMedium()

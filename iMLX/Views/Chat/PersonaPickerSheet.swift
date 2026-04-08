@@ -25,7 +25,7 @@ struct PersonaPickerSheet: View {
                             HStack(spacing: 12) {
                                 Image(systemName: persona.symbolName)
                                     .font(.title3)
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(BrandPalette.primaryGradient)
                                     .frame(width: 28)
 
                                 VStack(alignment: .leading, spacing: 4) {

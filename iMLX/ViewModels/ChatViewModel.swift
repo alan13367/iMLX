@@ -1,5 +1,23 @@
 import Foundation
+import FoundationModels
 import SwiftUI
+
+enum ChatMemoryNoticeKind: String, Equatable {
+    case saved
+    case forgotten
+    case pending
+}
+
+struct ChatMemoryNotice: Equatable, Identifiable {
+    let id = UUID()
+    let kind: ChatMemoryNoticeKind
+    let message: String
+    let eventKey: String
+
+    var suppressionKey: String {
+        "\(kind.rawValue):\(eventKey)"
+    }
+}
 
 private enum ChatGenerationAbort: LocalizedError {
     case lowMemory(UInt64)
@@ -19,6 +37,7 @@ final class ChatViewModel {
     var isGenerating: Bool = false
     var isModelLoading: Bool = false
     var errorMessage: String?
+    var memoryNotice: ChatMemoryNotice?
     var activeConversationId: UUID?
     var isThinkingEnabled: Bool = false
 
@@ -49,6 +68,8 @@ final class ChatViewModel {
     private let appState: AppState
     private let deviceCapabilityService: DeviceCapabilityService
     private var capabilityModelId: String?
+    private var memoryExtractionTasks: [UUID: Task<Void, Never>] = [:]
+    private var suppressedMemoryNoticeKey: String?
 
     init(appState: AppState, deviceCapabilityService: DeviceCapabilityService = DeviceCapabilityService()) {
         self.appState = appState
@@ -58,6 +79,9 @@ final class ChatViewModel {
 
     deinit {
         generationTask?.cancel()
+        for task in memoryExtractionTasks.values {
+            task.cancel()
+        }
     }
 
     @MainActor
@@ -69,6 +93,8 @@ final class ChatViewModel {
         activePersonaId = appState.persona(id: conversation.personaId)?.id ?? appState.defaultPersona().id
         currentResponse = ""
         errorMessage = nil
+        memoryNotice = nil
+        suppressedMemoryNoticeKey = nil
         updateThinkingAvailability(for: resolvedCurrentModel())
     }
 
@@ -107,6 +133,7 @@ final class ChatViewModel {
             attachedDocuments: pendingDocuments.isEmpty ? nil : pendingDocuments
         )
         messages.append(userMessage)
+        let handledExplicitMemoryCommand = handleExplicitMemoryCommands(in: text, userMessage: userMessage)
 
         isGenerating = true
         currentResponse = ""
@@ -128,10 +155,21 @@ final class ChatViewModel {
             guard let self else { return }
             let startTime = Date()
             var tokenCount = 0
+            var accumulatedResponse = ""
+            var lastResponseFlush = Date.distantPast
             var shouldForceFinalAnswerFollowUp = false
             let retrievalResult = await self.appState.documentLibraryService.retrieveContext(
                 for: text,
                 documents: self.attachedDocuments
+            )
+            let memoryRetrievalResult = self.appState.retrieveMemoryContext(
+                for: text,
+                personaId: persona.id,
+                maxCharacters: self.memoryContextCharacterLimit(for: loadedModel)
+            )
+            let memoryContext = self.promptMemoryContext(
+                memoryRetrievalResult.contextBlock,
+                for: loadedModel
             )
             let documentContext = self.promptDocumentContext(
                 retrievalResult.contextBlock,
@@ -139,6 +177,7 @@ final class ChatViewModel {
             )
             let effectiveSystemPrompt = self.mergedSystemPrompt(
                 base: systemPrompt,
+                memoryContext: memoryContext,
                 documentContext: documentContext,
                 thinkingEnabled: thinkingEnabled
             )
@@ -148,6 +187,13 @@ final class ChatViewModel {
                 if availableMB > 0 && availableMB < Constants.Generation.lowMemoryAbortThresholdMB {
                     throw ChatGenerationAbort.lowMemory(availableMB)
                 }
+            }
+
+            func flushResponseToUI(force: Bool = false) {
+                let now = Date()
+                guard force || now.timeIntervalSince(lastResponseFlush) >= Constants.UI.streamingResponseFlushInterval else { return }
+                self.currentResponse = accumulatedResponse
+                lastResponseFlush = now
             }
 
             do {
@@ -165,12 +211,13 @@ final class ChatViewModel {
 
                 for try await token in stream {
                     guard !Task.isCancelled else { break }
-                    self.currentResponse += token
+                    accumulatedResponse += token
                     tokenCount += 1
+                    flushResponseToUI()
                     if tokenCount.isMultiple(of: Constants.Generation.lowMemoryCheckInterval) {
                         try enforceMemorySafety()
                         if self.shouldInterruptRepetitiveThinking(
-                            in: self.currentResponse,
+                            in: accumulatedResponse,
                             thinkingEnabled: thinkingEnabled,
                             tokenCount: tokenCount
                         ) {
@@ -180,7 +227,9 @@ final class ChatViewModel {
                     }
                 }
 
-                if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: self.currentResponse, thinkingEnabled: thinkingEnabled) {
+                flushResponseToUI(force: true)
+
+                if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: accumulatedResponse, thinkingEnabled: thinkingEnabled) {
                     let followUpStream = await self.inferenceService.generate(
                         prompt: text,
                         images: userMessage.attachedImages,
@@ -188,6 +237,7 @@ final class ChatViewModel {
                         history: history,
                         systemPrompt: self.finalAnswerSystemPrompt(
                             base: systemPrompt,
+                            memoryContext: memoryContext,
                             documentContext: documentContext
                         ),
                         maxTokens: Constants.Generation.finalAnswerMaxTokens,
@@ -200,20 +250,23 @@ final class ChatViewModel {
                     for try await token in followUpStream {
                         guard !Task.isCancelled else { break }
                         if !startedFollowUpOutput {
-                            self.currentResponse += "\n\nFinal Answer:\n"
+                            accumulatedResponse += "\n\nFinal Answer:\n"
                             startedFollowUpOutput = true
                         }
-                        self.currentResponse += token
+                        accumulatedResponse += token
                         tokenCount += 1
+                        flushResponseToUI()
                         if tokenCount.isMultiple(of: Constants.Generation.lowMemoryCheckInterval) {
                             try enforceMemorySafety()
                         }
                     }
                 }
 
+                flushResponseToUI(force: true)
+
                 let elapsed = Date().timeIntervalSince(startTime)
                 let peakMemory = await self.currentMemoryUsage()
-                let promptMessageCount = self.messages.count - (self.currentResponse.isEmpty ? 1 : 2)
+                let promptMessageCount = self.messages.count - (accumulatedResponse.isEmpty ? 1 : 2)
                 let generationStats = GenerationStats(
                     tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                     totalTokens: tokenCount,
@@ -222,25 +275,33 @@ final class ChatViewModel {
                     peakMemoryMB: peakMemory
                 )
 
-                if !self.currentResponse.isEmpty {
+                if !accumulatedResponse.isEmpty {
                     let assistantMessage = ChatMessage(
                         role: .assistant,
-                        content: self.currentResponse,
+                        content: accumulatedResponse,
                         retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: generationStats
                     )
                     self.messages.append(assistantMessage)
+                    self.scheduleMemoryExtraction(
+                        userMessage: userMessage,
+                        assistantMessage: assistantMessage,
+                        personaId: persona.id,
+                        conversationId: self.activeConversationId,
+                        isEnabled: !handledExplicitMemoryCommand
+                    )
                 }
 
                 self.saveCurrentConversation()
                 Haptics.impactMedium()
             } catch is CancellationError {
-                if !self.currentResponse.isEmpty {
+                flushResponseToUI(force: true)
+                if !accumulatedResponse.isEmpty {
                     let elapsed = Date().timeIntervalSince(startTime)
                     let peakMemory = await self.currentMemoryUsage()
                     let partialMessage = ChatMessage(
                         role: .assistant,
-                        content: self.currentResponse,
+                        content: accumulatedResponse,
                         retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
@@ -254,12 +315,13 @@ final class ChatViewModel {
                 }
                 self.saveCurrentConversation()
             } catch {
-                if !self.currentResponse.isEmpty {
+                flushResponseToUI(force: true)
+                if !accumulatedResponse.isEmpty {
                     let elapsed = Date().timeIntervalSince(startTime)
                     let peakMemory = await self.currentMemoryUsage()
                     let partialMessage = ChatMessage(
                         role: .assistant,
-                        content: self.currentResponse,
+                        content: accumulatedResponse,
                         retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
@@ -345,6 +407,8 @@ final class ChatViewModel {
             attachedDocuments.removeAll()
             currentResponse = ""
             errorMessage = nil
+            memoryNotice = nil
+            suppressedMemoryNoticeKey = nil
             activePersonaId = appState.defaultPersona().id
         }
         return id
@@ -363,6 +427,12 @@ final class ChatViewModel {
         saveCurrentConversation()
         updateThinkingAvailability(for: resolvedCurrentModel())
         Haptics.selectionChanged()
+    }
+
+    @MainActor
+    func dismissMemoryNotice() {
+        suppressedMemoryNoticeKey = memoryNotice?.suppressionKey
+        memoryNotice = nil
     }
 
     @MainActor
@@ -423,6 +493,187 @@ final class ChatViewModel {
         }
 
         appState.updateConversation(conversation)
+    }
+
+    @MainActor
+    private func handleExplicitMemoryCommands(in text: String, userMessage: ChatMessage) -> Bool {
+        var handledCommand = false
+
+        if let memoryContent = explicitRememberContent(from: text) {
+            handledCommand = true
+            let savedMemory = appState.saveMemory(
+                content: memoryContent,
+                status: .active,
+                captureType: .explicit,
+                personaId: activePersonaId,
+                sourceConversationId: activeConversationId,
+                sourceMessageId: userMessage.id
+            )
+            if savedMemory != nil {
+                showMemoryNotice(
+                    kind: .saved,
+                    message: String.appLocalized("memory.notice.saved"),
+                    eventKey: "saved:\(userMessage.id.uuidString)"
+                )
+                Haptics.notificationSuccess()
+            }
+        }
+
+        if let forgetContent = explicitForgetContent(from: text) {
+            handledCommand = true
+            let count = appState.forgetMemory(matching: forgetContent)
+            if count > 0 {
+                showMemoryNotice(
+                    kind: .forgotten,
+                    message: String(format: String.appLocalized("memory.notice.forgotten"), count),
+                    eventKey: "forgotten:\(userMessage.id.uuidString)"
+                )
+                Haptics.impactLight()
+            }
+        }
+
+        if !handledCommand,
+           let memoryContent = highConfidenceSelfFactMemoryContent(from: text) {
+            handledCommand = true
+            let savedMemory = appState.saveMemory(
+                content: memoryContent,
+                status: .active,
+                captureType: .inferred,
+                personaId: activePersonaId,
+                sourceConversationId: activeConversationId,
+                sourceMessageId: userMessage.id
+            )
+            if savedMemory != nil {
+                showMemoryNotice(
+                    kind: .saved,
+                    message: String.appLocalized("memory.notice.saved"),
+                    eventKey: "saved:\(userMessage.id.uuidString)"
+                )
+                Haptics.notificationSuccess()
+            }
+        }
+
+        return handledCommand
+    }
+
+    @MainActor
+    private func scheduleMemoryExtraction(
+        userMessage: ChatMessage,
+        assistantMessage: ChatMessage,
+        personaId: String?,
+        conversationId: UUID?,
+        isEnabled: Bool
+    ) {
+        guard isEnabled else { return }
+
+        let messageId = userMessage.id
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.memoryExtractionTasks[messageId] = nil
+            }
+            do {
+                let candidates = try await self.extractMemoryCandidates(
+                    userMessage: userMessage,
+                    assistantMessage: assistantMessage
+                )
+                guard !Task.isCancelled else { return }
+                guard !candidates.isEmpty else { return }
+
+                let pendingBefore = self.appState.memories.filter { $0.status == .pending }.count
+                for candidate in candidates {
+                    _ = self.appState.saveMemory(
+                        content: candidate,
+                        status: .pending,
+                        captureType: .inferred,
+                        personaId: personaId,
+                        sourceConversationId: conversationId,
+                        sourceMessageId: userMessage.id
+                    )
+                }
+
+                let savedCount = max(0, self.appState.memories.filter { $0.status == .pending }.count - pendingBefore)
+                if savedCount > 0 {
+                    self.showMemoryNotice(
+                        kind: .pending,
+                        message: String(format: String.appLocalized("memory.notice.pending"), savedCount),
+                        eventKey: "pending:\(messageId.uuidString)"
+                    )
+                }
+            } catch is CancellationError {
+            } catch {
+            }
+        }
+        memoryExtractionTasks[messageId] = task
+    }
+
+    @MainActor
+    private func showMemoryNotice(kind: ChatMemoryNoticeKind, message: String, eventKey: String) {
+        let notice = ChatMemoryNotice(kind: kind, message: message, eventKey: eventKey)
+        guard suppressedMemoryNoticeKey != notice.suppressionKey else { return }
+        memoryNotice = notice
+    }
+
+    private func extractMemoryCandidates(
+        userMessage: ChatMessage,
+        assistantMessage _: ChatMessage
+    ) async throws -> [String] {
+        if #available(iOS 26.0, *) {
+            if let candidates = try await extractMemoryCandidatesWithAppleFoundationModel(
+                userMessage: userMessage
+            ) {
+                return candidates
+            }
+        }
+
+        guard appState.loadedModelId != nil else { return [] }
+        return try await extractMemoryCandidatesWithLoadedMLXModel(
+            userMessage: userMessage
+        )
+    }
+
+    @available(iOS 26.0, *)
+    private func extractMemoryCandidatesWithAppleFoundationModel(
+        userMessage: ChatMessage
+    ) async throws -> [String]? {
+        let model = SystemLanguageModel(useCase: .general)
+        guard model.isAvailable else { return nil }
+
+        let session = LanguageModelSession(
+            model: model,
+            instructions: memoryExtractionSystemPrompt()
+        )
+        let response = try await session.respond(
+            to: memoryExtractionPrompt(userMessage: userMessage),
+            options: GenerationOptions(
+                sampling: .greedy,
+                temperature: 0.0,
+                maximumResponseTokens: Constants.Memory.extractionMaxTokens
+            )
+        )
+        return appState.memoryService.extractionCandidates(from: response.content)
+    }
+
+    private func extractMemoryCandidatesWithLoadedMLXModel(
+        userMessage: ChatMessage
+    ) async throws -> [String] {
+        let prompt = memoryExtractionPrompt(userMessage: userMessage)
+        let stream = await inferenceService.generate(
+            prompt: prompt,
+            history: [],
+            systemPrompt: memoryExtractionSystemPrompt(),
+            maxTokens: Constants.Memory.extractionMaxTokens,
+            temperature: 0.1,
+            topP: 0.8,
+            repetitionPenalty: 1.0
+        )
+
+        var rawOutput = ""
+        for try await token in stream {
+            guard !Task.isCancelled else { throw CancellationError() }
+            rawOutput += token
+        }
+        return appState.memoryService.extractionCandidates(from: rawOutput)
     }
 
     private func currentMemoryUsage() async -> UInt64 {
@@ -505,6 +756,18 @@ final class ChatViewModel {
         return String(context.prefix(characterLimit))
     }
 
+    private func promptMemoryContext(_ context: String, for model: ModelInfo?) -> String {
+        let characterLimit = memoryContextCharacterLimit(for: model)
+        guard context.count > characterLimit else { return context }
+        return String(context.prefix(characterLimit))
+    }
+
+    private func memoryContextCharacterLimit(for model: ModelInfo?) -> Int {
+        isMemoryConstrainedLargeModel(model)
+            ? Constants.Memory.memoryConstrainedContextCharacters
+            : Constants.Memory.maxContextCharacters
+    }
+
     private func isMemoryConstrainedLargeModel(_ model: ModelInfo?) -> Bool {
         let estimatedSizeGB = model?.estimatedSizeGB ?? 0
         let isLargeModel = (model?.minDeviceRAM ?? 0) >= 12 || (model?.estimatedSizeGB ?? 0) >= 2.5
@@ -515,11 +778,15 @@ final class ChatViewModel {
         max(1.0, min(requested, 2.0))
     }
 
-    private func mergedSystemPrompt(base: String, documentContext: String, thinkingEnabled: Bool) -> String {
+    private func mergedSystemPrompt(base: String, memoryContext: String, documentContext: String, thinkingEnabled: Bool) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
             parts.append(trimmedBase)
+        }
+        let trimmedMemoryContext = memoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMemoryContext.isEmpty {
+            parts.append(trimmedMemoryContext)
         }
         let trimmedDocumentContext = documentContext.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedDocumentContext.isEmpty {
@@ -531,11 +798,15 @@ final class ChatViewModel {
         return parts.joined(separator: "\n\n")
     }
 
-    private func finalAnswerSystemPrompt(base: String, documentContext: String) -> String {
+    private func finalAnswerSystemPrompt(base: String, memoryContext: String, documentContext: String) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
             parts.append(trimmedBase)
+        }
+        let trimmedMemoryContext = memoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMemoryContext.isEmpty {
+            parts.append(trimmedMemoryContext)
         }
         let trimmedDocumentContext = documentContext.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedDocumentContext.isEmpty {
@@ -543,6 +814,279 @@ final class ChatViewModel {
         }
         parts.append(Constants.Generation.finalAnswerOnlyInstruction)
         return parts.joined(separator: "\n\n")
+    }
+
+    private func explicitRememberContent(from text: String) -> String? {
+        captureExplicitCommand(
+            in: text,
+            patterns: [
+                #"^\s*(?:please\s+)?remember(?:\s+that)?\s+(.+)$"#,
+                #"^\s*(?:please\s+)?keep\s+in\s+mind(?:\s+that)?\s+(.+)$"#
+            ]
+        )
+    }
+
+    private func explicitForgetContent(from text: String) -> String? {
+        captureExplicitCommand(
+            in: text,
+            patterns: [
+                #"^\s*(?:please\s+)?forget(?:\s+that|\s+about)?\s+(.+)$"#,
+                #"^\s*(?:please\s+)?don't\s+remember(?:\s+that)?\s+(.+)$"#
+            ]
+        )
+    }
+
+    private func highConfidenceSelfFactMemoryContent(from text: String) -> String? {
+        if let name = captureExplicitCommand(
+            in: text,
+            minimumCharacters: 2,
+            patterns: [
+                #"^\s*(?:(?:hi|hello|hey|hola)[,!\.\s]+)?(?:my\s+name\s+is|my\s+name(?:'|’)?s|i(?:'|’)?m\s+called|i\s+am\s+called)\s+(.+)$"#
+            ]
+        ) {
+            let phrase = normalizedMemoryPhrase(stableSelfFactPhrase(from: name))
+            guard !phrase.isEmpty else { return nil }
+            return "The user's name is \(phrase)."
+        }
+
+        if let fandom = highConfidenceFandomTarget(from: text) {
+            let phrase = "\(fandom) fan"
+            return "The user is \(article(for: phrase)) \(phrase)."
+        }
+
+        if let occupation = captureExplicitCommand(
+            in: text,
+            minimumCharacters: 3,
+            patterns: [
+                #"^\s*(?:(?:hi|hello|hey|hola)[,!\.\s]+)?i(?:'|’)?m\s+an?\s+([a-z][a-z0-9\s\-\/&,]+)$"#,
+                #"^\s*(?:(?:hi|hello|hey|hola)[,!\.\s]+)?i\s+am\s+an?\s+([a-z][a-z0-9\s\-\/&,]+)$"#,
+                #"^\s*i\s+work\s+as\s+(?:an?\s+)?([a-z][a-z0-9\s\-\/&,]+)$"#,
+                #"^\s*my\s+(?:job|profession|occupation|role)\s+is\s+(?:an?\s+)?([a-z][a-z0-9\s\-\/&,]+)$"#
+            ]
+        ) {
+            let phrase = normalizedMemoryPhrase(stableSelfFactPhrase(from: occupation))
+            guard !phrase.isEmpty, !isLowConfidenceSelfDescription(phrase) else { return nil }
+            return "The user is \(article(for: phrase)) \(phrase)."
+        }
+
+        return nil
+    }
+
+    private func highConfidenceFandomTarget(from text: String) -> String? {
+        if let explicitTarget = captureExplicitCommand(
+            in: text,
+            minimumCharacters: 2,
+            patterns: [
+                #".*\bi(?:'|’)?m\s+(?:an?\s+)?(?:(?:big|huge|massive|lifelong)\s+)?fan\s+of\s+([A-Za-z0-9][A-Za-z0-9\s&'\-\.]+)$"#,
+                #".*\bi\s+am\s+(?:an?\s+)?(?:(?:big|huge|massive|lifelong)\s+)?fan\s+of\s+([A-Za-z0-9][A-Za-z0-9\s&'\-\.]+)$"#
+            ]
+        ) {
+            let target = normalizedMemoryPhrase(stableSelfFactPhrase(from: explicitTarget))
+            return target.isEmpty ? nil : target
+        }
+
+        guard let fanRange = rangeOfFanDeclaration(in: text) else { return nil }
+        return fandomTargetFromContext(String(text[..<fanRange.lowerBound]))
+    }
+
+    private func rangeOfFanDeclaration(in text: String) -> Range<String.Index>? {
+        let pattern = #"\bi(?:'|’)?m\s+(?:an?\s+)?(?:(?:big|huge|massive|lifelong)\s+)?fan\b|\bi\s+am\s+(?:an?\s+)?(?:(?:big|huge|massive|lifelong)\s+)?fan\b"#
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: text, range: range),
+              let declarationRange = Range(match.range, in: text) else {
+            return nil
+        }
+        return declarationRange
+    }
+
+    private func fandomTargetFromContext(_ context: String) -> String? {
+        let pattern = #"\b(?:[A-Z][A-Za-z0-9]+|[A-Z]{2,})(?:\s+(?:[A-Z][A-Za-z0-9]+|[A-Z]{2,}))*\b"#
+        let range = NSRange(context.startIndex..<context.endIndex, in: context)
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              !context.isEmpty else {
+            return nil
+        }
+
+        let ignoredCandidates = Set([
+            "what",
+            "who",
+            "when",
+            "where",
+            "why",
+            "how",
+            "which",
+            "tell",
+            "can",
+            "could",
+            "would",
+            "please"
+        ])
+
+        let matches = regex.matches(in: context, range: range)
+        for match in matches.reversed() {
+            guard let matchRange = Range(match.range, in: context) else { continue }
+            let candidate = normalizedMemoryPhrase(String(context[matchRange]))
+            guard !candidate.isEmpty, !ignoredCandidates.contains(candidate.lowercased()) else { continue }
+            return candidate
+        }
+
+        return nil
+    }
+
+    private func captureExplicitCommand(
+        in text: String,
+        minimumCharacters: Int = Constants.Memory.minimumCandidateCharacters,
+        patterns: [String]
+    ) -> String? {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                  let match = regex.firstMatch(in: text, range: range),
+                  match.numberOfRanges > 1,
+                  let capturedRange = Range(match.range(at: 1), in: text) else {
+                continue
+            }
+            let captured = text[capturedRange]
+                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!\"'")))
+            if captured.count >= minimumCharacters {
+                return String(captured)
+            }
+        }
+        return nil
+    }
+
+    private func normalizedMemoryPhrase(_ phrase: String) -> String {
+        phrase
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!?,;:\"'")))
+    }
+
+    private func stableSelfFactPhrase(from phrase: String) -> String {
+        let markerTrimmedPhrase = phraseByDroppingRequestTailMarkers(from: phrase)
+        let requestTailPatterns = [
+            #"\s+(?:and|but|so|because)\s+(?:i(?:'|’)?m|i\s+am|i(?:'|’)?d|i\s+would|i\s+want|i\s+need|i\s+like|i\s+would\s+like|please|can\s+you|could\s+you|would\s+you|you|we)\b.*$"#,
+            #"\s+(?:and|but|so|because)\s+(?:help|use|prefer|would|want|need|like)\b.*$"#,
+            #"\s*,\s*(?:and|but|so|because)\s+.*$"#
+        ]
+
+        return requestTailPatterns.reduce(markerTrimmedPhrase) { partial, pattern in
+            partial.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: [.caseInsensitive, .regularExpression]
+            )
+        }
+    }
+
+    private func phraseByDroppingRequestTailMarkers(from phrase: String) -> String {
+        let normalized = phrase.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        let lowercased = normalized.lowercased()
+        let markers = [
+            " and i would like ",
+            " and i'd like ",
+            " and i want ",
+            " and i need ",
+            " and would like ",
+            " and want ",
+            " and need ",
+            " and please ",
+            ", i would like ",
+            ", i'd like ",
+            ", i want ",
+            ", i need ",
+            ", would like ",
+            ", want ",
+            ", need ",
+            ", please ",
+            " but i would like ",
+            " but i'd like ",
+            " but i want ",
+            " but i need ",
+            " but would like ",
+            " but want ",
+            " but need ",
+            " so i would like ",
+            " so i'd like ",
+            " so i want ",
+            " so i need ",
+            " so would like ",
+            " so want ",
+            " so need "
+        ]
+
+        let firstMarkerRange = markers
+            .compactMap { marker in lowercased.range(of: marker) }
+            .min { left, right in left.lowerBound < right.lowerBound }
+
+        guard let firstMarkerRange else { return normalized }
+        return String(normalized[..<firstMarkerRange.lowerBound])
+    }
+
+    private func isLowConfidenceSelfDescription(_ phrase: String) -> Bool {
+        let normalized = phrase.lowercased()
+        let blockedTerms = [
+            "ready",
+            "here",
+            "fine",
+            "good",
+            "ok",
+            "okay",
+            "sure",
+            "happy",
+            "sad",
+            "tired",
+            "hungry",
+            "busy",
+            "bored"
+        ]
+        return blockedTerms.contains(normalized)
+            || normalized.contains("looking for")
+            || normalized.contains("trying to")
+            || normalized.contains("going to")
+    }
+
+    private func article(for phrase: String) -> String {
+        let trimmedPhrase = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let firstWord = trimmedPhrase.split(separator: " ").first else {
+            return "a"
+        }
+
+        let firstWordText = String(firstWord)
+        let isInitialism = firstWordText.count > 1 && firstWordText == firstWordText.uppercased()
+        if isInitialism, ["A", "E", "F", "H", "I", "L", "M", "N", "O", "R", "S", "X"].contains(String(firstWordText.prefix(1))) {
+            return "an"
+        }
+
+        guard let firstCharacter = trimmedPhrase.lowercased().first else { return "a" }
+        return ["a", "e", "i", "o", "u"].contains(firstCharacter) ? "an" : "a"
+    }
+
+    private func memoryExtractionSystemPrompt() -> String {
+        """
+        You write durable user memories for a private on-device assistant. You are not a topic tagger.
+        Return only a compact JSON array of strings.
+        Read only the provided user message and decide whether it contains anything worth remembering for future conversations.
+        Use only stable user facts, preferences, likes, dislikes, fandoms, goals, ongoing projects, names, roles, or constraints.
+        Rewrite every memory as a complete third-person sentence starting with "The user..." or "The user's...".
+        Example: "I'm a software engineer" becomes "The user is a software engineer."
+        Example: "I'm a FC Barcelona fan" becomes "The user is an FC Barcelona fan."
+        Example: "I love Nintendo games" becomes "The user likes Nintendo video games."
+        Example: "I want to learn Swift" becomes "The user wants to learn Swift."
+        If a user message mixes a stable fact with a request, save only the stable fact.
+        Do not output labels, topics, categories, keywords, or request types like "clarification request" or "sports recommendation".
+        Do not infer a preference just because the user asks about a topic.
+        Do not include temporary requests, assistant facts, generic advice, secrets, or anything uncertain.
+        If there is nothing worth remembering, return [].
+        Keep each memory under 22 words.
+        """
+    }
+
+    private func memoryExtractionPrompt(userMessage: ChatMessage) -> String {
+        """
+        User message only:
+        \(userMessage.content)
+        """
     }
 
     private func shouldRunFinalAnswerFollowUp(for content: String, thinkingEnabled: Bool) -> Bool {

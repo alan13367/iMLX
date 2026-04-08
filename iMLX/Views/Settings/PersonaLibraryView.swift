@@ -77,7 +77,7 @@ struct PersonaLibraryView: View {
             HStack(spacing: 12) {
                 Image(systemName: persona.symbolName)
                     .font(.title3)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(BrandPalette.primaryGradient)
                     .frame(width: 30)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -91,8 +91,7 @@ struct PersonaLibraryView: View {
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(.fill.tertiary)
-                                .clipShape(Capsule())
+                                .liquidGlassSurface(in: Capsule(), fallback: AnyShapeStyle(.fill.tertiary))
                         }
                     }
 

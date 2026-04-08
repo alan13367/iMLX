@@ -11,9 +11,11 @@ final class AppState {
     let downloadService = ModelDownloadService()
     let manifestService = ManifestService()
     let personaService = PersonaService()
+    let memoryService = MemoryService()
     let documentLibraryService = DocumentLibraryService()
     var conversations: [Conversation] = []
     var personas: [Persona] = []
+    var memories: [UserMemory] = []
     var activeConversationId: UUID?
     var preferredAppLanguageCode: String?
 
@@ -22,6 +24,8 @@ final class AppState {
     init() {
         preferredAppLanguageCode = userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
         loadPersonas()
+        loadMemories()
+        loadConversationsFromDisk()
         restoreModelState()
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -155,6 +159,12 @@ final class AppState {
         reconcileActiveConversationForChat()
     }
 
+    private func loadConversationsFromDisk() {
+        conversations = conversationService.listAll()
+        migrateConversationsWithoutPersona()
+        reconcileActiveConversationForChat()
+    }
+
     nonisolated private func fetchConversationsInBackground() async -> [Conversation] {
         return await Task.detached {
             self.conversationService.listAll()
@@ -163,6 +173,10 @@ final class AppState {
 
     func loadPersonas() {
         personas = personaService.listAll()
+    }
+
+    func loadMemories() {
+        memories = memoryService.listAll()
     }
 
     private func reconcileActiveConversationForChat() {
@@ -260,6 +274,90 @@ final class AppState {
         }
 
         loadPersonas()
+    }
+
+    @discardableResult
+    func saveMemory(
+        content: String,
+        status: UserMemoryStatus,
+        captureType: UserMemoryCaptureType,
+        personaId: String? = nil,
+        category: String? = nil,
+        sourceConversationId: UUID? = nil,
+        sourceMessageId: UUID? = nil
+    ) -> UserMemory? {
+        let memory = memoryService.upsert(
+            content: content,
+            status: status,
+            captureType: captureType,
+            personaId: personaId,
+            category: category,
+            sourceConversationId: sourceConversationId,
+            sourceMessageId: sourceMessageId
+        )
+        loadMemories()
+        return memory
+    }
+
+    func updateMemory(_ memory: UserMemory) {
+        _ = memoryService.update(memory)
+        loadMemories()
+    }
+
+    func acceptMemory(id: UUID) {
+        _ = memoryService.setStatus(id: id, status: .active)
+        loadMemories()
+    }
+
+    func rejectMemory(id: UUID) {
+        _ = memoryService.setStatus(id: id, status: .archived)
+        loadMemories()
+    }
+
+    func deleteMemory(id: UUID) {
+        memoryService.delete(id: id)
+        loadMemories()
+    }
+
+    func clearAllMemories() {
+        memoryService.clearAll()
+        loadMemories()
+    }
+
+    @discardableResult
+    func forgetMemory(matching query: String) -> Int {
+        let count = memoryService.archiveMatching(query)
+        loadMemories()
+        return count
+    }
+
+    func retrieveMemoryContext(
+        for query: String,
+        personaId: String?,
+        maxCharacters: Int = Constants.Memory.maxContextCharacters
+    ) -> MemoryRetrievalResult {
+        let selectedMemories = memoryService.retrieveActiveMemories(
+            for: query,
+            personaId: personaId,
+            limit: Constants.Memory.maxRetrievedMemories,
+            maxCharacters: maxCharacters
+        )
+        guard !selectedMemories.isEmpty else {
+            return MemoryRetrievalResult(contextBlock: "", memories: [])
+        }
+
+        memoryService.markUsed(ids: selectedMemories.map(\.id))
+        loadMemories()
+
+        let contextLines = selectedMemories.map { "- \($0.content)" }
+        let contextBlock = """
+        Relevant persistent user memories:
+        These memories were retrieved as potentially relevant. Use only the ones that directly help the current request, ignore any that do not fit, and do not mention stored memories unless the user asks.
+
+        \(contextLines.joined(separator: "\n"))
+        """
+
+        return MemoryRetrievalResult(contextBlock: contextBlock, memories: selectedMemories)
     }
 
     func updateConversation(_ conversation: Conversation) {

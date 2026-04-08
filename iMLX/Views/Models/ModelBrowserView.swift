@@ -28,22 +28,6 @@ struct ModelBrowserView: View {
                     familyRow(family: group.family, models: group.models)
                 }
             }
-
-            if !viewModel.incompatibleModels.isEmpty {
-                Section(String.appLocalized("models.section.low_memory")) {
-                    ForEach(viewModel.incompatibleModels) { model in
-                        ModelCardView(
-                            model: model,
-                            progress: 0,
-                            isDownloading: false,
-                            anyModelDownloading: false,
-                            onDownload: {},
-                            onDelete: {}
-                        )
-                        .dimmed(true)
-                    }
-                }
-            }
         }
         .navigationTitle(String.appLocalized("models.browser.title"))
         .task {
@@ -53,12 +37,7 @@ struct ModelBrowserView: View {
 
     private func familyRow(family: ModelInfo.ModelFamily, models: [ModelInfo]) -> some View {
         HStack(spacing: 12) {
-            Image(family.logoName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 40, height: 40)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+            ModelLogoView(family: family)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(family.displayName)
@@ -102,6 +81,11 @@ struct FamilyModelsView: View {
 
     var body: some View {
         List {
+            familyDescriptionCard
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 12, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
             ForEach(models) { model in
                 ModelCardView(
                     model: model,
@@ -119,10 +103,24 @@ struct FamilyModelsView: View {
         .navigationTitle(family.displayName)
         .navigationBarTitleDisplayMode(.inline)
     }
-}
 
-private extension View {
-    func dimmed(_ dimmed: Bool) -> some View {
-        self.opacity(dimmed ? 0.4 : 1.0)
+    private var familyDescriptionCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(family.displayName) Family")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text(family.familyDescription)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .liquidGlassSurface(
+            tint: BrandPalette.navy.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            fallback: AnyShapeStyle(.thinMaterial)
+        )
     }
 }

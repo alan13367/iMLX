@@ -1,6 +1,6 @@
 import Foundation
 
-struct ChatMessage: Identifiable, Codable {
+struct ChatMessage: Identifiable, Codable, Equatable {
     let id: UUID
     let role: Role
     var content: String
@@ -10,7 +10,7 @@ struct ChatMessage: Identifiable, Codable {
     var generationStats: GenerationStats?
     let timestamp: Date
 
-    enum Role: String, Codable {
+    enum Role: String, Codable, Equatable {
         case user
         case assistant
         case system

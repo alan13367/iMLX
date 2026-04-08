@@ -2,7 +2,17 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 
+private enum ChatUtilitySheet: String, Identifiable {
+    case conversations
+    case models
+    case memoryLibrary
+    case settings
+
+    var id: String { rawValue }
+}
+
 struct ChatView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var chatViewModel: ChatViewModel
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
@@ -13,7 +23,7 @@ struct ChatView: View {
     @State private var showPhotoLibrary = false
     @State private var showDocumentImporter = false
     @State private var selectedPhotoItem: PhotosPickerItem?
-    @State private var showConversationHistory = false
+    @State private var utilitySheet: ChatUtilitySheet?
     @State private var streamingScrollTask: Task<Void, Never>?
     @State private var streamingAutoscrollEnabled = true
     @State private var scrollPinnedToBottom = true
@@ -35,13 +45,31 @@ struct ChatView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    isInputFocused = false
-                    showConversationHistory = true
+                Menu {
+                    Button {
+                        isInputFocused = false
+                        utilitySheet = .conversations
+                    } label: {
+                        Label(String.appLocalized("conversation.title.chats"), systemImage: "bubble.left.and.bubble.right")
+                    }
+
+                    Button {
+                        isInputFocused = false
+                        utilitySheet = .models
+                    } label: {
+                        Label(String.appLocalized("tab.models"), systemImage: "arrow.down.circle")
+                    }
+
+                    Button {
+                        isInputFocused = false
+                        utilitySheet = .settings
+                    } label: {
+                        Label(String.appLocalized("tab.settings"), systemImage: "gearshape")
+                    }
                 } label: {
                     Image(systemName: "line.3.horizontal")
                 }
-                .accessibilityLabel("Open conversations")
+                .accessibilityLabel("Open app menu")
             }
             ToolbarItem(placement: .principal) {
                 modelStatus
@@ -83,6 +111,7 @@ struct ChatView: View {
                 isInputFocused = false
             }
         )
+        .simultaneousGesture(openConversationHistoryGesture)
         .task(id: appState.selectedModel?.id) {
             if let model = appState.selectedModel,
                appState.loadedModelId != model.id {
@@ -135,19 +164,8 @@ struct ChatView: View {
                 chatViewModel.errorMessage = error.localizedDescription
             }
         }
-        .sheet(isPresented: $showConversationHistory) {
-            NavigationStack {
-                ConversationListView(appState: appState, presentation: .modalSheet) { _ in
-                    showConversationHistory = false
-                }
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button(String.appLocalized("common.done")) {
-                            showConversationHistory = false
-                        }
-                    }
-                }
-            }
+        .sheet(item: $utilitySheet) { sheet in
+            utilitySheetView(sheet)
         }
         .sheet(isPresented: $showPersonaPicker) {
             PersonaPickerSheet(
@@ -176,6 +194,51 @@ struct ChatView: View {
             return conversation.displayTitle
         }
         return "iMLX"
+    }
+
+    private var openConversationHistoryGesture: some Gesture {
+        DragGesture(minimumDistance: 24, coordinateSpace: .local)
+            .onEnded { value in
+                guard shouldOpenConversationHistory(from: value) else { return }
+                isInputFocused = false
+                utilitySheet = .conversations
+            }
+    }
+
+    private func shouldOpenConversationHistory(from value: DragGesture.Value) -> Bool {
+        guard utilitySheet == nil else { return false }
+        guard value.startLocation.x <= 56 else { return false }
+
+        let horizontalDistance = value.translation.width
+        let verticalDistance = abs(value.translation.height)
+        guard horizontalDistance > 90 else { return false }
+        guard horizontalDistance > verticalDistance * 1.6 else { return false }
+        return value.predictedEndTranslation.width > 120
+    }
+
+    @ViewBuilder
+    private func utilitySheetView(_ sheet: ChatUtilitySheet) -> some View {
+        NavigationStack {
+            switch sheet {
+            case .conversations:
+                ConversationListView(appState: appState, presentation: .modalSheet) { _ in
+                    utilitySheet = nil
+                }
+            case .models:
+                ModelBrowserView(appState: appState)
+            case .memoryLibrary:
+                MemoryLibraryView(appState: appState)
+            case .settings:
+                SettingsView(appState: appState)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(String.appLocalized("common.done")) {
+                    utilitySheet = nil
+                }
+            }
+        }
     }
 
     private var modelStatus: some View {
@@ -218,13 +281,7 @@ struct ChatView: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(.thinMaterial)
-            .overlay {
-                Capsule()
-                    .strokeBorder(.secondary.opacity(0.18), lineWidth: 1)
-            }
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+            .liquidGlassSurface(in: Capsule(), interactive: true)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
@@ -270,6 +327,7 @@ struct ChatView: View {
                     VStack(spacing: 12) {
                         ForEach(chatViewModel.messages) { message in
                             MessageBubbleView(message: message)
+                                .equatable()
                                 .id(message.id)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
@@ -342,9 +400,14 @@ struct ChatView: View {
                             Image(systemName: "arrow.down.circle.fill")
                                 .font(.title2)
                                 .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .frame(width: 44, height: 44)
-                                .background(Color.blue, in: Circle())
+                                .liquidGlassSurface(
+                                    tint: BrandPalette.accent.opacity(0.28),
+                                    in: Circle(),
+                                    fallback: AnyShapeStyle(BrandPalette.primaryGradient),
+                                    interactive: true
+                                )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Scroll to bottom")
@@ -357,9 +420,19 @@ struct ChatView: View {
     }
 
     private var bottomAccessoryStack: some View {
+        bottomAccessoryContent
+            .liquidGlassContainer(spacing: 16)
+            .padding(.top, 8)
+    }
+
+    private var bottomAccessoryContent: some View {
         VStack(spacing: 8) {
             if let errorMessage = chatViewModel.errorMessage {
                 errorBanner(message: errorMessage)
+            }
+
+            if let memoryNotice = chatViewModel.memoryNotice {
+                memoryNoticeCard(memoryNotice)
             }
 
             if chatViewModel.isModelLoading {
@@ -370,37 +443,44 @@ struct ChatView: View {
                 generatingIndicator
             }
 
-            personaBadge
             inputBar
         }
-        .padding(.top, 8)
     }
 
-    private var personaBadge: some View {
+    private var composerPersonaRow: some View {
         HStack(spacing: 10) {
             Image(systemName: chatViewModel.activePersona.symbolName)
-                .font(.title3)
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 3) {
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BrandPalette.primaryGradient)
+                .frame(width: 30, height: 30)
+                .liquidGlassSurface(
+                    tint: BrandPalette.accent.opacity(0.14),
+                    in: Circle(),
+                    fallback: AnyShapeStyle(BrandPalette.accent.opacity(0.10))
+                )
+            VStack(alignment: .leading, spacing: 2) {
                 Text(chatViewModel.activePersona.localizedName)
                     .font(.subheadline.weight(.semibold))
-                Text(chatViewModel.activePersona.localizedDisplaySummary)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if !chatViewModel.activePersona.localizedDisplaySummary.isEmpty {
+                    Text(chatViewModel.activePersona.localizedDisplaySummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
-            Spacer()
-            Button(String.appLocalized("common.change")) {
+            Spacer(minLength: 8)
+            Button {
                 isInputFocused = false
                 showPersonaPicker = true
+            } label: {
+                Text(String.appLocalized("common.change"))
+                    .font(.caption.weight(.semibold))
             }
-            .font(.subheadline.weight(.semibold))
+            .liquidGlassButtonStyle(tint: BrandPalette.accent)
+            .controlSize(.small)
+            .frame(minHeight: 36)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .padding(.horizontal)
     }
 
     private var modelLoadingCard: some View {
@@ -418,10 +498,10 @@ struct ChatView: View {
             }
             Spacer()
         }
+        .frame(maxWidth: bottomChromeMaxWidth)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .liquidGlassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.horizontal)
     }
 
@@ -434,8 +514,11 @@ struct ChatView: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
+        .frame(maxWidth: bottomChromeMaxWidth)
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
+        .liquidGlassSurface(in: Capsule())
+        .padding(.horizontal)
     }
 
     private func errorBanner(message: String) -> some View {
@@ -465,10 +548,78 @@ struct ChatView: View {
             .frame(width: 44, height: 44)
             .accessibilityLabel("Dismiss error")
         }
+        .frame(maxWidth: bottomChromeMaxWidth)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isOOMError(message) ? .red.opacity(0.1) : .orange.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .liquidGlassSurface(
+            tint: isOOMError(message) ? .red.opacity(0.18) : .orange.opacity(0.18),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous),
+            fallback: AnyShapeStyle(isOOMError(message) ? Color.red.opacity(0.1) : Color.orange.opacity(0.12))
+        )
+        .padding(.horizontal)
+    }
+
+    private func memoryNoticeCard(_ notice: ChatMemoryNotice) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: notice.kind == .pending ? "brain.head.profile" : "checkmark.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(notice.kind == .pending ? BrandPalette.cyan : .green)
+                .frame(width: 30, height: 30)
+                .liquidGlassSurface(
+                    tint: notice.kind == .pending ? BrandPalette.cyan.opacity(0.18) : Color.green.opacity(0.18),
+                    in: Circle(),
+                    fallback: AnyShapeStyle(notice.kind == .pending ? BrandPalette.cyan.opacity(0.1) : Color.green.opacity(0.1))
+                )
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(memoryNoticeTitle(for: notice))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(notice.message)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if notice.kind == .pending {
+                    Button(String.appLocalized("settings.manage_memory")) {
+                        isInputFocused = false
+                        utilitySheet = .memoryLibrary
+                    }
+                    .liquidGlassButtonStyle(tint: BrandPalette.cyan)
+                    .controlSize(.small)
+                    .frame(minHeight: 32)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                chatViewModel.dismissMemoryNotice()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .liquidGlassSurface(
+                        in: Circle(),
+                        fallback: AnyShapeStyle(Color.secondary.opacity(0.1)),
+                        interactive: true
+                    )
+            }
+            .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel(String.appLocalized("memory.notice.dismiss"))
+        }
+        .frame(maxWidth: bottomChromeMaxWidth, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .liquidGlassSurface(
+            tint: notice.kind == .pending ? BrandPalette.cyan.opacity(0.16) : Color.green.opacity(0.14),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous),
+            fallback: AnyShapeStyle(notice.kind == .pending ? BrandPalette.cyan.opacity(0.1) : Color.green.opacity(0.08))
+        )
         .padding(.horizontal)
     }
 
@@ -488,15 +639,26 @@ struct ChatView: View {
         return lower.contains("low memory") || lower.contains("poca memoria") || lower.contains("内存偏低")
     }
 
+    private func memoryNoticeTitle(for notice: ChatMemoryNotice) -> String {
+        switch notice.kind {
+        case .saved, .forgotten:
+            "Memory"
+        case .pending:
+            String.appLocalized("memory.section.pending")
+        }
+    }
+
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 10) {
+            composerPersonaRow
+
             if !chatViewModel.pendingDocuments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(chatViewModel.pendingDocuments) { document in
                             HStack(spacing: 6) {
                                 Image(systemName: iconName(for: document.kind))
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(BrandPalette.cyan)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(document.displayName)
                                         .font(.caption.weight(.semibold))
@@ -516,10 +678,14 @@ struct ChatView: View {
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 8)
-                            .background(.fill.tertiary)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .liquidGlassSurface(
+                                tint: BrandPalette.cyan.opacity(0.18),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                fallback: AnyShapeStyle(BrandPalette.cyan.opacity(0.1))
+                            )
                         }
                     }
+                    .liquidGlassContainer(spacing: 10)
                     .padding(.horizontal, 4)
                 }
             }
@@ -528,25 +694,19 @@ struct ChatView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(Array(chatViewModel.pendingImages.enumerated()), id: \.offset) { index, imageData in
-                            if let uiImage = UIImage(data: imageData) {
-                                ZStack(alignment: .topTrailing) {
-                                    Image(uiImage: uiImage)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 60, height: 60)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    
-                                    Button {
-                                        chatViewModel.pendingImages.remove(at: index)
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundStyle(.white, .black.opacity(0.6))
-                                            .font(.caption)
-                                    }
-                                    .frame(width: 44, height: 44)
-                                    .accessibilityLabel("Remove image")
-                                    .offset(x: 4, y: -4)
+                            ZStack(alignment: .topTrailing) {
+                                AttachmentImageThumbnailView(imageData: imageData, size: 60, cornerRadius: 8)
+
+                                Button {
+                                    chatViewModel.pendingImages.remove(at: index)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.white, .black.opacity(0.6))
+                                        .font(.caption)
                                 }
+                                .frame(width: 44, height: 44)
+                                .accessibilityLabel("Remove image")
+                                .offset(x: 4, y: -4)
                             }
                         }
                     }
@@ -559,11 +719,15 @@ struct ChatView: View {
                     showAttachmentActionSheet = true
                 } label: {
                     Image(systemName: "plus")
-                        .font(.title2.weight(.semibold))
-                        .frame(width: 34, height: 34)
-                        .background(Color.secondary.opacity(0.12))
-                        .foregroundStyle(.secondary)
-                        .clipShape(Circle())
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                        .foregroundStyle(BrandPalette.accent)
+                        .liquidGlassSurface(
+                            tint: BrandPalette.accent.opacity(0.12),
+                            in: Circle(),
+                            fallback: AnyShapeStyle(BrandPalette.accent.opacity(0.10)),
+                            interactive: true
+                        )
                 }
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Add attachment")
@@ -587,11 +751,15 @@ struct ChatView: View {
                         chatViewModel.toggleThinking()
                     } label: {
                         Image(systemName: chatViewModel.isThinkingEnabled ? "lightbulb.fill" : "lightbulb")
-                            .font(.title2)
-                            .frame(width: 34, height: 34)
-                            .background(chatViewModel.isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12))
+                            .font(.title3)
+                            .frame(width: 32, height: 32)
                             .foregroundStyle(chatViewModel.isThinkingEnabled ? .orange : .secondary)
-                            .clipShape(Circle())
+                            .liquidGlassSurface(
+                                tint: chatViewModel.isThinkingEnabled ? .orange.opacity(0.2) : nil,
+                                in: Circle(),
+                                fallback: AnyShapeStyle(chatViewModel.isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)),
+                                interactive: true
+                            )
                     }
                     .frame(width: 44, height: 44)
                     .accessibilityLabel(chatViewModel.isThinkingEnabled ? "Disable thinking" : "Enable thinking")
@@ -607,9 +775,20 @@ struct ChatView: View {
                 )
             }
         }
+        .frame(maxWidth: bottomChromeMaxWidth)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .liquidGlassSurface(
+            tint: BrandPalette.navy.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous),
+            fallback: AnyShapeStyle(.thinMaterial)
+        )
         .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.bar)
+    }
+
+    private var bottomChromeMaxWidth: CGFloat {
+        horizontalSizeClass == .regular ? 760 : .infinity
     }
 
     private var canSendMessage: Bool {
@@ -617,12 +796,16 @@ struct ChatView: View {
     }
 
     private var supportedDocumentTypes: [UTType] {
+        Self.cachedSupportedDocumentTypes
+    }
+
+    private static let cachedSupportedDocumentTypes: [UTType] = {
         var types: [UTType] = [.pdf, .plainText, .commaSeparatedText]
         if let markdown = UTType(filenameExtension: "md") {
             types.append(markdown)
         }
         return types
-    }
+    }()
 
     private func iconName(for kind: ConversationDocumentKind) -> String {
         switch kind {

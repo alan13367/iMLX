@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="iMLX/Assets.xcassets/BrandLogo.imageset/brand-logo.png" alt="iMLX" width="72" height="72" />
+  <img src="iMLX/Assets.xcassets/AppIcon.appiconset/icon-1024.png" alt="iMLX app icon" width="96" height="96" />
 </p>
 
 <p align="center"><strong>iMLX</strong></p>
@@ -23,7 +23,7 @@ iMLX is a native app for streaming, multi-turn chat with curated MLX models: dow
 | **Personas** | Reusable roles (goal, tone, optional default model); editor under **Settings → Personas**; per-chat persona + picker; starters + custom personas |
 | **Chat** | Saved conversations, history from the toolbar, chat-first launch |
 | **Thinking** | Per-model toggle where the model supports `enable_thinking` |
-| **UX** | Branded launch/loading; EN / ES / zh-Hans + optional in-app language |
+| **UX** | Chat-first launch, brain-logo icon, cyan/magenta brand accents, EN / ES / zh-Hans + optional in-app language |
 
 ---
 
@@ -31,6 +31,7 @@ iMLX is a native app for streaming, multi-turn chat with curated MLX models: dow
 
 - **Personas** replace a single global system prompt: choose or create a persona per chat; manage under **Settings → Personas** (guided fields or advanced sampling).
 - Chat opens into the current conversation; use the top-left list control for history.
+- The README and asset catalog use the same full-bleed high-resolution brain-logo icon so installed app icons do not show white padding.
 - Manifest validation prunes stale download entries; model paths tolerate symlinks and cache snapshots; broken links auto-heal.
 - Simulator shows a clear “unsupported” path instead of failing inside MLX load.
 - Generation uses safety caps, memory-aware stops, thinking budgets by model size, repetitive-thinking detection, and an answer-only follow-up when needed.

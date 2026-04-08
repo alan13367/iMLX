@@ -1,66 +1,24 @@
 import SwiftUI
-import MLX
 
 @main
 struct iMLXApp: App {
     @State private var appState = AppState()
-    @State private var isShowingLaunchScreen = true
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                MainTabView(appState: appState)
-                    .opacity(isShowingLaunchScreen ? 0 : 1)
-
-                if isShowingLaunchScreen {
-                    BrandLoadingView(
-                        title: "iMLX",
-                        subtitle: String.appLocalized("brand.subtitle")
-                    )
-                    .transition(.opacity)
-                }
-            }
-            .environment(\.locale, appState.effectiveLocale)
-            .task {
-                let minimumBrandDuration: Duration = .seconds(1.2)
-                let launchStart = ContinuousClock.now
-                await appState.loadConversations()
-
-                let elapsed = launchStart.duration(to: ContinuousClock.now)
-                if elapsed < minimumBrandDuration {
-                    try? await Task.sleep(for: minimumBrandDuration - elapsed)
-                }
-
-                await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.35)) {
-                        isShowingLaunchScreen = false
-                    }
-                }
-            }
+            AppRootView(appState: appState)
+                .environment(\.locale, appState.effectiveLocale)
+                .tint(BrandPalette.accent)
         }
     }
 }
 
-struct MainTabView: View {
+struct AppRootView: View {
     let appState: AppState
 
     var body: some View {
         let _ = appState.preferredAppLanguageCode
-        TabView {
-            Tab(String.appLocalized("tab.chat"), systemImage: "bubble.left.and.bubble.right") {
-                ChatRootView(appState: appState)
-            }
-            Tab(String.appLocalized("tab.models"), systemImage: "arrow.down.circle") {
-                NavigationStack {
-                    ModelBrowserView(appState: appState)
-                }
-            }
-            Tab(String.appLocalized("tab.settings"), systemImage: "gearshape") {
-                NavigationStack {
-                    SettingsView(appState: appState)
-                }
-            }
-        }
+        ChatRootView(appState: appState)
     }
 }
 

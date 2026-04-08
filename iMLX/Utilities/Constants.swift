@@ -98,7 +98,7 @@ enum Constants {
                 family: .gemma3,
                 logoName: "gemma_logo",
                 supportsThinking: false,
-                supportsVision: true,
+                supportsVision: false,
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
@@ -116,12 +116,96 @@ enum Constants {
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
-                id: "lfm2-1.5b-4bit",
-                displayName: "LFM2 1.5B",
-                huggingFaceId: "mlx-community/LFM2-1.5B-4bit",
-                parameterCount: "1.5B",
+                id: "ministral-3-3b-instruct-4bit",
+                displayName: "Ministral 3 3B Instruct",
+                huggingFaceId: "mlx-community/Ministral-3-3B-Instruct-2512-4bit",
+                parameterCount: "3B",
                 quantization: "4-bit",
-                estimatedSizeGB: 1.0,
+                estimatedSizeGB: 1.9,
+                minDeviceRAM: 12,
+                family: .mistral3,
+                logoName: "mistral_logo",
+                supportsThinking: false,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
+                id: "ministral-3-3b-reasoning-4bit",
+                displayName: "Ministral 3 3B Reasoning",
+                huggingFaceId: "mlx-community/Ministral-3-3B-Reasoning-2512-4bit",
+                parameterCount: "3B",
+                quantization: "4-bit",
+                estimatedSizeGB: 1.9,
+                minDeviceRAM: 12,
+                family: .mistral3,
+                logoName: "mistral_logo",
+                supportsThinking: false,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
+                id: "ministral-3-8b-instruct-4bit",
+                displayName: "Ministral 3 8B Instruct",
+                huggingFaceId: "mlx-community/Ministral-3-8B-Instruct-2512-4bit",
+                parameterCount: "8B",
+                quantization: "4-bit",
+                estimatedSizeGB: 4.8,
+                minDeviceRAM: 16,
+                family: .mistral3,
+                logoName: "mistral_logo",
+                supportsThinking: false,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
+                id: "ministral-3-8b-reasoning-4bit",
+                displayName: "Ministral 3 8B Reasoning",
+                huggingFaceId: "mlx-community/Ministral-3-8B-Reasoning-2512-4bit",
+                parameterCount: "8B",
+                quantization: "4-bit",
+                estimatedSizeGB: 4.8,
+                minDeviceRAM: 16,
+                family: .mistral3,
+                logoName: "mistral_logo",
+                supportsThinking: false,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
+                id: "ministral-3-14b-instruct-4bit",
+                displayName: "Ministral 3 14B Instruct",
+                huggingFaceId: "mlx-community/Ministral-3-14B-Instruct-2512-4bit",
+                parameterCount: "14B",
+                quantization: "4-bit",
+                estimatedSizeGB: 8.3,
+                minDeviceRAM: 24,
+                family: .mistral3,
+                logoName: "mistral_logo",
+                supportsThinking: false,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
+                id: "ministral-3-14b-reasoning-4bit",
+                displayName: "Ministral 3 14B Reasoning",
+                huggingFaceId: "mlx-community/Ministral-3-14B-Reasoning-2512-4bit",
+                parameterCount: "14B",
+                quantization: "4-bit",
+                estimatedSizeGB: 8.3,
+                minDeviceRAM: 24,
+                family: .mistral3,
+                logoName: "mistral_logo",
+                supportsThinking: false,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
+                id: "lfm2-1.2b-4bit",
+                displayName: "LFM2 1.2B",
+                huggingFaceId: "mlx-community/LFM2-1.2B-4bit",
+                parameterCount: "1.2B",
+                quantization: "4-bit",
+                estimatedSizeGB: 0.7,
                 minDeviceRAM: 8,
                 family: .lfm2,
                 logoName: "lfm_logo",
@@ -132,10 +216,10 @@ enum Constants {
             ModelInfo(
                 id: "lfm2.5-350m-4bit",
                 displayName: "LFM2.5 350M",
-                huggingFaceId: "mlx-community/LFM2.5-350M-4bit",
+                huggingFaceId: "LiquidAI/LFM2.5-350M-MLX-4bit",
                 parameterCount: "350M",
                 quantization: "4-bit",
-                estimatedSizeGB: 0.2,
+                estimatedSizeGB: 0.3,
                 minDeviceRAM: 8,
                 family: .lfm25,
                 logoName: "lfm_logo",
@@ -149,7 +233,7 @@ enum Constants {
                 huggingFaceId: "mlx-community/LFM2.5-1.2B-Thinking-4bit",
                 parameterCount: "1.2B",
                 quantization: "4-bit",
-                estimatedSizeGB: 0.8,
+                estimatedSizeGB: 0.7,
                 minDeviceRAM: 8,
                 family: .lfm25,
                 logoName: "lfm_logo",
@@ -164,6 +248,8 @@ enum Constants {
         static let modelsDirectory = "Models"
         static let conversationsDirectory = "Conversations"
         static let personasDirectory = "Personas"
+        static let memoriesDirectory = "Memories"
+        static let memoriesFilename = "user_memories.json"
         static let documentsDirectory = "Documents"
         static let documentMetadataDirectory = "DocumentMetadata"
         static let documentIndexesDirectory = "DocumentIndexes"
@@ -205,5 +291,26 @@ enum Constants {
         static let maxRetrievedChunks = 4
         static let maxContextCharacters = 4_000
         static let maxPreviewCharacters = 220
+    }
+
+    enum Memory {
+        static let maxRetrievedMemories = 4
+        static let maxContextCharacters = 1_200
+        static let memoryConstrainedContextCharacters = 600
+        static let extractionMaxTokens = 256
+        static let minimumCandidateCharacters = 8
+        static let maximumCandidateCharacters = 220
+        static let minimumBaseRetrievalScore = 0.12
+        static let topicalAffinityScore = 0.24
+        static let coreIdentityRetrievalScore = 0.14
+        static let duplicateScoreThreshold = 0.82
+        static let forgetMatchThreshold = 0.35
+        static let personaMatchBoost = 0.12
+        static let globalMemoryBoost = 0.04
+        static let substringMatchBoost = 0.25
+    }
+
+    enum UI {
+        static let streamingResponseFlushInterval: TimeInterval = 1.0 / 30.0
     }
 }

@@ -11,6 +11,17 @@ struct ConversationListView: View {
     var onSelect: (UUID) -> Void
     @State private var conversationPendingDeletion: Conversation?
 
+    private var isShowingDeleteAlert: Binding<Bool> {
+        Binding(
+            get: { conversationPendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    conversationPendingDeletion = nil
+                }
+            }
+        )
+    }
+
     private var showsInlineDeleteButton: Bool {
         UIDevice.current.userInterfaceIdiom == .pad
     }
@@ -51,15 +62,19 @@ struct ConversationListView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .frame(width: 28, height: 28)
-                                    .background(.fill.tertiary)
-                                    .clipShape(Circle())
+                                    .liquidGlassSurface(
+                                        tint: .red.opacity(0.14),
+                                        in: Circle(),
+                                        fallback: AnyShapeStyle(.fill.tertiary),
+                                        interactive: true
+                                    )
                             }
                             .buttonStyle(.borderless)
                             .frame(width: 44, height: 44)
                             .accessibilityLabel("Delete conversation")
                         }
                     }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
                             conversationPendingDeletion = conversation
                         } label: {
@@ -72,28 +87,6 @@ struct ConversationListView: View {
                         } label: {
                             Label(String.appLocalized("common.delete"), systemImage: "trash")
                         }
-                    }
-                    .confirmationDialog(
-                        String.appLocalized("conversation.delete_title"),
-                        isPresented: Binding(
-                            get: { conversationPendingDeletion?.id == conversation.id },
-                            set: { isPresented in
-                                if !isPresented, conversationPendingDeletion?.id == conversation.id {
-                                    conversationPendingDeletion = nil
-                                }
-                            }
-                        ),
-                        titleVisibility: .visible
-                    ) {
-                        Button(String.appLocalized("common.delete"), role: .destructive) {
-                            appState.deleteConversation(conversation.id)
-                            conversationPendingDeletion = nil
-                        }
-                        Button(String.appLocalized("common.cancel"), role: .cancel) {
-                            conversationPendingDeletion = nil
-                        }
-                    } message: {
-                        Text(String(format: String.appLocalized("conversation.delete_message"), conversation.displayTitle))
                     }
                 }
             }
@@ -109,6 +102,27 @@ struct ConversationListView: View {
                 }
                 .accessibilityLabel("New conversation")
             }
+        }
+        .alert(
+            String.appLocalized("conversation.delete_title"),
+            isPresented: isShowingDeleteAlert,
+            presenting: conversationPendingDeletion
+        ) { conversation in
+            Button(String.appLocalized("common.delete"), role: .destructive) {
+                deleteConversation(conversation)
+            }
+            Button(String.appLocalized("common.cancel"), role: .cancel) {
+                conversationPendingDeletion = nil
+            }
+        } message: { conversation in
+            Text(String(format: String.appLocalized("conversation.delete_message"), conversation.displayTitle))
+        }
+    }
+
+    private func deleteConversation(_ conversation: Conversation) {
+        appState.deleteConversation(conversation.id)
+        if conversationPendingDeletion?.id == conversation.id {
+            conversationPendingDeletion = nil
         }
     }
 
@@ -153,8 +167,7 @@ struct ConversationRow: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(.fill.tertiary)
-                .clipShape(Capsule())
+                .liquidGlassSurface(in: Capsule(), fallback: AnyShapeStyle(.fill.tertiary))
 
             if showsDeleteControl {
                 Button(role: .destructive, action: onDelete) {
@@ -162,8 +175,12 @@ struct ConversationRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(width: 28, height: 28)
-                        .background(.fill.tertiary)
-                        .clipShape(Circle())
+                        .liquidGlassSurface(
+                            tint: .red.opacity(0.14),
+                            in: Circle(),
+                            fallback: AnyShapeStyle(.fill.tertiary),
+                            interactive: true
+                        )
                 }
                 .buttonStyle(.borderless)
                 .frame(width: 44, height: 44)

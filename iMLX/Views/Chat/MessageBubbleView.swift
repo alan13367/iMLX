@@ -1,8 +1,10 @@
+import Foundation
 import SwiftUI
 import UIKit
+import ImageIO
 import UniformTypeIdentifiers
 
-struct MessageBubbleView: View {
+struct MessageBubbleView: View, Equatable {
     let message: ChatMessage
     let isStreaming: Bool
     @State private var showCopyFeedback = false
@@ -12,6 +14,10 @@ struct MessageBubbleView: View {
     init(message: ChatMessage, isStreaming: Bool = false) {
         self.message = message
         self.isStreaming = isStreaming
+    }
+
+    static func == (lhs: MessageBubbleView, rhs: MessageBubbleView) -> Bool {
+        lhs.message == rhs.message && lhs.isStreaming == rhs.isStreaming
     }
 
     var body: some View {
@@ -69,13 +75,7 @@ struct MessageBubbleView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(Array(attachedImages.enumerated()), id: \.offset) { _, imageData in
-                    if let uiImage = UIImage(data: imageData) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 80, height: 80)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
+                    AttachmentImageThumbnailView(imageData: imageData, size: 80, cornerRadius: 12)
                 }
             }
             .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
@@ -102,7 +102,7 @@ struct MessageBubbleView: View {
                 ForEach(attachedDocuments) { document in
                     HStack(spacing: 8) {
                         Image(systemName: iconName(for: document.kind))
-                            .foregroundStyle(message.role == .user ? .white : .blue)
+                            .foregroundStyle(message.role == .user ? .white : BrandPalette.cyan)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(document.displayName)
                                 .font(.caption.weight(.semibold))
@@ -114,7 +114,13 @@ struct MessageBubbleView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .background(message.role == .user ? Color.blue.opacity(0.82) : Color(.tertiarySystemFill))
+                    .background {
+                        if message.role == .user {
+                            BrandPalette.primaryGradient
+                        } else {
+                            Color(.tertiarySystemFill)
+                        }
+                    }
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
@@ -212,7 +218,7 @@ struct MessageBubbleView: View {
             .padding(.vertical, 10)
             .background(
                 message.role == .user
-                    ? AnyShapeStyle(.blue)
+                    ? AnyShapeStyle(BrandPalette.primaryGradient)
                     : AnyShapeStyle(.fill.tertiary)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -239,7 +245,7 @@ struct MessageBubbleView: View {
         } else if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             Text(attributed)
                 .font(.body)
-                .tint(.blue)
+                .tint(BrandPalette.accent)
         } else {
             Text(text)
                 .font(.body)
@@ -304,10 +310,102 @@ struct MessageBubbleView: View {
     }
 }
 
+struct AttachmentImageThumbnailView: View {
+    let imageData: Data
+    let size: CGFloat
+    let cornerRadius: CGFloat
+    @State private var image: UIImage?
+
+    private var maxPixelSize: CGFloat {
+        size * UIScreen.main.scale
+    }
+
+    private var cacheKey: String {
+        AttachmentImageThumbnailCache.cacheKey(for: imageData, maxPixelSize: maxPixelSize)
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(Color(.tertiarySystemFill))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .task(id: cacheKey) {
+            image = nil
+            image = await AttachmentImageThumbnailCache.shared.image(
+                for: imageData,
+                maxPixelSize: maxPixelSize
+            )
+        }
+    }
+}
+
+private final class AttachmentImageThumbnailCache {
+    static let shared = AttachmentImageThumbnailCache()
+    private let cache = NSCache<NSString, UIImage>()
+
+    static func cacheKey(for data: Data, maxPixelSize: CGFloat) -> String {
+        "\(data.count)-\(data.hashValue)-\(Int(maxPixelSize.rounded(.up)))"
+    }
+
+    func image(for data: Data, maxPixelSize: CGFloat) async -> UIImage? {
+        let key = Self.cacheKey(for: data, maxPixelSize: maxPixelSize) as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+
+        let decoded = await Task.detached(priority: .utility) {
+            Self.downsampledImage(from: data, maxPixelSize: maxPixelSize)
+        }.value
+
+        if let decoded {
+            cache.setObject(decoded, forKey: key)
+        }
+
+        return decoded
+    }
+
+    private static func downsampledImage(from data: Data, maxPixelSize: CGFloat) -> UIImage? {
+        let imageSourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, imageSourceOptions) else {
+            return UIImage(data: data)
+        }
+
+        let downsampleOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, Int(maxPixelSize.rounded(.up)))
+        ] as CFDictionary
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions) else {
+            return UIImage(data: data)
+        }
+
+        return UIImage(cgImage: cgImage)
+    }
+}
+
 struct ParsedAssistantContent {
     let thinking: String?
     let response: String
     let copyableText: String
+
+    private static let answerHeadingRegexes: [NSRegularExpression] = [
+        "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})final answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
+        "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})suggested answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
+        "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
+        "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})response(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*"
+    ].compactMap {
+        try? NSRegularExpression(pattern: $0, options: [.caseInsensitive])
+    }
 
     init(_ rawContent: String, isStreaming: Bool = false) {
         let normalizedContent = Self.normalizedContent(rawContent)
@@ -589,18 +687,10 @@ struct ParsedAssistantContent {
 
     private static func stripAnswerHeading(_ response: String) -> String {
         var cleaned = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        let headingPatterns = [
-            "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})final answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
-            "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})suggested answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
-            "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
-            "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})response(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*"
-        ]
 
-        for pattern in headingPatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
-                let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
-                cleaned = regex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
-            }
+        for regex in answerHeadingRegexes {
+            let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
+            cleaned = regex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
         }
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)

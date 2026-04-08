@@ -47,6 +47,19 @@ struct SettingsView: View {
                 }
             }
 
+            Section(String.appLocalized("settings.section.memory")) {
+                NavigationLink {
+                    MemoryLibraryView(appState: appState)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(String.appLocalized("settings.manage_memory"))
+                        Text(memoryDetailText)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section(String.appLocalized("settings.section.storage")) {
                 LabeledContent(String.appLocalized("settings.models_storage")) {
                     Text(String(format: "%.2f GB", appState.manifestService.totalStorageUsedGB))
@@ -80,5 +93,14 @@ struct SettingsView: View {
                 Haptics.notificationWarning()
             }
         }
+    }
+
+    private var memoryDetailText: String {
+        let pendingCount = appState.memories.filter { $0.status == .pending }.count
+        let activeCount = appState.memories.filter { $0.status == .active }.count
+        if pendingCount > 0 {
+            return String(format: String.appLocalized("settings.manage_memory_detail_pending"), activeCount, pendingCount)
+        }
+        return String(format: String.appLocalized("settings.manage_memory_detail"), activeCount)
     }
 }

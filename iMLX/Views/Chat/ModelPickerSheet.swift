@@ -160,11 +160,6 @@ struct ModelPickerSheet: View {
     }
 
     private func modelLogo(for model: ModelInfo) -> some View {
-        Image(model.logoName)
-            .resizable()
-            .scaledToFit()
-            .frame(width: 40, height: 40)
-            .clipShape(Circle())
-            .overlay(Circle().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+        ModelLogoView(family: model.family)
     }
 }

@@ -12,6 +12,7 @@ struct StatsOverlayView: View {
                 StatItem(icon: "clock", value: stats.formattedTime, isLive: isLive)
                 StatItem(icon: "memorychip", value: stats.formattedMemory, isLive: isLive)
             }
+            .liquidGlassContainer(spacing: 8)
         }
         .fixedSize(horizontal: false, vertical: true)
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
@@ -27,7 +28,7 @@ struct StatItem: View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.caption)
-                .foregroundStyle(isLive ? .blue : .secondary)
+                .foregroundStyle(isLive ? BrandPalette.cyan : .secondary)
             Text(value)
                 .font(.caption2)
                 .fontWeight(.medium)
@@ -35,8 +36,11 @@ struct StatItem: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(isLive ? Color.blue.opacity(0.10) : Color.secondary.opacity(0.12))
-        .clipShape(Capsule())
+        .liquidGlassSurface(
+            tint: isLive ? BrandPalette.cyan.opacity(0.2) : nil,
+            in: Capsule(),
+            fallback: AnyShapeStyle(isLive ? BrandPalette.cyan.opacity(0.10) : Color.secondary.opacity(0.12))
+        )
         .fixedSize(horizontal: true, vertical: true)
     }
 }

@@ -43,7 +43,7 @@ actor InferenceService {
 
     func generate(
         prompt: String,
-        images: [Data]? = nil,
+        images: [ChatAttachmentImage]? = nil,
         thinkingEnabled: Bool? = nil,
         history: [ChatMessage],
         systemPrompt: String,
@@ -176,7 +176,7 @@ actor InferenceService {
     }
 }
 
-private extension ChatMessage {
+nonisolated private extension ChatMessage {
     var chatMessage: Chat.Message {
         let userInputImages = userInputImages(from: attachedImages)
         
@@ -191,10 +191,11 @@ private extension ChatMessage {
     }
 }
 
-private func userInputImages(from images: [Data]?) -> [UserInput.Image] {
+nonisolated private func userInputImages(from images: [ChatAttachmentImage]?) -> [UserInput.Image] {
     guard let images else { return [] }
 
-    return images.compactMap { data in
+    return images.compactMap { image in
+        let data = image.data
         if let ciImage = CIImage(data: data, options: [.applyOrientationProperty: true]) {
             return .ciImage(ciImage)
         }

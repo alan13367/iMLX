@@ -10,7 +10,7 @@ private struct MemoryRetrievalCandidate {
     let score: Double
 }
 
-final class MemoryService {
+nonisolated final class MemoryService {
     private let fileManager = FileManager.default
     private let memoriesDirectory: URL
     private let memoriesURL: URL

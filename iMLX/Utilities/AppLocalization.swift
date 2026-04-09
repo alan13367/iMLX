@@ -1,6 +1,6 @@
 import Foundation
 
-enum AppLocalization {
+nonisolated enum AppLocalization {
     static let preferredLanguageUserDefaultsKey = "preferredAppLanguage"
 
     static var effectiveLocale: Locale {
@@ -11,7 +11,7 @@ enum AppLocalization {
     }
 }
 
-enum AppLanguageOption: String, CaseIterable, Identifiable {
+nonisolated enum AppLanguageOption: String, CaseIterable, Identifiable {
     case system = "system"
     case english = "en"
     case spanish = "es"
@@ -53,7 +53,7 @@ enum AppLanguageOption: String, CaseIterable, Identifiable {
 }
 
 extension String {
-    static func appLocalized(_ key: String) -> String {
+    nonisolated static func appLocalized(_ key: String) -> String {
         if let code = UserDefaults.standard.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey), !code.isEmpty {
             var resource = LocalizedStringResource(String.LocalizationValue(stringLiteral: key))
             resource.locale = Locale(identifier: code)

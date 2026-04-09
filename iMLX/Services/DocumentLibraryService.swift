@@ -8,7 +8,7 @@ actor DocumentLibraryService {
         let location: String?
     }
 
-    private let fileManager = FileManager.default
+    private let fileManager: FileManager
     private let documentsDirectory: URL
     private let metadataDirectory: URL
     private let indexesDirectory: URL
@@ -16,7 +16,9 @@ actor DocumentLibraryService {
     private let decoder = JSONDecoder()
 
     init() {
+        let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
+        self.fileManager = fileManager
         documentsDirectory = appSupport.appendingPathComponent(Constants.Storage.documentsDirectory, isDirectory: true)
         metadataDirectory = appSupport.appendingPathComponent(Constants.Storage.documentMetadataDirectory, isDirectory: true)
         indexesDirectory = appSupport.appendingPathComponent(Constants.Storage.documentIndexesDirectory, isDirectory: true)

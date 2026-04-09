@@ -1,6 +1,6 @@
 import Foundation
 
-enum DeviceTier: Int, Comparable {
+nonisolated enum DeviceTier: Int, Comparable {
     case tier8GB = 8
     case tier12GB = 12
     case tier16GB = 16
@@ -20,8 +20,7 @@ enum DeviceTier: Int, Comparable {
     }
 }
 
-@Observable
-final class DeviceCapabilityService {
+nonisolated final class DeviceCapabilityService {
     let physicalMemoryGB: Int
     let tier: DeviceTier
     let usableMemoryEstimateGB: Int

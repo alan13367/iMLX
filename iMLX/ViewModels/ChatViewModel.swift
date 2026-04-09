@@ -34,6 +34,7 @@ private enum ChatGenerationAbort: LocalizedError {
 final class ChatViewModel {
     var messages: [ChatMessage] = []
     var currentResponse: String = ""
+    var currentParsedResponse: ParsedAssistantContent = .empty
     var isGenerating: Bool = false
     var isModelLoading: Bool = false
     var errorMessage: String?
@@ -49,7 +50,7 @@ final class ChatViewModel {
         resolvedCurrentModel()?.supportsVision == true
     }
 
-    var pendingImages: [Data] = []
+    var pendingImages: [ChatAttachmentImage] = []
     var pendingDocuments: [ConversationDocumentReference] = []
     var attachedDocuments: [ConversationDocumentReference] = []
     var activePersonaId: String?
@@ -92,6 +93,7 @@ final class ChatViewModel {
         attachedDocuments = conversation.documents
         activePersonaId = appState.persona(id: conversation.personaId)?.id ?? appState.defaultPersona().id
         currentResponse = ""
+        currentParsedResponse = .empty
         errorMessage = nil
         memoryNotice = nil
         suppressedMemoryNoticeKey = nil
@@ -137,6 +139,7 @@ final class ChatViewModel {
 
         isGenerating = true
         currentResponse = ""
+        currentParsedResponse = .empty
         errorMessage = nil
         pendingImages.removeAll()
         pendingDocuments.removeAll()
@@ -156,6 +159,7 @@ final class ChatViewModel {
             let startTime = Date()
             var tokenCount = 0
             var accumulatedResponse = ""
+            var latestParsedResponse = ParsedAssistantContent.empty
             var lastResponseFlush = Date.distantPast
             var shouldForceFinalAnswerFollowUp = false
             let retrievalResult = await self.appState.documentLibraryService.retrieveContext(
@@ -182,6 +186,7 @@ final class ChatViewModel {
                 thinkingEnabled: thinkingEnabled
             )
 
+            @MainActor
             func enforceMemorySafety() throws {
                 let availableMB = self.deviceCapabilityService.availableMemoryMB
                 if availableMB > 0 && availableMB < Constants.Generation.lowMemoryAbortThresholdMB {
@@ -189,10 +194,18 @@ final class ChatViewModel {
                 }
             }
 
+            @MainActor
+            func refreshParsedResponse() {
+                latestParsedResponse = ParsedAssistantContent(accumulatedResponse, isStreaming: true)
+            }
+
+            @MainActor
             func flushResponseToUI(force: Bool = false) {
                 let now = Date()
                 guard force || now.timeIntervalSince(lastResponseFlush) >= Constants.UI.streamingResponseFlushInterval else { return }
+                refreshParsedResponse()
                 self.currentResponse = accumulatedResponse
+                self.currentParsedResponse = latestParsedResponse
                 lastResponseFlush = now
             }
 
@@ -215,9 +228,10 @@ final class ChatViewModel {
                     tokenCount += 1
                     flushResponseToUI()
                     if tokenCount.isMultiple(of: Constants.Generation.lowMemoryCheckInterval) {
+                        refreshParsedResponse()
                         try enforceMemorySafety()
                         if self.shouldInterruptRepetitiveThinking(
-                            in: accumulatedResponse,
+                            in: latestParsedResponse,
                             thinkingEnabled: thinkingEnabled,
                             tokenCount: tokenCount
                         ) {
@@ -229,7 +243,7 @@ final class ChatViewModel {
 
                 flushResponseToUI(force: true)
 
-                if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: accumulatedResponse, thinkingEnabled: thinkingEnabled) {
+                if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: latestParsedResponse, thinkingEnabled: thinkingEnabled) {
                     let followUpStream = await self.inferenceService.generate(
                         prompt: text,
                         images: userMessage.attachedImages,
@@ -339,6 +353,7 @@ final class ChatViewModel {
             }
 
             self.currentResponse = ""
+            self.currentParsedResponse = .empty
             self.isGenerating = false
         }
     }
@@ -406,6 +421,7 @@ final class ChatViewModel {
             pendingDocuments.removeAll()
             attachedDocuments.removeAll()
             currentResponse = ""
+            currentParsedResponse = .empty
             errorMessage = nil
             memoryNotice = nil
             suppressedMemoryNoticeKey = nil
@@ -457,6 +473,16 @@ final class ChatViewModel {
             errorMessage = error.localizedDescription
             Haptics.notificationError()
         }
+    }
+
+    @MainActor
+    func appendPendingImage(_ data: Data) {
+        pendingImages.append(ChatAttachmentImage(data: data))
+    }
+
+    @MainActor
+    func removePendingImage(id: UUID) {
+        pendingImages.removeAll { $0.id == id }
     }
 
     @MainActor
@@ -769,7 +795,6 @@ final class ChatViewModel {
     }
 
     private func isMemoryConstrainedLargeModel(_ model: ModelInfo?) -> Bool {
-        let estimatedSizeGB = model?.estimatedSizeGB ?? 0
         let isLargeModel = (model?.minDeviceRAM ?? 0) >= 12 || (model?.estimatedSizeGB ?? 0) >= 2.5
         return deviceCapabilityService.tier <= .tier12GB && isLargeModel
     }
@@ -1089,19 +1114,15 @@ final class ChatViewModel {
         """
     }
 
-    private func shouldRunFinalAnswerFollowUp(for content: String, thinkingEnabled: Bool) -> Bool {
+    private func shouldRunFinalAnswerFollowUp(for parsedContent: ParsedAssistantContent, thinkingEnabled: Bool) -> Bool {
         guard thinkingEnabled else { return false }
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        return ParsedAssistantContent(trimmed, isStreaming: true).response.isEmpty
+        return parsedContent.response.isEmpty
     }
 
-    private func shouldInterruptRepetitiveThinking(in content: String, thinkingEnabled: Bool, tokenCount: Int) -> Bool {
+    private func shouldInterruptRepetitiveThinking(in parsedContent: ParsedAssistantContent, thinkingEnabled: Bool, tokenCount: Int) -> Bool {
         guard thinkingEnabled else { return false }
         guard tokenCount >= Constants.Generation.repetitiveThinkingCheckStartTokens else { return false }
-
-        let parsed = ParsedAssistantContent(content, isStreaming: true)
-        guard parsed.response.isEmpty, let thinking = parsed.thinking, !thinking.isEmpty else { return false }
+        guard parsedContent.response.isEmpty, let thinking = parsedContent.thinking, !thinking.isEmpty else { return false }
 
         let duplicateThreshold = Constants.Generation.repetitiveThinkingDuplicateLineThreshold
         var counts: [String: Int] = [:]

@@ -1,6 +1,6 @@
 import Foundation
 
-final class PersonaService {
+nonisolated final class PersonaService {
     private let fileManager = FileManager.default
     private let personasDirectory: URL
 

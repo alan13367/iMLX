@@ -153,7 +153,7 @@ final class AppState {
 
     @MainActor
     func loadConversations() async {
-        let loaded = await fetchConversationsInBackground()
+        let loaded = await Self.fetchConversationsInBackground(using: conversationService)
         conversations = loaded
         migrateConversationsWithoutPersona()
         reconcileActiveConversationForChat()
@@ -165,9 +165,9 @@ final class AppState {
         reconcileActiveConversationForChat()
     }
 
-    nonisolated private func fetchConversationsInBackground() async -> [Conversation] {
-        return await Task.detached {
-            self.conversationService.listAll()
+    nonisolated private static func fetchConversationsInBackground(using conversationService: ConversationService) async -> [Conversation] {
+        return await Task.detached(priority: .utility) {
+            conversationService.listAll()
         }.value
     }
 

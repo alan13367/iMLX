@@ -149,9 +149,10 @@ struct ModelPickerSheet: View {
                         .controlSize(.small)
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contentShape(Rectangle())
         #if targetEnvironment(simulator)
         .opacity(0.6)
         #endif

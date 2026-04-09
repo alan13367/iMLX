@@ -1,6 +1,6 @@
 import Foundation
 
-enum PersonaTone: String, Codable, CaseIterable, Identifiable {
+nonisolated enum PersonaTone: String, Codable, CaseIterable, Identifiable {
     case balanced
     case supportive
     case professional
@@ -40,7 +40,7 @@ enum PersonaTone: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct Persona: Identifiable, Codable, Equatable {
+nonisolated struct Persona: Identifiable, Codable, Equatable {
     static let defaultID = "general-assistant"
 
     let id: String

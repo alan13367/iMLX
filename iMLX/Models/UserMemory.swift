@@ -1,6 +1,6 @@
 import Foundation
 
-enum UserMemoryStatus: String, Codable, CaseIterable {
+nonisolated enum UserMemoryStatus: String, Codable, CaseIterable {
     case pending
     case active
     case archived
@@ -17,7 +17,7 @@ enum UserMemoryStatus: String, Codable, CaseIterable {
     }
 }
 
-enum UserMemoryCaptureType: String, Codable, CaseIterable {
+nonisolated enum UserMemoryCaptureType: String, Codable, CaseIterable {
     case explicit
     case inferred
 
@@ -31,7 +31,7 @@ enum UserMemoryCaptureType: String, Codable, CaseIterable {
     }
 }
 
-struct UserMemory: Identifiable, Codable, Hashable {
+nonisolated struct UserMemory: Identifiable, Codable, Hashable {
     let id: UUID
     var content: String
     var status: UserMemoryStatus
@@ -88,7 +88,7 @@ struct UserMemory: Identifiable, Codable, Hashable {
     }
 }
 
-struct MemoryRetrievalResult {
+nonisolated struct MemoryRetrievalResult {
     let contextBlock: String
     let memories: [UserMemory]
 }

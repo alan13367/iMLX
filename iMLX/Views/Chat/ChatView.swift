@@ -11,6 +11,11 @@ private enum ChatUtilitySheet: String, Identifiable {
     var id: String { rawValue }
 }
 
+private struct ChatScrollState: Equatable {
+    let contentOverflows: Bool
+    let isPinnedToBottom: Bool
+}
+
 struct ChatView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var chatViewModel: ChatViewModel
@@ -26,6 +31,7 @@ struct ChatView: View {
     @State private var utilitySheet: ChatUtilitySheet?
     @State private var streamingScrollTask: Task<Void, Never>?
     @State private var streamingAutoscrollEnabled = true
+    @State private var contentOverflows = false
     @State private var scrollPinnedToBottom = true
     let appState: AppState
     let conversationId: UUID
@@ -132,7 +138,7 @@ struct ChatView: View {
                 Task {
                     if let data = try? await item.loadTransferable(type: Data.self) {
                         await MainActor.run {
-                            chatViewModel.pendingImages.append(data)
+                            chatViewModel.appendPendingImage(data)
                             selectedPhotoItem = nil
                         }
                     } else {
@@ -145,7 +151,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showCamera) {
             ImagePicker(isPresented: $showCamera) { data in
-                chatViewModel.pendingImages.append(data)
+                chatViewModel.appendPendingImage(data)
             }
         }
         .photosPicker(isPresented: $showPhotoLibrary, selection: $selectedPhotoItem, matching: .images)
@@ -324,7 +330,7 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    VStack(spacing: 12) {
+                    LazyVStack(spacing: 12) {
                         ForEach(chatViewModel.messages) { message in
                             MessageBubbleView(message: message)
                                 .equatable()
@@ -337,7 +343,8 @@ struct ChatView: View {
                                     role: .assistant,
                                     content: chatViewModel.currentResponse + (chatViewModel.isGenerating ? "▊" : "")
                                 ),
-                                isStreaming: true
+                                isStreaming: true,
+                                parsedAssistantContent: chatViewModel.currentParsedResponse
                             )
                             .id("streaming")
                             .transition(.opacity)
@@ -346,18 +353,18 @@ struct ChatView: View {
                             .frame(height: 1)
                             .id("chatBottomAnchor")
                     }
-                    .animation(.easeOut(duration: 0.2), value: chatViewModel.messages.count)
                     .padding(.horizontal)
                     .padding(.vertical, 12)
                 }
-                .onScrollGeometryChange(for: Bool.self, of: { geometry in
-                    let offsetY = geometry.contentOffset.y
+                .onScrollGeometryChange(for: ChatScrollState.self, of: { geometry in
                     let contentHeight = geometry.contentSize.height
                     let visibleHeight = geometry.visibleRect.height
-                    let maxOffset = max(0, contentHeight - visibleHeight)
-                    return offsetY >= maxOffset - 32
-                }, action: { _, pinned in
-                    scrollPinnedToBottom = pinned
+                    let overflows = contentHeight > visibleHeight + 32
+                    let pinned = !overflows || geometry.visibleRect.maxY >= contentHeight - 32
+                    return ChatScrollState(contentOverflows: overflows, isPinnedToBottom: pinned)
+                }, action: { _, state in
+                    contentOverflows = state.contentOverflows
+                    scrollPinnedToBottom = state.isPinnedToBottom
                 })
                 .onScrollPhaseChange { _, newPhase in
                     guard newPhase == .tracking || newPhase == .interacting else { return }
@@ -388,14 +395,11 @@ struct ChatView: View {
                     }
                 }
 
-                if !scrollPinnedToBottom || !streamingAutoscrollEnabled {
+                if contentOverflows && (!scrollPinnedToBottom || !streamingAutoscrollEnabled) {
                     HStack {
                         Spacer(minLength: 0)
                         Button {
-                            streamingAutoscrollEnabled = true
-                            withAnimation {
-                                proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
-                            }
+                            resumeAutoscroll(using: proxy)
                         } label: {
                             Image(systemName: "arrow.down.circle.fill")
                                 .font(.title2)
@@ -415,6 +419,22 @@ struct ChatView: View {
                     }
                     .padding(.bottom, 12)
                 }
+            }
+        }
+    }
+
+    private func resumeAutoscroll(using proxy: ScrollViewProxy) {
+        streamingScrollTask?.cancel()
+        withAnimation(.easeOut(duration: 0.15)) {
+            proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
+        }
+        streamingAutoscrollEnabled = true
+        streamingScrollTask = Task { @MainActor in
+            defer { streamingScrollTask = nil }
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.15)) {
+                proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
             }
         }
     }
@@ -693,12 +713,12 @@ struct ChatView: View {
             if !chatViewModel.pendingImages.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(Array(chatViewModel.pendingImages.enumerated()), id: \.offset) { index, imageData in
+                        ForEach(chatViewModel.pendingImages) { image in
                             ZStack(alignment: .topTrailing) {
-                                AttachmentImageThumbnailView(imageData: imageData, size: 60, cornerRadius: 8)
+                                AttachmentImageThumbnailView(imageData: image.data, size: 60, cornerRadius: 8)
 
                                 Button {
-                                    chatViewModel.pendingImages.remove(at: index)
+                                    chatViewModel.removePendingImage(id: image.id)
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundStyle(.white, .black.opacity(0.6))

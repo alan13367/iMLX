@@ -1,6 +1,6 @@
 import Foundation
 
-enum Constants {
+nonisolated enum Constants {
     enum ModelRegistry {
         static let curatedModels: [ModelInfo] = [
             ModelInfo(

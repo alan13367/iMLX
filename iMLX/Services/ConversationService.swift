@@ -1,7 +1,6 @@
 import Foundation
 
-@Observable
-final class ConversationService {
+nonisolated final class ConversationService: @unchecked Sendable {
     private let fileManager = FileManager.default
     private let conversationsDirectory: URL
 

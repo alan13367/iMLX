@@ -5,11 +5,12 @@ final class AppState {
     var selectedModel: ModelInfo?
     var isModelLoading: Bool = false
     var loadedModelId: String?
+    var modelDownloadSnapshots: [String: ModelDownloadSnapshot] = [:]
 
     let conversationService = ConversationService()
     let inferenceService = InferenceService()
-    let downloadService = ModelDownloadService()
-    let manifestService = ManifestService()
+    let downloadService: ModelDownloadService
+    let manifestService: ManifestService
     let personaService = PersonaService()
     let memoryService = MemoryService()
     let documentLibraryService = DocumentLibraryService()
@@ -22,13 +23,21 @@ final class AppState {
     private let userDefaults = UserDefaults.standard
 
     init() {
+        self.manifestService = ManifestService()
+        self.downloadService = ModelDownloadService(manifestService: manifestService)
         preferredAppLanguageCode = userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
         loadPersonas()
         loadMemories()
         loadConversationsFromDisk()
         restoreModelState()
-        Task { @MainActor [weak self] in
+
+        Task { [weak self] in
             guard let self else { return }
+            await self.downloadService.setSnapshotObserver { [weak self] snapshots in
+                guard let self else { return }
+                await self.handleDownloadSnapshots(snapshots)
+            }
+            await self.downloadService.restorePendingDownloads()
             _ = await self.reconcileModelCatalogState()
         }
     }
@@ -137,6 +146,11 @@ final class AppState {
         setLoadedModel(id: nil)
     }
 
+    func handleBackgroundDownloadEvents() async {
+        await downloadService.restorePendingDownloads()
+        _ = await reconcileModelCatalogState()
+    }
+
     @MainActor
     func clearAllDownloadedModels() async {
         let downloadedEntries = manifestService.getDownloadedModels()
@@ -149,6 +163,16 @@ final class AppState {
             try? await downloadService.deleteModel(modelId: entry.id, huggingFaceId: entry.huggingFaceId)
         }
         manifestService.removeDownloaded(modelIds: idsToRemove)
+    }
+
+    private func handleDownloadSnapshots(_ snapshots: [String: ModelDownloadSnapshot]) async {
+        let previousModelIDs = Set(modelDownloadSnapshots.keys)
+        modelDownloadSnapshots = snapshots
+
+        let removedModelIDs = previousModelIDs.subtracting(snapshots.keys)
+        if !removedModelIDs.isEmpty {
+            _ = await reconcileModelCatalogState()
+        }
     }
 
     @MainActor

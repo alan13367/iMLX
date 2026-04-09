@@ -10,6 +10,9 @@ struct iMLXApp: App {
                 .environment(\.locale, appState.effectiveLocale)
                 .tint(BrandPalette.accent)
         }
+        .backgroundTask(.urlSession(ModelDownloadService.backgroundSessionIdentifier)) {
+            await appState.handleBackgroundDownloadEvents()
+        }
     }
 }
 

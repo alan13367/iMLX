@@ -21,7 +21,6 @@ struct ModelBrowserView: View {
                 NavigationLink {
                     FamilyModelsView(
                         family: group.family,
-                        models: group.models,
                         viewModel: viewModel
                     )
                 } label: {
@@ -31,6 +30,9 @@ struct ModelBrowserView: View {
         }
         .navigationTitle(String.appLocalized("models.browser.title"))
         .task {
+            viewModel.refreshDownloadStatusFromDisk()
+        }
+        .task(id: appState.modelDownloadSnapshots.count) {
             viewModel.refreshDownloadStatusFromDisk()
         }
     }
@@ -76,7 +78,6 @@ struct ModelBrowserView: View {
 
 struct FamilyModelsView: View {
     let family: ModelInfo.ModelFamily
-    let models: [ModelInfo]
     let viewModel: ModelManagerViewModel
 
     var body: some View {
@@ -86,7 +87,7 @@ struct FamilyModelsView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            ForEach(models) { model in
+            ForEach(viewModel.models(for: family)) { model in
                 ModelCardView(
                     model: model,
                     progress: viewModel.downloadProgress[model.id] ?? 0,

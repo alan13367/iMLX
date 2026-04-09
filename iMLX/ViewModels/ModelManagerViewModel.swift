@@ -3,8 +3,6 @@ import Foundation
 @Observable
 final class ModelManagerViewModel {
     var availableModels: [ModelInfo] = []
-    var downloadProgress: [String: Float] = [:]
-    var isDownloading: [String: Bool] = [:]
     var errorMessage: String?
 
     private let appState: AppState
@@ -49,7 +47,15 @@ final class ModelManagerViewModel {
     }
 
     var isAnyDownloading: Bool {
-        isDownloading.values.contains(true)
+        appState.modelDownloadSnapshots.values.contains { $0.isActive }
+    }
+
+    var downloadProgress: [String: Float] {
+        Dictionary(uniqueKeysWithValues: appState.modelDownloadSnapshots.map { ($0.key, $0.value.progress) })
+    }
+
+    var isDownloading: [String: Bool] {
+        Dictionary(uniqueKeysWithValues: appState.modelDownloadSnapshots.map { ($0.key, $0.value.isActive) })
     }
 
     var downloadableModels: [ModelInfo] {
@@ -67,45 +73,26 @@ final class ModelManagerViewModel {
         availableModels.filter { !deviceCapability.canRunModel($0) }
     }
 
+    func models(for family: ModelInfo.ModelFamily) -> [ModelInfo] {
+        availableModels
+            .filter { $0.family == family && deviceCapability.canRunModel($0) }
+            .sorted { $0.estimatedSizeGB < $1.estimatedSizeGB }
+            .map(resolvePresentationModel)
+    }
+
     func download(model: ModelInfo) {
         guard !isAnyDownloading else { return }
         guard isDownloading[model.id] != true else { return }
         guard !manifestService.isDownloaded(modelId: model.id) else { return }
-        isDownloading[model.id] = true
-        downloadProgress[model.id] = 0
         errorMessage = nil
 
         Task { [weak self] in
             guard let self else { return }
-            let stream = await self.downloadService.downloadModel(model)
             do {
-                for try await progress in stream {
-                    await MainActor.run {
-                        self.downloadProgress[model.id] = progress
-                    }
-                }
-                let sizeOnDisk = await self.downloadService.sizeOfModel(model)
-                let localURL = await self.downloadService.localURL(for: model)
-                await MainActor.run {
-                    if let index = self.availableModels.firstIndex(where: { $0.id == model.id }) {
-                        self.availableModels[index].isDownloaded = true
-                        self.availableModels[index].localURL = localURL
-                    }
-                    self.manifestService.addDownloaded(
-                        modelId: model.id,
-                        displayName: model.displayName,
-                        huggingFaceId: model.huggingFaceId,
-                        localPath: model.id,
-                        sizeOnDiskBytes: Int64(sizeOnDisk)
-                    )
-                    self.downloadProgress[model.id] = 1.0
-                    self.isDownloading[model.id] = false
-                }
+                try await self.downloadService.startDownload(for: model)
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
-                    self.isDownloading[model.id] = false
-                    self.downloadProgress.removeValue(forKey: model.id)
                 }
             }
         }
@@ -143,5 +130,15 @@ final class ModelManagerViewModel {
 
     var downloadedModels: [ModelInfo] {
         availableModels.filter { $0.isDownloaded }
+    }
+
+    private func resolvePresentationModel(_ model: ModelInfo) -> ModelInfo {
+        var updated = model
+        if manifestService.isDownloaded(modelId: model.id) {
+            updated.isDownloaded = true
+        } else {
+            updated.isDownloaded = false
+        }
+        return updated
     }
 }

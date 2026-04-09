@@ -254,6 +254,8 @@ nonisolated enum Constants {
         static let documentMetadataDirectory = "DocumentMetadata"
         static let documentIndexesDirectory = "DocumentIndexes"
         static let downloadedModelsManifest = "downloaded_models.json"
+        static let modelDownloadJobsManifest = "model_download_jobs.json"
+        static let modelDownloadStagingDirectory = "ModelDownloadStaging"
     }
 
     enum Generation {

@@ -6,3 +6,5 @@ iMLX/Models/.DS_Store
 iMLX/Conversations/.DS_Store
 .agents/
 .DerivedData/
+iMLX.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate

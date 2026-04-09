@@ -256,6 +256,8 @@ nonisolated enum Constants {
         static let downloadedModelsManifest = "downloaded_models.json"
         static let modelDownloadJobsManifest = "model_download_jobs.json"
         static let modelDownloadStagingDirectory = "ModelDownloadStaging"
+        static let speechAssetsDirectory = "SpeechAssets"
+        static let speechAssetsStateFilename = "speech_assets.json"
     }
 
     enum Generation {
@@ -314,5 +316,13 @@ nonisolated enum Constants {
 
     enum UI {
         static let streamingResponseFlushInterval: TimeInterval = 1.0 / 30.0
+    }
+
+    enum WebSearch {
+        static let maxResults = 3
+        static let maxContextCharacters = 6_000
+        static let maxPreviewCharacters = 240
+        static let chunkWordTarget = 140
+        static let chunkWordOverlap = 24
     }
 }

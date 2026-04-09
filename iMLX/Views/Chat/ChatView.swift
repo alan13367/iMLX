@@ -23,10 +23,11 @@ struct ChatView: View {
     @FocusState private var isInputFocused: Bool
     @State private var showModelPicker = false
     @State private var showPersonaPicker = false
-    @State private var showAttachmentActionSheet = false
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
     @State private var showDocumentImporter = false
+    @State private var showWebSearchDisclosure = false
+    @State private var showLiveVoice = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var utilitySheet: ChatUtilitySheet?
     @State private var streamingScrollTask: Task<Void, Never>?
@@ -179,6 +180,18 @@ struct ChatView: View {
                 chatViewModel: chatViewModel,
                 isPresented: $showPersonaPicker
             )
+        }
+        .sheet(isPresented: $showLiveVoice) {
+            LiveVoiceConversationView(appState: appState, chatViewModel: chatViewModel)
+        }
+        .alert("Enable web search?", isPresented: $showWebSearchDisclosure) {
+            Button("Cancel", role: .cancel) {}
+            Button("Enable") {
+                appState.markWebSearchDisclosureSeen()
+                chatViewModel.setWebSearchEnabled(true)
+            }
+        } message: {
+            Text("Only the current raw user message is sent to DuckDuckGo. Persona, memory, prior transcript, and attached-document context stay local.")
         }
         .onDisappear {
             streamingScrollTask?.cancel()
@@ -455,6 +468,10 @@ struct ChatView: View {
                 memoryNoticeCard(memoryNotice)
             }
 
+            if let webSearchNotice = chatViewModel.webSearchNotice {
+                infoBanner(message: webSearchNotice)
+            }
+
             if chatViewModel.isModelLoading {
                 modelLoadingCard
             }
@@ -575,6 +592,33 @@ struct ChatView: View {
             tint: isOOMError(message) ? .red.opacity(0.18) : .orange.opacity(0.18),
             in: RoundedRectangle(cornerRadius: 10, style: .continuous),
             fallback: AnyShapeStyle(isOOMError(message) ? Color.red.opacity(0.1) : Color.orange.opacity(0.12))
+        )
+        .padding(.horizontal)
+    }
+
+    private func infoBanner(message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "globe")
+                .foregroundStyle(BrandPalette.cyan)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.primary)
+            Spacer()
+            Button {
+                chatViewModel.webSearchNotice = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: bottomChromeMaxWidth)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .liquidGlassSurface(
+            tint: BrandPalette.cyan.opacity(0.16),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous),
+            fallback: AnyShapeStyle(BrandPalette.cyan.opacity(0.08))
         )
         .padding(.horizontal)
     }
@@ -735,8 +779,30 @@ struct ChatView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                Button {
-                    showAttachmentActionSheet = true
+                Menu {
+                    Button {
+                        showDocumentImporter = true
+                    } label: {
+                        Label(String.appLocalized("chat.import_document"), systemImage: "doc.text")
+                    }
+
+                    if chatViewModel.canUseVision {
+                        Button {
+                            showCamera = true
+                        } label: {
+                            Label(String.appLocalized("chat.take_photo"), systemImage: "camera")
+                        }
+
+                        Button {
+                            showPhotoLibrary = true
+                        } label: {
+                            Label(String.appLocalized("chat.photo_library"), systemImage: "photo.on.rectangle")
+                        }
+                    }
+
+                    Toggle(isOn: webSearchMenuBinding) {
+                        Label("Web Search", systemImage: "globe")
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.title3.weight(.semibold))
@@ -751,20 +817,6 @@ struct ChatView: View {
                 }
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Add attachment")
-                .confirmationDialog(String.appLocalized("chat.add_to_conversation"), isPresented: $showAttachmentActionSheet) {
-                    Button(String.appLocalized("chat.import_document")) {
-                        showDocumentImporter = true
-                    }
-                    if chatViewModel.canUseVision {
-                        Button(String.appLocalized("chat.take_photo")) {
-                            showCamera = true
-                        }
-                        Button(String.appLocalized("chat.photo_library")) {
-                            showPhotoLibrary = true
-                        }
-                    }
-                    Button(String.appLocalized("common.cancel"), role: .cancel) {}
-                }
 
                 if chatViewModel.canUseThinking {
                     Button {
@@ -789,7 +841,9 @@ struct ChatView: View {
                     text: $inputText,
                     isGenerating: chatViewModel.isGenerating,
                     isSendEnabled: canSendMessage,
+                    isVoiceEnabled: canPresentLiveVoice,
                     isFocused: $isInputFocused,
+                    onVoiceTap: { showLiveVoice = true },
                     onSend: sendMessage,
                     onStop: chatViewModel.stopGeneration
                 )
@@ -815,6 +869,30 @@ struct ChatView: View {
         !chatViewModel.isModelLoading && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var canPresentLiveVoice: Bool {
+        !chatViewModel.isModelLoading
+            && !chatViewModel.isGenerating
+            && appState.loadedModelId != nil
+            && !isRunningOnSimulator
+    }
+
+    private var webSearchMenuBinding: Binding<Bool> {
+        Binding(
+            get: { chatViewModel.isWebSearchEnabled },
+            set: { isEnabled in
+                guard isEnabled != chatViewModel.isWebSearchEnabled else { return }
+
+                if !isEnabled {
+                    chatViewModel.setWebSearchEnabled(false)
+                } else if appState.hasSeenWebSearchDisclosure {
+                    chatViewModel.setWebSearchEnabled(true)
+                } else {
+                    showWebSearchDisclosure = true
+                }
+            }
+        )
+    }
+
     private var supportedDocumentTypes: [UTType] {
         Self.cachedSupportedDocumentTypes
     }
@@ -836,5 +914,13 @@ struct ChatView: View {
         case .text:
             "doc.text"
         }
+    }
+
+    private var isRunningOnSimulator: Bool {
+        #if targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
     }
 }

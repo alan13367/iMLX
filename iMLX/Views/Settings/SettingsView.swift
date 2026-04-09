@@ -60,6 +60,36 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Onboarding") {
+                Button("Replay onboarding") {
+                    appState.resetOnboarding()
+                }
+            }
+
+            Section("Speech Assets") {
+                LabeledContent("Resolved voice locale") {
+                    Text(appState.resolvedVoiceLocale.displayName)
+                }
+                LabeledContent("Core model") {
+                    Text(appState.speechAssetStatus.hasCoreModel ? "Installed" : "Not installed")
+                }
+                LabeledContent("Voice locales") {
+                    Text(
+                        appState.speechAssetStatus.activatedLocales.isEmpty
+                            ? "None"
+                            : appState.speechAssetStatus.activatedLocales
+                                .sorted { $0.displayName < $1.displayName }
+                                .map(\.displayName)
+                                .joined(separator: ", ")
+                    )
+                }
+                Button("Clear speech assets", role: .destructive) {
+                    Task {
+                        await appState.clearSpeechAssets()
+                    }
+                }
+            }
+
             Section(String.appLocalized("settings.section.storage")) {
                 LabeledContent(String.appLocalized("settings.models_storage")) {
                     Text(String(format: "%.2f GB", appState.manifestService.totalStorageUsedGB))

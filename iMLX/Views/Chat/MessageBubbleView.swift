@@ -5,6 +5,7 @@ import ImageIO
 import UniformTypeIdentifiers
 
 struct MessageBubbleView: View, Equatable {
+    @Environment(\.openURL) private var openURL
     let message: ChatMessage
     let isStreaming: Bool
     let parsedAssistantContent: ParsedAssistantContent?
@@ -195,25 +196,35 @@ struct MessageBubbleView: View, Equatable {
         message.role == .user && (message.attachedImages?.count == 1)
     }
 
-    private func sourcesSection(_ sources: [RetrievedDocumentSource]) -> some View {
+    private func sourcesSection(_ sources: [MessageSource]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(String.appLocalized("message.sources"), systemImage: "doc.text.magnifyingglass")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             ForEach(sources) { source in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(sourceTitle(for: source))
-                        .font(.caption.weight(.semibold))
-                    Text(source.excerpt)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
+                Button {
+                    if let url = source.url {
+                        openURL(url)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(sourceTitle(for: source))
+                            .font(.caption.weight(.semibold))
+                            .multilineTextAlignment(.leading)
+                        Text(source.excerpt)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(.fill.quaternary)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(.fill.quaternary)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.plain)
+                .disabled(source.url == nil)
             }
         }
     }
@@ -310,11 +321,11 @@ struct MessageBubbleView: View, Equatable {
         }
     }
 
-    private func sourceTitle(for source: RetrievedDocumentSource) -> String {
+    private func sourceTitle(for source: MessageSource) -> String {
         if let location = source.location, !location.isEmpty {
-            return "\(source.documentName) | \(location)"
+            return "\(source.title) | \(location)"
         }
-        return source.documentName
+        return source.title
     }
 }
 

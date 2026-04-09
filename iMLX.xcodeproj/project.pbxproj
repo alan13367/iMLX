@@ -13,6 +13,8 @@
 		E74248D12F7D2670003ECA6B /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P004 /* MLXLMCommon */; };
 		E74248D22F7D2670003ECA6B /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P005 /* MLXLLM */; };
 		E74248D32F7D2670003ECA6B /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P006 /* MLXVLM */; };
+		E74248D42F7D2670003ECA6B /* MLXFFT in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P007 /* MLXFFT */; };
+		E74248D52F7D2670003ECA6B /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P008 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +34,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E74248D52F7D2670003ECA6B /* ZIPFoundation in Frameworks */,
+				E74248D42F7D2670003ECA6B /* MLXFFT in Frameworks */,
 				E74248D32F7D2670003ECA6B /* MLXVLM in Frameworks */,
 				E74248D22F7D2670003ECA6B /* MLXLLM in Frameworks */,
 				E74248D12F7D2670003ECA6B /* MLXLMCommon in Frameworks */,
@@ -86,6 +90,8 @@
 				E7B001012F7D30000001P004 /* MLXLMCommon */,
 				E7B001012F7D30000001P005 /* MLXLLM */,
 				E7B001012F7D30000001P006 /* MLXVLM */,
+				E7B001012F7D30000001P007 /* MLXFFT */,
+				E7B001012F7D30000001P008 /* ZIPFoundation */,
 			);
 			productName = iMLX;
 			productReference = E7306A002F7D21010061F6D5 /* iMLX.app */;
@@ -120,6 +126,7 @@
 			packageReferences = (
 				E7B002002F7D30000002P001 /* XCRemoteSwiftPackageReference "mlx-swift" */,
 				E7B002002F7D30000002P002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
+				E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E7306A012F7D21010061F6D5 /* Products */;
@@ -283,6 +290,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to capture photos for visual models.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access for live voice conversations.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "We need speech recognition to transcribe your voice locally for live conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -317,6 +326,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to capture photos for visual models.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access for live voice conversations.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "We need speech recognition to transcribe your voice locally for live conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -379,6 +390,14 @@
 				kind = branch;
 			};
 		};
+		E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -411,6 +430,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E7B002002F7D30000002P002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXVLM;
+		};
+		E7B001012F7D30000001P007 /* MLXFFT */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E7B002002F7D30000002P001 /* XCRemoteSwiftPackageReference "mlx-swift" */;
+			productName = MLXFFT;
+		};
+		E7B001012F7D30000001P008 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -2,15 +2,29 @@ import Foundation
 
 @Observable
 final class AppState {
+    private enum Keys {
+        static let selectedModelId = "selectedModelId"
+        static let hasCompletedOnboarding = "hasCompletedOnboarding"
+        static let pendingStarterModelId = "pendingStarterModelId"
+        static let hasSeenWebSearchDisclosure = "hasSeenWebSearchDisclosure"
+    }
+
     var selectedModel: ModelInfo?
     var isModelLoading: Bool = false
     var loadedModelId: String?
     var modelDownloadSnapshots: [String: ModelDownloadSnapshot] = [:]
+    var speechAssetStatus: SpeechAssetStatus = .empty
+    var hasCompletedOnboarding: Bool
+    var pendingStarterModelId: String?
+    var hasSeenWebSearchDisclosure: Bool
+    var voiceSessionInvalidationSeed: Int = 0
 
     let conversationService = ConversationService()
     let inferenceService = InferenceService()
     let downloadService: ModelDownloadService
     let manifestService: ManifestService
+    let speechAssetService: SpeechAssetService
+    let webSearchService = WebSearchService()
     let personaService = PersonaService()
     let memoryService = MemoryService()
     let documentLibraryService = DocumentLibraryService()
@@ -25,7 +39,15 @@ final class AppState {
     init() {
         self.manifestService = ManifestService()
         self.downloadService = ModelDownloadService(manifestService: manifestService)
+        self.speechAssetService = SpeechAssetService()
         preferredAppLanguageCode = userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
+        if let persistedOnboardingState = userDefaults.object(forKey: Keys.hasCompletedOnboarding) as? Bool {
+            hasCompletedOnboarding = persistedOnboardingState
+        } else {
+            hasCompletedOnboarding = Self.hasExistingUserState(userDefaults: userDefaults)
+        }
+        pendingStarterModelId = userDefaults.string(forKey: Keys.pendingStarterModelId)
+        hasSeenWebSearchDisclosure = userDefaults.bool(forKey: Keys.hasSeenWebSearchDisclosure)
         loadPersonas()
         loadMemories()
         loadConversationsFromDisk()
@@ -37,13 +59,38 @@ final class AppState {
                 guard let self else { return }
                 await self.handleDownloadSnapshots(snapshots)
             }
+            await self.speechAssetService.setStatusObserver { [weak self] status in
+                guard let self else { return }
+                await MainActor.run {
+                    self.speechAssetStatus = status
+                }
+            }
             await self.downloadService.restorePendingDownloads()
+            let speechStatus = await self.speechAssetService.status()
+            await MainActor.run {
+                self.speechAssetStatus = speechStatus
+            }
             _ = await self.reconcileModelCatalogState()
         }
     }
 
+    private static func hasExistingUserState(userDefaults: UserDefaults) -> Bool {
+        userDefaults.string(forKey: Keys.selectedModelId) != nil
+            || userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey) != nil
+            || !ManifestService().getDownloadedModels().isEmpty
+            || !MemoryService().listAll().isEmpty
+            || !ConversationService().listAll().isEmpty
+    }
+
     var effectiveLocale: Locale {
         AppLocalization.effectiveLocale
+    }
+
+    var resolvedVoiceLocale: VoiceLocale {
+        VoiceLocale.resolve(
+            preferredAppLanguageCode: preferredAppLanguageCode,
+            effectiveLocale: effectiveLocale
+        )
     }
 
     func setPreferredAppLanguage(_ code: String?) {
@@ -53,14 +100,57 @@ final class AppState {
             userDefaults.removeObject(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
         }
         preferredAppLanguageCode = code
+        voiceSessionInvalidationSeed &+= 1
+    }
+
+    func markOnboardingCompleted() {
+        hasCompletedOnboarding = true
+        userDefaults.set(true, forKey: Keys.hasCompletedOnboarding)
+    }
+
+    func resetOnboarding() {
+        hasCompletedOnboarding = false
+        userDefaults.set(false, forKey: Keys.hasCompletedOnboarding)
+    }
+
+    func markWebSearchDisclosureSeen() {
+        hasSeenWebSearchDisclosure = true
+        userDefaults.set(true, forKey: Keys.hasSeenWebSearchDisclosure)
+    }
+
+    func recommendedStarterModels(deviceCapabilityService: DeviceCapabilityService = DeviceCapabilityService()) -> [ModelInfo] {
+        let modelIDs: [String]
+        switch deviceCapabilityService.tier {
+        case .tier8GB:
+            modelIDs = ["qwen3-1.7b-4bit", "lfm2.5-350m-4bit", "qwen3.5-2b-4bit"]
+        case .tier12GB, .tier16GB, .tier24GB:
+            modelIDs = ["qwen3-4b-4bit", "lfm2.5-350m-4bit", "qwen3.5-4b-4bit"]
+        }
+
+        return modelIDs.compactMap { id in
+            Constants.ModelRegistry.curatedModels.first(where: { $0.id == id })
+        }
+    }
+
+    @MainActor
+    func startStarterModelDownload(_ model: ModelInfo) async throws {
+        pendingStarterModelId = model.id
+        userDefaults.set(model.id, forKey: Keys.pendingStarterModelId)
+        try await downloadService.startDownload(for: model)
+    }
+
+    @MainActor
+    func clearSpeechAssets() async {
+        await speechAssetService.clearAllAssets()
+        speechAssetStatus = await speechAssetService.status()
     }
 
     func selectModel(_ model: ModelInfo?) {
         selectedModel = model
         if let model {
-            userDefaults.set(model.id, forKey: "selectedModelId")
+            userDefaults.set(model.id, forKey: Keys.selectedModelId)
         } else {
-            userDefaults.removeObject(forKey: "selectedModelId")
+            userDefaults.removeObject(forKey: Keys.selectedModelId)
         }
     }
 
@@ -69,7 +159,7 @@ final class AppState {
     }
 
     func restoreModelState() {
-        let selectedId = userDefaults.string(forKey: "selectedModelId")
+        let selectedId = userDefaults.string(forKey: Keys.selectedModelId)
         userDefaults.removeObject(forKey: "loadedModelId")
 
         if let selectedId,
@@ -172,6 +262,21 @@ final class AppState {
         let removedModelIDs = previousModelIDs.subtracting(snapshots.keys)
         if !removedModelIDs.isEmpty {
             _ = await reconcileModelCatalogState()
+        }
+
+        if let pendingStarterModelId,
+           snapshots[pendingStarterModelId] == nil,
+           manifestService.isDownloaded(modelId: pendingStarterModelId) {
+            if selectedModel == nil || selectedModel?.id == pendingStarterModelId {
+                if let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == pendingStarterModelId }) {
+                    var updatedModel = model
+                    updatedModel.isDownloaded = true
+                    updatedModel.localURL = await downloadService.localURL(for: model)
+                    selectModel(updatedModel)
+                }
+            }
+            self.pendingStarterModelId = nil
+            userDefaults.removeObject(forKey: Keys.pendingStarterModelId)
         }
     }
 

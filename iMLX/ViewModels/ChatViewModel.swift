@@ -41,6 +41,8 @@ final class ChatViewModel {
     var memoryNotice: ChatMemoryNotice?
     var activeConversationId: UUID?
     var isThinkingEnabled: Bool = false
+    var isWebSearchEnabled: Bool = false
+    var webSearchNotice: String?
 
     var canUseThinking: Bool {
         resolvedCurrentModel()?.supportsThinking == true
@@ -65,11 +67,12 @@ final class ChatViewModel {
 
     private var inferenceService: InferenceService { appState.inferenceService }
     private var downloadService: ModelDownloadService { appState.downloadService }
-    private var generationTask: Task<Void, Never>?
+    private var generationTask: Task<ChatMessage?, Never>?
     private let appState: AppState
     private let deviceCapabilityService: DeviceCapabilityService
     private var capabilityModelId: String?
     private var memoryExtractionTasks: [UUID: Task<Void, Never>] = [:]
+    private var titleGenerationTasks: [UUID: Task<Void, Never>] = [:]
     private var suppressedMemoryNoticeKey: String?
 
     init(appState: AppState, deviceCapabilityService: DeviceCapabilityService = DeviceCapabilityService()) {
@@ -81,6 +84,9 @@ final class ChatViewModel {
     deinit {
         generationTask?.cancel()
         for task in memoryExtractionTasks.values {
+            task.cancel()
+        }
+        for task in titleGenerationTasks.values {
             task.cancel()
         }
     }
@@ -97,28 +103,56 @@ final class ChatViewModel {
         errorMessage = nil
         memoryNotice = nil
         suppressedMemoryNoticeKey = nil
+        isWebSearchEnabled = conversation.webSearchEnabled
+        webSearchNotice = nil
         updateThinkingAvailability(for: resolvedCurrentModel())
     }
 
     @MainActor
     func sendMessage(_ text: String) {
-        guard !isGenerating else { return }
+        let normalizedText = prepareToSendMessage(text)
+        guard let normalizedText else { return }
+        generationTask = Task<ChatMessage?, Never> { @MainActor [self] in
+            return await self.performSendMessage(normalizedText)
+        }
+    }
+
+    @MainActor
+    func sendMessageAndWait(_ text: String) async -> ChatMessage? {
+        let normalizedText = prepareToSendMessage(text)
+        guard let normalizedText else { return nil }
+        let task = Task<ChatMessage?, Never> { @MainActor [self] in
+            return await self.performSendMessage(normalizedText)
+        }
+        generationTask = task
+        return await task.value
+    }
+
+    @MainActor
+    func setWebSearchEnabled(_ enabled: Bool) {
+        isWebSearchEnabled = enabled
+        saveCurrentConversation()
+    }
+
+    @MainActor
+    private func prepareToSendMessage(_ text: String) -> String? {
+        guard !isGenerating else { return nil }
         guard !isModelLoading else {
             errorMessage = String.appLocalized("error.chat.model_still_loading")
             Haptics.notificationWarning()
-            return
+            return nil
         }
         guard appState.loadedModelId != nil else {
             errorMessage = String.appLocalized("error.chat.no_model_loaded")
             Haptics.notificationWarning()
-            return
+            return nil
         }
 
         let availableMB = deviceCapabilityService.availableMemoryMB
         if availableMB > 0 && availableMB < 200 {
             errorMessage = String(format: String.appLocalized("error.chat.low_memory"), availableMB)
             Haptics.notificationWarning()
-            return
+            return nil
         }
 
         if activeConversationId == nil {
@@ -126,6 +160,11 @@ final class ChatViewModel {
             activeConversationId = id
         }
 
+        return text
+    }
+
+    @MainActor
+    private func performSendMessage(_ text: String) async -> ChatMessage? {
         let loadedModel = resolvedCurrentModel()
         let history = promptHistory(from: messages, for: loadedModel)
         let userMessage = ChatMessage(
@@ -141,6 +180,7 @@ final class ChatViewModel {
         currentResponse = ""
         currentParsedResponse = .empty
         errorMessage = nil
+        webSearchNotice = nil
         pendingImages.removeAll()
         pendingDocuments.removeAll()
 
@@ -154,63 +194,79 @@ final class ChatViewModel {
         let thinkingEnabled = loadedModel?.supportsThinking == true ? isThinkingEnabled : false
         let generationMaxTokens = generationTokenLimit(for: loadedModel, thinkingEnabled: thinkingEnabled)
 
-        generationTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let startTime = Date()
-            var tokenCount = 0
-            var accumulatedResponse = ""
-            var latestParsedResponse = ParsedAssistantContent.empty
-            var lastResponseFlush = Date.distantPast
-            var shouldForceFinalAnswerFollowUp = false
-            let retrievalResult = await self.appState.documentLibraryService.retrieveContext(
+        let startTime = Date()
+        var tokenCount = 0
+        var accumulatedResponse = ""
+        var latestParsedResponse = ParsedAssistantContent.empty
+        var lastResponseFlush = Date.distantPast
+        var shouldForceFinalAnswerFollowUp = false
+        let retrievalResult = await self.appState.documentLibraryService.retrieveContext(
                 for: text,
                 documents: self.attachedDocuments
             )
-            let memoryRetrievalResult = self.appState.retrieveMemoryContext(
+        let webRetrievalResult: MessageGroundingResult
+        if isWebSearchEnabled {
+            do {
+                webRetrievalResult = try await appState.webSearchService.retrieveContext(for: text)
+            } catch {
+                webRetrievalResult = MessageGroundingResult(contextBlock: "", sources: [])
+                webSearchNotice = "Web search was unavailable for this turn. iMLX answered locally instead."
+            }
+        } else {
+            webRetrievalResult = MessageGroundingResult(contextBlock: "", sources: [])
+        }
+        let memoryRetrievalResult = self.appState.retrieveMemoryContext(
                 for: text,
                 personaId: persona.id,
                 maxCharacters: self.memoryContextCharacterLimit(for: loadedModel)
             )
-            let memoryContext = self.promptMemoryContext(
+        let memoryContext = self.promptMemoryContext(
                 memoryRetrievalResult.contextBlock,
                 for: loadedModel
             )
-            let documentContext = self.promptDocumentContext(
+        let documentContext = self.promptDocumentContext(
                 retrievalResult.contextBlock,
                 for: loadedModel
             )
-            let effectiveSystemPrompt = self.mergedSystemPrompt(
+        let webContext = self.promptWebContext(
+            webRetrievalResult.contextBlock,
+            for: loadedModel
+        )
+        let effectiveSystemPrompt = self.mergedSystemPrompt(
                 base: systemPrompt,
                 memoryContext: memoryContext,
                 documentContext: documentContext,
+                webContext: webContext,
                 thinkingEnabled: thinkingEnabled
             )
 
-            @MainActor
-            func enforceMemorySafety() throws {
-                let availableMB = self.deviceCapabilityService.availableMemoryMB
-                if availableMB > 0 && availableMB < Constants.Generation.lowMemoryAbortThresholdMB {
-                    throw ChatGenerationAbort.lowMemory(availableMB)
-                }
+        @MainActor
+        func enforceMemorySafety() throws {
+            let availableMB = self.deviceCapabilityService.availableMemoryMB
+            if availableMB > 0 && availableMB < Constants.Generation.lowMemoryAbortThresholdMB {
+                throw ChatGenerationAbort.lowMemory(availableMB)
             }
+        }
 
-            @MainActor
-            func refreshParsedResponse() {
-                latestParsedResponse = ParsedAssistantContent(accumulatedResponse, isStreaming: true)
-            }
+        @MainActor
+        func refreshParsedResponse() {
+            latestParsedResponse = ParsedAssistantContent(accumulatedResponse, isStreaming: true)
+        }
 
-            @MainActor
-            func flushResponseToUI(force: Bool = false) {
-                let now = Date()
-                guard force || now.timeIntervalSince(lastResponseFlush) >= Constants.UI.streamingResponseFlushInterval else { return }
-                refreshParsedResponse()
-                self.currentResponse = accumulatedResponse
-                self.currentParsedResponse = latestParsedResponse
-                lastResponseFlush = now
-            }
+        @MainActor
+        func flushResponseToUI(force: Bool = false) {
+            let now = Date()
+            guard force || now.timeIntervalSince(lastResponseFlush) >= Constants.UI.streamingResponseFlushInterval else { return }
+            refreshParsedResponse()
+            self.currentResponse = accumulatedResponse
+            self.currentParsedResponse = latestParsedResponse
+            lastResponseFlush = now
+        }
 
-            do {
-                let stream = await self.inferenceService.generate(
+        var completedAssistantMessage: ChatMessage?
+
+        do {
+            let stream = await self.inferenceService.generate(
                     prompt: text,
                     images: userMessage.attachedImages,
                     thinkingEnabled: loadedModel?.supportsThinking == true ? thinkingEnabled : nil,
@@ -243,8 +299,8 @@ final class ChatViewModel {
 
                 flushResponseToUI(force: true)
 
-                if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: latestParsedResponse, thinkingEnabled: thinkingEnabled) {
-                    let followUpStream = await self.inferenceService.generate(
+            if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: latestParsedResponse, thinkingEnabled: thinkingEnabled) {
+                let followUpStream = await self.inferenceService.generate(
                         prompt: text,
                         images: userMessage.attachedImages,
                         thinkingEnabled: false,
@@ -252,7 +308,8 @@ final class ChatViewModel {
                         systemPrompt: self.finalAnswerSystemPrompt(
                             base: systemPrompt,
                             memoryContext: memoryContext,
-                            documentContext: documentContext
+                            documentContext: documentContext,
+                            webContext: webContext
                         ),
                         maxTokens: Constants.Generation.finalAnswerMaxTokens,
                         temperature: temperature,
@@ -289,73 +346,91 @@ final class ChatViewModel {
                     peakMemoryMB: peakMemory
                 )
 
-                if !accumulatedResponse.isEmpty {
-                    let assistantMessage = ChatMessage(
+            if !accumulatedResponse.isEmpty {
+                let assistantMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
-                        retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
+                        retrievedSources: combinedSources(
+                            retrievalResult.sources,
+                            webRetrievalResult.sources
+                        ),
                         generationStats: generationStats
                     )
-                    self.messages.append(assistantMessage)
-                    self.scheduleMemoryExtraction(
-                        userMessage: userMessage,
-                        assistantMessage: assistantMessage,
-                        personaId: persona.id,
-                        conversationId: self.activeConversationId,
-                        isEnabled: !handledExplicitMemoryCommand
-                    )
-                }
-
+                self.messages.append(assistantMessage)
+                self.scheduleMemoryExtraction(
+                    userMessage: userMessage,
+                    assistantMessage: assistantMessage,
+                    personaId: persona.id,
+                    conversationId: self.activeConversationId,
+                    isEnabled: !handledExplicitMemoryCommand
+                )
+                completedAssistantMessage = assistantMessage
                 self.saveCurrentConversation()
-                Haptics.impactMedium()
-            } catch is CancellationError {
-                flushResponseToUI(force: true)
-                if !accumulatedResponse.isEmpty {
-                    let elapsed = Date().timeIntervalSince(startTime)
-                    let peakMemory = await self.currentMemoryUsage()
-                    let partialMessage = ChatMessage(
-                        role: .assistant,
-                        content: accumulatedResponse,
-                        retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
-                        generationStats: GenerationStats(
-                            tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
-                            totalTokens: tokenCount,
-                            promptTokens: self.messages.count - 1,
-                            generationTime: elapsed,
-                            peakMemoryMB: peakMemory
-                        )
-                    )
-                    self.messages.append(partialMessage)
-                }
+                self.scheduleConversationTitleGeneration(
+                    userMessage: userMessage,
+                    assistantMessage: assistantMessage
+                )
+            } else {
                 self.saveCurrentConversation()
-            } catch {
-                flushResponseToUI(force: true)
-                if !accumulatedResponse.isEmpty {
-                    let elapsed = Date().timeIntervalSince(startTime)
-                    let peakMemory = await self.currentMemoryUsage()
-                    let partialMessage = ChatMessage(
-                        role: .assistant,
-                        content: accumulatedResponse,
-                        retrievedSources: retrievalResult.sources.isEmpty ? nil : retrievalResult.sources,
-                        generationStats: GenerationStats(
-                            tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
-                            totalTokens: tokenCount,
-                            promptTokens: self.messages.count - 1,
-                            generationTime: elapsed,
-                            peakMemoryMB: peakMemory
-                        )
-                    )
-                    self.messages.append(partialMessage)
-                }
-                self.errorMessage = error.localizedDescription
-                self.saveCurrentConversation()
-                Haptics.notificationError()
             }
-
-            self.currentResponse = ""
-            self.currentParsedResponse = .empty
-            self.isGenerating = false
+            Haptics.impactMedium()
+        } catch is CancellationError {
+            flushResponseToUI(force: true)
+            if !accumulatedResponse.isEmpty {
+                let elapsed = Date().timeIntervalSince(startTime)
+                let peakMemory = await self.currentMemoryUsage()
+                let partialMessage = ChatMessage(
+                        role: .assistant,
+                        content: accumulatedResponse,
+                        retrievedSources: combinedSources(
+                            retrievalResult.sources,
+                            webRetrievalResult.sources
+                        ),
+                        generationStats: GenerationStats(
+                            tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
+                            totalTokens: tokenCount,
+                            promptTokens: self.messages.count - 1,
+                            generationTime: elapsed,
+                            peakMemoryMB: peakMemory
+                        )
+                    )
+                self.messages.append(partialMessage)
+                completedAssistantMessage = partialMessage
+            }
+            self.saveCurrentConversation()
+        } catch {
+            flushResponseToUI(force: true)
+            if !accumulatedResponse.isEmpty {
+                let elapsed = Date().timeIntervalSince(startTime)
+                let peakMemory = await self.currentMemoryUsage()
+                let partialMessage = ChatMessage(
+                        role: .assistant,
+                        content: accumulatedResponse,
+                        retrievedSources: combinedSources(
+                            retrievalResult.sources,
+                            webRetrievalResult.sources
+                        ),
+                        generationStats: GenerationStats(
+                            tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
+                            totalTokens: tokenCount,
+                            promptTokens: self.messages.count - 1,
+                            generationTime: elapsed,
+                            peakMemoryMB: peakMemory
+                        )
+                    )
+                self.messages.append(partialMessage)
+                completedAssistantMessage = partialMessage
+            }
+            self.errorMessage = error.localizedDescription
+            self.saveCurrentConversation()
+            Haptics.notificationError()
         }
+
+        self.currentResponse = ""
+        self.currentParsedResponse = .empty
+        self.isGenerating = false
+        self.generationTask = nil
+        return completedAssistantMessage
     }
 
     @MainActor
@@ -409,6 +484,24 @@ final class ChatViewModel {
         updateThinkingAvailability(for: nil)
     }
 
+    @MainActor
+    func suspendLoadedModelForVoicePlayback() async -> ModelInfo? {
+        guard let selectedModel = appState.selectedModel else { return nil }
+        guard appState.loadedModelId == selectedModel.id else { return selectedModel }
+
+        await inferenceService.unload()
+        appState.setLoadedModel(id: nil)
+        updateThinkingAvailability(for: selectedModel)
+        return selectedModel
+    }
+
+    @MainActor
+    func resumeModelAfterVoicePlayback(_ model: ModelInfo?) async {
+        guard let model else { return }
+        guard appState.loadedModelId != model.id else { return }
+        await loadModel(model)
+    }
+
     @discardableResult
     @MainActor
     func startNewConversation() -> UUID? {
@@ -426,6 +519,8 @@ final class ChatViewModel {
             memoryNotice = nil
             suppressedMemoryNoticeKey = nil
             activePersonaId = appState.defaultPersona().id
+            isWebSearchEnabled = false
+            webSearchNotice = nil
         }
         return id
     }
@@ -506,6 +601,7 @@ final class ChatViewModel {
             conversation.messages = messages
             conversation.modelId = appState.loadedModelId
             conversation.personaId = activePersonaId ?? appState.defaultPersona().id
+            conversation.webSearchEnabled = isWebSearchEnabled
             conversation.documents = attachedDocuments
             conversation.updatedAt = Date()
         } else {
@@ -514,11 +610,99 @@ final class ChatViewModel {
                 messages: messages,
                 modelId: appState.loadedModelId,
                 personaId: activePersonaId ?? appState.defaultPersona().id,
+                webSearchEnabled: isWebSearchEnabled,
                 documents: attachedDocuments
             )
         }
 
         appState.updateConversation(conversation)
+    }
+
+    @MainActor
+    private func scheduleConversationTitleGeneration(
+        userMessage: ChatMessage,
+        assistantMessage: ChatMessage
+    ) {
+        guard let conversationId = activeConversationId else { return }
+        guard let conversation = appState.conversations.first(where: { $0.id == conversationId }) else { return }
+        guard conversation.title == "New Conversation" else { return }
+
+        titleGenerationTasks[conversationId]?.cancel()
+        titleGenerationTasks[conversationId] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.titleGenerationTasks[conversationId] = nil }
+            guard let generatedTitle = try? await self.generateConversationTitle(
+                userMessage: userMessage,
+                assistantMessage: assistantMessage
+            ) else {
+                return
+            }
+            guard !generatedTitle.isEmpty else { return }
+            guard var refreshedConversation = self.appState.conversationService.load(id: conversationId),
+                  refreshedConversation.title == "New Conversation" else {
+                return
+            }
+            refreshedConversation.title = generatedTitle
+            self.appState.updateConversation(refreshedConversation)
+        }
+    }
+
+    @MainActor
+    private func generateConversationTitle(
+        userMessage: ChatMessage,
+        assistantMessage: ChatMessage
+    ) async throws -> String? {
+        guard #available(iOS 26.0, *) else { return nil }
+        let model = SystemLanguageModel(useCase: .general)
+        guard model.isAvailable else { return nil }
+
+        let session = LanguageModelSession(
+            model: model,
+            instructions: """
+            You generate short conversation titles for a private on-device chat app.
+            Return only the title text.
+            Keep it plain, specific, and between 2 and 4 words when possible.
+            Never use quotes, markdown, punctuation at the end, or line breaks.
+            """
+        )
+
+        let response = try await session.respond(
+            to: """
+            First user message:
+            \(userMessage.content)
+
+            First assistant reply:
+            \(assistantMessage.content)
+            """,
+            options: GenerationOptions(
+                sampling: .greedy,
+                temperature: 0.0,
+                maximumResponseTokens: 12
+            )
+        )
+
+        let sanitized = sanitizeConversationTitle(response.content)
+        return sanitized.isEmpty ? nil : sanitized
+    }
+
+    private func sanitizeConversationTitle(_ rawTitle: String) -> String {
+        let flattened = rawTitle
+            .components(separatedBy: .newlines)
+            .joined(separator: " ")
+            .replacingOccurrences(of: #"[\"*_`#]"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        let collapsedWhitespace = flattened.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        if collapsedWhitespace.count <= 32 {
+            return collapsedWhitespace
+        }
+        let endIndex = collapsedWhitespace.index(collapsedWhitespace.startIndex, offsetBy: 32)
+        return String(collapsedWhitespace[..<endIndex])
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func combinedSources(_ documentSources: [MessageSource], _ webSources: [MessageSource]) -> [MessageSource]? {
+        let sources = documentSources + webSources
+        return sources.isEmpty ? nil : sources
     }
 
     @MainActor
@@ -782,6 +966,13 @@ final class ChatViewModel {
         return String(context.prefix(characterLimit))
     }
 
+    private func promptWebContext(_ context: String, for model: ModelInfo?) -> String {
+        guard isMemoryConstrainedLargeModel(model) else { return context }
+        let characterLimit = Constants.Generation.memoryConstrainedDocumentContextCharacters
+        guard context.count > characterLimit else { return context }
+        return String(context.prefix(characterLimit))
+    }
+
     private func promptMemoryContext(_ context: String, for model: ModelInfo?) -> String {
         let characterLimit = memoryContextCharacterLimit(for: model)
         guard context.count > characterLimit else { return context }
@@ -803,7 +994,7 @@ final class ChatViewModel {
         max(1.0, min(requested, 2.0))
     }
 
-    private func mergedSystemPrompt(base: String, memoryContext: String, documentContext: String, thinkingEnabled: Bool) -> String {
+    private func mergedSystemPrompt(base: String, memoryContext: String, documentContext: String, webContext: String, thinkingEnabled: Bool) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
@@ -816,6 +1007,10 @@ final class ChatViewModel {
         let trimmedDocumentContext = documentContext.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedDocumentContext.isEmpty {
             parts.append(trimmedDocumentContext)
+        }
+        let trimmedWebContext = webContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedWebContext.isEmpty {
+            parts.append(trimmedWebContext)
         }
         if thinkingEnabled {
             parts.append(Constants.Generation.conciseThinkingInstruction)
@@ -823,7 +1018,7 @@ final class ChatViewModel {
         return parts.joined(separator: "\n\n")
     }
 
-    private func finalAnswerSystemPrompt(base: String, memoryContext: String, documentContext: String) -> String {
+    private func finalAnswerSystemPrompt(base: String, memoryContext: String, documentContext: String, webContext: String) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
@@ -836,6 +1031,10 @@ final class ChatViewModel {
         let trimmedDocumentContext = documentContext.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedDocumentContext.isEmpty {
             parts.append(trimmedDocumentContext)
+        }
+        let trimmedWebContext = webContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedWebContext.isEmpty {
+            parts.append(trimmedWebContext)
         }
         parts.append(Constants.Generation.finalAnswerOnlyInstruction)
         return parts.joined(separator: "\n\n")

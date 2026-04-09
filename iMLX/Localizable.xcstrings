@@ -17,6 +17,16 @@
         }
       }
     },
+    "%@ • %@ • %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ • %2$@ • %3$@"
+          }
+        }
+      }
+    },
     "%@ Family" : {
 
     },
@@ -27,6 +37,9 @@
 
     },
     "Add attachment" : {
+
+    },
+    "Back" : {
 
     },
     "brand.subtitle" : {
@@ -51,6 +64,9 @@
           }
         }
       }
+    },
+    "Cancel" : {
+
     },
     "chat.add_to_conversation" : {
       "extractionState" : "manual",
@@ -420,6 +436,15 @@
         }
       }
     },
+    "Choose one model to download now, or skip and browse models later." : {
+
+    },
+    "Clear speech assets" : {
+
+    },
+    "Close" : {
+
+    },
     "common.cancel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -558,6 +583,9 @@
         }
       }
     },
+    "Continue" : {
+
+    },
     "conversation.delete_message" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -674,6 +702,9 @@
       }
     },
     "Copy response" : {
+
+    },
+    "Core model" : {
 
     },
     "Delete conversation" : {
@@ -809,7 +840,16 @@
     "Download unavailable — another model is downloading" : {
 
     },
+    "Download Voice Assets" : {
+
+    },
+    "Enable" : {
+
+    },
     "Enable thinking" : {
+
+    },
+    "Enable web search?" : {
 
     },
     "error.chat.generation_memory_abort" : {
@@ -1087,6 +1127,12 @@
           }
         }
       }
+    },
+    "Installed" : {
+
+    },
+    "Live Voice" : {
+
     },
     "Load %@" : {
 
@@ -2385,6 +2431,15 @@
     "New conversation" : {
 
     },
+    "Not installed" : {
+
+    },
+    "Onboarding" : {
+
+    },
+    "Only the current raw user message is sent to DuckDuckGo. Persona, memory, prior transcript, and attached-document context stay local." : {
+
+    },
     "Open app menu" : {
 
     },
@@ -3380,16 +3435,25 @@
         }
       }
     },
+    "Recommended" : {
+
+    },
+    "Recommended starter models" : {
+
+    },
     "Remove document" : {
 
     },
     "Remove image" : {
 
     },
-    "Scroll to bottom" : {
+    "Replay onboarding" : {
 
     },
-    "Send message" : {
+    "Resolved voice locale" : {
+
+    },
+    "Scroll to bottom" : {
 
     },
     "settings.active_model" : {
@@ -3944,6 +4008,15 @@
         }
       }
     },
+    "Skip for now" : {
+
+    },
+    "Speech Assets" : {
+
+    },
+    "Start Using iMLX" : {
+
+    },
     "stats.mb" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4108,6 +4181,9 @@
         }
       }
     },
+    "This downloads Kokoro voice assets for %@ before live voice starts." : {
+
+    },
     "tone.balanced" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4227,6 +4303,18 @@
 
     },
     "Unload model from memory" : {
+
+    },
+    "Voice" : {
+
+    },
+    "Voice locales" : {
+
+    },
+    "Web Search" : {
+
+    },
+    "Welcome to iMLX" : {
 
     }
   },

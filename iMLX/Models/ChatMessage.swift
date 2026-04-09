@@ -16,7 +16,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
     var content: String
     var attachedImages: [ChatAttachmentImage]?
     var attachedDocuments: [ConversationDocumentReference]?
-    var retrievedSources: [RetrievedDocumentSource]?
+    var retrievedSources: [MessageSource]?
     var generationStats: GenerationStats?
     let timestamp: Date
 
@@ -42,7 +42,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         content: String,
         attachedImages: [ChatAttachmentImage]? = nil,
         attachedDocuments: [ConversationDocumentReference]? = nil,
-        retrievedSources: [RetrievedDocumentSource]? = nil,
+        retrievedSources: [MessageSource]? = nil,
         generationStats: GenerationStats? = nil
     ) {
         self.id = UUID()
@@ -55,7 +55,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         self.timestamp = Date()
     }
 
-    init(from decoder: Decoder) throws {
+    init(from decoder: any Swift.Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         role = try container.decode(Role.self, forKey: .role)
@@ -70,7 +70,13 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         }
 
         attachedDocuments = try container.decodeIfPresent([ConversationDocumentReference].self, forKey: .attachedDocuments)
-        retrievedSources = try container.decodeIfPresent([RetrievedDocumentSource].self, forKey: .retrievedSources)
+        if let decodedSources = try container.decodeIfPresent([MessageSource].self, forKey: .retrievedSources) {
+            retrievedSources = decodedSources
+        } else if let legacySources = try container.decodeIfPresent([RetrievedDocumentSource].self, forKey: .retrievedSources) {
+            retrievedSources = legacySources.map(\.messageSource)
+        } else {
+            retrievedSources = nil
+        }
         generationStats = try container.decodeIfPresent(GenerationStats.self, forKey: .generationStats)
         timestamp = try container.decode(Date.self, forKey: .timestamp)
     }

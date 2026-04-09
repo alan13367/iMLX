@@ -112,14 +112,14 @@ actor DocumentLibraryService {
         try? fileManager.removeItem(at: conversationDirectory)
     }
 
-    func retrieveContext(for query: String, documents: [ConversationDocumentReference]) -> DocumentRetrievalResult {
+    func retrieveContext(for query: String, documents: [ConversationDocumentReference]) -> MessageGroundingResult {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty, !documents.isEmpty else {
-            return DocumentRetrievalResult(contextBlock: "", sources: [])
+            return MessageGroundingResult(contextBlock: "", sources: [])
         }
 
         let queryVector = embedding(for: trimmedQuery, languageCode: detectLanguageCode(in: trimmedQuery))
-        var candidates: [(source: RetrievedDocumentSource, text: String)] = []
+        var candidates: [(source: MessageSource, text: String)] = []
         let shouldUseOverview = wantsDocumentOverview(for: trimmedQuery)
 
         for reference in documents {
@@ -137,13 +137,13 @@ actor DocumentLibraryService {
                 guard score > 0 else { continue }
 
                 let excerpt = compactExcerpt(from: chunk.text)
-                let source = RetrievedDocumentSource(
+                let source = MessageSource(
                     id: "\(reference.id)-\(chunk.id)",
-                    documentId: reference.id,
-                    documentName: reference.displayName,
-                    chunkId: chunk.id,
+                    kind: .document,
+                    title: reference.displayName,
                     excerpt: excerpt,
                     location: chunk.location,
+                    url: nil,
                     score: score
                 )
                 candidates.append((source, chunk.text))
@@ -160,19 +160,19 @@ actor DocumentLibraryService {
         let ranked = candidates
             .sorted { lhs, rhs in
                 if lhs.source.score == rhs.source.score {
-                    return lhs.source.documentName.localizedCaseInsensitiveCompare(rhs.source.documentName) == .orderedAscending
+                    return lhs.source.title.localizedCaseInsensitiveCompare(rhs.source.title) == .orderedAscending
                 }
-                return lhs.source.score > rhs.source.score
+                return (lhs.source.score ?? 0) > (rhs.source.score ?? 0)
             }
             .prefix(Constants.RAG.maxRetrievedChunks)
 
         var contextSections: [String] = []
-        var sources: [RetrievedDocumentSource] = []
+        var sources: [MessageSource] = []
         var usedCharacters = 0
 
         for candidate in ranked {
             let headerParts = [
-                "Source: \(candidate.source.documentName)",
+                "Source: \(candidate.source.title)",
                 candidate.source.location
             ]
             .compactMap { $0 }
@@ -201,7 +201,7 @@ actor DocumentLibraryService {
             """
         }
 
-        return DocumentRetrievalResult(contextBlock: contextBlock, sources: sources)
+        return MessageGroundingResult(contextBlock: contextBlock, sources: sources)
     }
 
     private func persist(record: DocumentRecord, index: DocumentIndex) throws {
@@ -502,18 +502,18 @@ actor DocumentLibraryService {
     private func overviewCandidates(
         for reference: ConversationDocumentReference,
         index: DocumentIndex
-    ) -> [(source: RetrievedDocumentSource, text: String)] {
+    ) -> [(source: MessageSource, text: String)] {
         guard !index.chunks.isEmpty else { return [] }
 
         let selectedChunks = sampledOverviewChunks(from: index.chunks)
         return selectedChunks.map { chunk in
-            let source = RetrievedDocumentSource(
+            let source = MessageSource(
                 id: "\(reference.id)-\(chunk.id)",
-                documentId: reference.id,
-                documentName: reference.displayName,
-                chunkId: chunk.id,
+                kind: .document,
+                title: reference.displayName,
                 excerpt: compactExcerpt(from: chunk.text),
                 location: chunk.location,
+                url: nil,
                 score: 1.0
             )
             return (source, chunk.text)

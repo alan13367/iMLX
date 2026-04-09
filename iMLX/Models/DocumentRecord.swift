@@ -63,21 +63,6 @@ nonisolated struct DocumentIndex: Codable {
     let chunks: [DocumentChunk]
 }
 
-nonisolated struct RetrievedDocumentSource: Identifiable, Codable, Hashable {
-    let id: String
-    let documentId: String
-    let documentName: String
-    let chunkId: String
-    let excerpt: String
-    let location: String?
-    let score: Double
-}
-
-nonisolated struct DocumentRetrievalResult {
-    let contextBlock: String
-    let sources: [RetrievedDocumentSource]
-}
-
 nonisolated enum DocumentImportError: LocalizedError {
     case unreadable
     case unsupportedType

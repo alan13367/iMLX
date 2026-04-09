@@ -68,4 +68,15 @@ nonisolated struct ModelDownloadSnapshot: Equatable, Sendable {
             return false
         }
     }
+
+    var displayStatus: String {
+        switch status {
+        case .queued:
+            return "Queued"
+        case .downloading:
+            return String(format: "Downloading %.0f%%", progress * 100)
+        case .failed:
+            return lastErrorMessage ?? "Download failed"
+        }
+    }
 }

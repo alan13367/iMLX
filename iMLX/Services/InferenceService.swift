@@ -2,12 +2,16 @@ import Foundation
 import CoreImage
 import ImageIO
 import MLX
+import MLXFFT
 import MLXLMCommon
 import MLXVLM
 
 actor InferenceService {
     private var modelContainer: ModelContainer?
     private var loadedModelSupportsVision = false
+    private var kokoroTTS: KokoroTTS?
+    private var kokoroVoiceEmbedding: MLXArray?
+    private var kokoroAssets: SpeechAssetFileLocations?
 
     var isModelLoaded: Bool {
         modelContainer != nil
@@ -137,8 +141,156 @@ actor InferenceService {
         }
     }
 
+    func synthesizeSpeech(
+        text: String,
+        locale: VoiceLocale,
+        assets: SpeechAssetFileLocations
+    ) async throws -> SynthesizedSpeech {
+        #if targetEnvironment(simulator)
+        throw InferenceError.simulatorUnsupported
+        #else
+        defer {
+            releaseSpeechSynthesisResources()
+        }
+
+        guard locale.supportsLiveKokoroSynthesis else {
+            throw InferenceError.unsupportedSpeechLocale(locale.displayName)
+        }
+
+        MLX.Memory.clearCache()
+
+        if kokoroAssets != assets || kokoroTTS == nil || kokoroVoiceEmbedding == nil {
+            kokoroTTS = KokoroTTS(modelPath: assets.modelURL)
+            let voiceWeights = try MLX.loadArrays(url: assets.voiceURL)
+            guard let firstKey = voiceWeights.keys.sorted().first,
+                  let voiceEmbedding = voiceWeights[firstKey] else {
+                throw InferenceError.speechAssetsUnavailable
+            }
+            kokoroVoiceEmbedding = voiceEmbedding
+            kokoroAssets = assets
+        }
+
+        guard let kokoroTTS,
+              let voiceEmbedding = kokoroVoiceEmbedding else {
+            throw InferenceError.speechAssetsUnavailable
+        }
+
+        let language: Language = .enUS
+        let chunks = speechChunks(for: text)
+        guard !chunks.isEmpty else {
+            throw InferenceError.speechTextEmpty
+        }
+        let audio = try await withPreferredDevice {
+            var combinedAudio: [Float] = []
+            combinedAudio.reserveCapacity(chunks.count * 24_000)
+
+            for index in chunks.indices {
+                let chunkAudio = try kokoroTTS.generateAudio(
+                    voice: voiceEmbedding,
+                    language: language,
+                    text: chunks[index]
+                ).0
+                combinedAudio.append(contentsOf: chunkAudio)
+                if index < chunks.index(before: chunks.endIndex) {
+                    combinedAudio.append(contentsOf: Array(repeating: 0, count: 2_400))
+                }
+            }
+
+            return combinedAudio
+        }
+        MLX.Memory.clearCache()
+        return SynthesizedSpeech(
+            samples: audio,
+            sampleRate: Double(KokoroTTS.Constants.samplingRate)
+        )
+        #endif
+    }
+
+    func unloadSpeechSynthesisResources() {
+        releaseSpeechSynthesisResources()
+    }
+
     private func withPreferredDevice<R>(_ operation: () async throws -> R) async rethrows -> R {
         return try await operation()
+    }
+
+    private func speechChunks(for text: String) -> [String] {
+        let normalizedText = String(
+            text
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(360)
+        )
+        guard !normalizedText.isEmpty else {
+            return []
+        }
+
+        let sentenceFragments = normalizedText
+            .components(separatedBy: CharacterSet(charactersIn: ".!?;\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let baseFragments = sentenceFragments.isEmpty ? [normalizedText] : sentenceFragments
+        var chunks: [String] = []
+        var currentChunk = ""
+
+        for fragment in baseFragments {
+            for wordChunk in splitIntoWordChunks(fragment, maxCharacters: 180) {
+                let candidate = currentChunk.isEmpty ? wordChunk : "\(currentChunk). \(wordChunk)"
+                if candidate.count <= 220 {
+                    currentChunk = candidate
+                } else {
+                    if !currentChunk.isEmpty {
+                        chunks.append(currentChunk)
+                    }
+                    currentChunk = wordChunk
+                }
+            }
+        }
+
+        if !currentChunk.isEmpty {
+            chunks.append(currentChunk)
+        }
+
+        return Array(chunks.prefix(3))
+    }
+
+    private func splitIntoWordChunks(_ text: String, maxCharacters: Int) -> [String] {
+        guard text.count > maxCharacters else {
+            return [text]
+        }
+
+        var chunks: [String] = []
+        var currentChunk = ""
+
+        for word in text.split(separator: " ") {
+            let wordString = String(word)
+            if currentChunk.isEmpty {
+                currentChunk = wordString
+                continue
+            }
+
+            let candidate = "\(currentChunk) \(wordString)"
+            if candidate.count <= maxCharacters {
+                currentChunk = candidate
+            } else {
+                chunks.append(currentChunk)
+                currentChunk = wordString
+            }
+        }
+
+        if !currentChunk.isEmpty {
+            chunks.append(currentChunk)
+        }
+
+        return chunks
+    }
+
+    private func releaseSpeechSynthesisResources() {
+        kokoroTTS = nil
+        kokoroVoiceEmbedding = nil
+        kokoroAssets = nil
+        MLX.Memory.clearCache()
     }
 
     private func detectVisionSupport(in directory: URL) -> Bool {
@@ -217,6 +369,9 @@ enum InferenceError: LocalizedError {
     case simulatorUnsupported
     case visionUnsupportedModel
     case invalidImageData
+    case speechAssetsUnavailable
+    case speechTextEmpty
+    case unsupportedSpeechLocale(String)
 
     var errorDescription: String? {
         switch self {
@@ -234,6 +389,12 @@ enum InferenceError: LocalizedError {
             String.appLocalized("error.inference.vision_unsupported")
         case .invalidImageData:
             String.appLocalized("error.inference.invalid_image")
+        case .speechAssetsUnavailable:
+            "Kokoro speech assets are not available yet."
+        case .speechTextEmpty:
+            "There was no reply text to speak."
+        case .unsupportedSpeechLocale(let localeName):
+            "Live voice is not available for \(localeName) yet."
         }
     }
 }

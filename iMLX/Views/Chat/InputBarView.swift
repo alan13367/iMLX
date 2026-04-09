@@ -4,7 +4,9 @@ struct InputBarView: View {
     @Binding var text: String
     let isGenerating: Bool
     let isSendEnabled: Bool
+    let isVoiceEnabled: Bool
     var isFocused: FocusState<Bool>.Binding
+    let onVoiceTap: () -> Void
     let onSend: () -> Void
     let onStop: () -> Void
 
@@ -41,24 +43,61 @@ struct InputBarView: View {
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Stop generating")
             } else {
-                Button(action: onSend) {
-                    Image(systemName: "arrow.up")
+                Button(action: primaryAction) {
+                    Image(systemName: primarySymbolName)
                         .font(.title3.weight(.semibold))
                         .frame(width: 32, height: 32)
-                        .foregroundStyle(isSendEnabled ? Color.white : Color.secondary)
+                        .foregroundStyle(primaryActionEnabled ? Color.white : Color.secondary)
                         .liquidGlassSurface(
-                            tint: isSendEnabled ? BrandPalette.accent.opacity(0.3) : nil,
+                            tint: primaryActionTint,
                             in: Circle(),
-                            fallback: isSendEnabled
-                                ? AnyShapeStyle(BrandPalette.primaryGradient)
-                                : AnyShapeStyle(Color.secondary.opacity(0.12)),
+                            fallback: primaryActionFallback,
                             interactive: true
                         )
                 }
-                .disabled(!isSendEnabled)
+                .disabled(!primaryActionEnabled)
                 .frame(width: 44, height: 44)
-                .accessibilityLabel("Send message")
+                .accessibilityLabel(primaryAccessibilityLabel)
             }
+        }
+    }
+
+    private var isTextEmpty: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var primaryActionEnabled: Bool {
+        isTextEmpty ? isVoiceEnabled : isSendEnabled
+    }
+
+    private var primarySymbolName: String {
+        isTextEmpty ? "mic.fill" : "arrow.up"
+    }
+
+    private var primaryAccessibilityLabel: String {
+        isTextEmpty ? "Open live voice" : "Send message"
+    }
+
+    private var primaryActionTint: Color? {
+        guard primaryActionEnabled else { return nil }
+        return isTextEmpty ? BrandPalette.cyan.opacity(0.22) : BrandPalette.accent.opacity(0.3)
+    }
+
+    private var primaryActionFallback: AnyShapeStyle {
+        if !primaryActionEnabled {
+            return AnyShapeStyle(Color.secondary.opacity(0.12))
+        }
+        if isTextEmpty {
+            return AnyShapeStyle(BrandPalette.cyan.opacity(0.9))
+        }
+        return AnyShapeStyle(BrandPalette.primaryGradient)
+    }
+
+    private func primaryAction() {
+        if isTextEmpty {
+            onVoiceTap()
+        } else {
+            onSend()
         }
     }
 }

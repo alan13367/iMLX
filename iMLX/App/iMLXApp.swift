@@ -22,6 +22,12 @@ struct AppRootView: View {
     var body: some View {
         let _ = appState.preferredAppLanguageCode
         ChatRootView(appState: appState)
+            .fullScreenCover(isPresented: Binding(
+                get: { !appState.hasCompletedOnboarding },
+                set: { _ in }
+            )) {
+                OnboardingFlowView(appState: appState)
+            }
     }
 }
 

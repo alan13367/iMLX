@@ -571,10 +571,6 @@ struct ChatView: View {
                 errorBanner(message: errorMessage)
             }
 
-            if let memoryNotice = chatViewModel.memoryNotice {
-                memoryNoticeCard(memoryNotice)
-            }
-
             if let webSearchNotice = chatViewModel.webSearchNotice {
                 infoBanner(message: webSearchNotice)
             }
@@ -585,6 +581,10 @@ struct ChatView: View {
 
             if chatViewModel.isGenerating {
                 generatingIndicator
+            }
+
+            if let memoryNotice = chatViewModel.memoryNotice {
+                memoryNoticeCard(memoryNotice)
             }
 
             inputBar
@@ -650,19 +650,20 @@ struct ChatView: View {
     }
 
     private var generatingIndicator: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
+                .tint(BrandPalette.cyan)
             Text(String.appLocalized("chat.generating"))
-                .font(.caption)
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Spacer()
         }
         .frame(maxWidth: bottomChromeMaxWidth)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .liquidGlassSurface(in: Capsule())
+        .padding(.horizontal, 20)
+        .padding(.vertical, 2)
         .padding(.horizontal)
+        .accessibilityElement(children: .combine)
     }
 
     private func errorBanner(message: String) -> some View {
@@ -786,11 +787,19 @@ struct ChatView: View {
         .frame(maxWidth: bottomChromeMaxWidth, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .liquidGlassSurface(
-            tint: notice.kind == .pending ? BrandPalette.cyan.opacity(0.16) : Color.green.opacity(0.14),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous),
-            fallback: AnyShapeStyle(notice.kind == .pending ? BrandPalette.cyan.opacity(0.1) : Color.green.opacity(0.08))
-        )
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(notice.kind == .pending ? BrandPalette.cyan.opacity(0.18) : Color.green.opacity(0.16))
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .stroke(notice.kind == .pending ? BrandPalette.cyan.opacity(0.30) : Color.green.opacity(0.24), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
         .padding(.horizontal)
     }
 

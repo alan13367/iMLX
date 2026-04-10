@@ -861,7 +861,10 @@ final class ChatViewModel {
                 maximumResponseTokens: Constants.Memory.extractionMaxTokens
             )
         )
-        return appState.memoryService.extractionCandidates(from: response.content)
+        return appState.memoryService.extractionCandidates(
+            from: response.content,
+            sourceText: userMessage.content
+        )
     }
 
     private func extractMemoryCandidatesWithLoadedMLXModel(
@@ -883,7 +886,10 @@ final class ChatViewModel {
             guard !Task.isCancelled else { throw CancellationError() }
             rawOutput += token
         }
-        return appState.memoryService.extractionCandidates(from: rawOutput)
+        return appState.memoryService.extractionCandidates(
+            from: rawOutput,
+            sourceText: userMessage.content
+        )
     }
 
     private func currentMemoryUsage() async -> UInt64 {
@@ -1299,6 +1305,8 @@ final class ChatViewModel {
         Example: "I want to learn Swift" becomes "The user wants to learn Swift."
         If a user message mixes a stable fact with a request, save only the stable fact.
         Do not output labels, topics, categories, keywords, or request types like "clarification request" or "sports recommendation".
+        Do not save greetings, thanks, acknowledgements, small talk, or descriptions of what the user said, such as "The user says hi."
+        Use only information stated or directly implied by the user message; never turn your own likely answer, price estimate, recommendation, or budget number into a user memory.
         Do not infer a preference just because the user asks about a topic.
         Do not include temporary requests, assistant facts, generic advice, secrets, or anything uncertain.
         If there is nothing worth remembering, return [].

@@ -10,7 +10,7 @@ import Foundation
 ///
 /// The protocol leverages the existing `init(bigEndian:)` and `init(littleEndian:)` initializers
 /// that are already provided by Swift's standard unsigned integer types.
-protocol MultiByteUInt {
+nonisolated protocol MultiByteUInt {
     /// Creates an integer from its big-endian representation, swapping bytes if necessary.
     /// - Parameter bigEndian: A value in big-endian byte order
     init(bigEndian: Self)
@@ -21,10 +21,10 @@ protocol MultiByteUInt {
 }
 
 /// Conformance for 16-bit unsigned integers
-extension UInt16: MultiByteUInt {}
+nonisolated extension UInt16: MultiByteUInt {}
 
 /// Conformance for 32-bit unsigned integers
-extension UInt32: MultiByteUInt {}
+nonisolated extension UInt32: MultiByteUInt {}
 
 /// Conformance for 64-bit unsigned integers
-extension UInt64: MultiByteUInt {}
+nonisolated extension UInt64: MultiByteUInt {}

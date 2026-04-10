@@ -2,7 +2,7 @@ import NaturalLanguage
 
 /// Maps Apple's NLTag (lexicalClass) to a Penn Treebank POS tag string.
 /// `token` is optional but might enable some heuristics.
-func pennTag(for nlTag: NLTag, token: String? = nil) -> String {
+nonisolated func pennTag(for nlTag: NLTag, token: String? = nil) -> String {
     let t = token?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let lower = t.lowercased()
 
@@ -140,7 +140,7 @@ func pennTag(for nlTag: NLTag, token: String? = nil) -> String {
     }
 }
 
-func isPersonalPrononun(tag: NLTag, token: String) -> Bool {
+nonisolated func isPersonalPrononun(tag: NLTag, token: String) -> Bool {
   let personalPronouns: Set<String> = [
     "i", "me", "my", "mine", "myself",
     "you", "your", "yours", "yourself", "yourselves",

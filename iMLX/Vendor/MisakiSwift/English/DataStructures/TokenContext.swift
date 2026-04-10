@@ -1,6 +1,6 @@
 import Foundation
 
-class TokenContext {
+nonisolated class TokenContext {
   var futureVowel: Bool?
   var futureTo: Bool
   

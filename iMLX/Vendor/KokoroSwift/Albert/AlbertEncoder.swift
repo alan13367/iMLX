@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AlbertEncoder {
+nonisolated class AlbertEncoder {
   let config: AlbertModelArgs
   let embeddingHiddenMappingIn: Linear
   let albertLayerGroups: [AlbertLayerGroup]

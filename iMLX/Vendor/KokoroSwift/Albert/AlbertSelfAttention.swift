@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AlbertSelfAttention {
+nonisolated class AlbertSelfAttention {
   let numAttentionHeads: Int
   let attentionHeadSize: Int
   let allHeadSize: Int

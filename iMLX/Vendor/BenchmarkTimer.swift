@@ -1,6 +1,6 @@
 import Foundation
 
-enum BenchmarkTimer {
+nonisolated enum BenchmarkTimer {
     static func reset() {}
     static func startTimer(_ name: String) {
         logPrint("Starting benchmark: \(name)")

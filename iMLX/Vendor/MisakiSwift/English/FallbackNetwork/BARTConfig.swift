@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Configuration
-struct BARTConfig: Codable {
+nonisolated struct BARTConfig: Codable {
   let activationDropout: Double
   let activationFunction: String
   let architectures: [String]

@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AlbertLayerGroup {
+nonisolated class AlbertLayerGroup {
   let albertLayers: [AlbertLayer]
 
   init(config: AlbertModelArgs, layerNum: Int, weights: [String: MLXArray]) {

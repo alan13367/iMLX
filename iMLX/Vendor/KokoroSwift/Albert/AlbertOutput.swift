@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AlbertOutput {
+nonisolated class AlbertOutput {
   let dense: Linear
   let layerNorm: LayerNorm
 

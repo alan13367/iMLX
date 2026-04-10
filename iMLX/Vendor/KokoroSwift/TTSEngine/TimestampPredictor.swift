@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class TimestampPredictor {
+nonisolated class TimestampPredictor {
   private init() {}
   
   static func preditTimestamps(tokens: [MToken], predictionDuration: MLXArray) {

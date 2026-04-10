@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class Decoder {
+nonisolated class Decoder {
   private let encode: AdainResBlk1d
   private var decode: [AdainResBlk1d] = []
   private let F0Conv: ConvWeighted

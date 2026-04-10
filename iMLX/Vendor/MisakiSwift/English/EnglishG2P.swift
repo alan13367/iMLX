@@ -2,7 +2,7 @@ import Foundation
 import NaturalLanguage
 
 // Main G2P pipeline for English text
-final public class EnglishG2P {
+nonisolated final public class EnglishG2P {
   private let british: Bool
   private let tagger: NLTagger
   private let lexicon: Lexicon

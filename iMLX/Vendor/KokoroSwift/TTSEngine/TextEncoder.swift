@@ -13,7 +13,7 @@ import MLXNN
 /// 3. **Bidirectional LSTM**: Captures long-range dependencies in both directions
 ///
 /// The output embeddings are used by the decoder to generate speech aligned with the input text.
-final class TextEncoder {
+nonisolated final class TextEncoder {
   /// Embedding layer that converts token IDs to dense vectors
   let embedding: Embedding
   

@@ -18,7 +18,7 @@ import MLXNN
 ///
 /// These prosodic features are essential for generating natural-sounding,
 /// expressive speech with proper intonation and rhythm.
-final class ProsodyPredictor {
+nonisolated final class ProsodyPredictor {
   /// Shared bidirectional LSTM for processing input features
   /// Captures temporal dependencies before branching into F0 and N predictions
   let shared: LSTM

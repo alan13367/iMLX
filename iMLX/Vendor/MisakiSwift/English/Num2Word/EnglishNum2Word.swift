@@ -1,7 +1,7 @@
 import Foundation
 
 /// Converts numbers to English words, converted from num2words Python package and from Num2Word_EN class
-struct EnglishNum2Word {
+nonisolated struct EnglishNum2Word {
   enum ConversionFormat {
     case ordinal
     case ordinalNum

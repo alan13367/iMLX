@@ -18,7 +18,7 @@ import MLXNN
 /// - Predictor (duration and prosody) weights
 /// - Text encoder weights
 /// - Decoder weights
-final class WeightLoader {
+nonisolated final class WeightLoader {
   /// WeightLoader is a utility class with only static methods.
   private init() {}
 

@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AlbertIntermediate {
+nonisolated class AlbertIntermediate {
   let dense: Linear
 
   init(config: AlbertModelArgs) {

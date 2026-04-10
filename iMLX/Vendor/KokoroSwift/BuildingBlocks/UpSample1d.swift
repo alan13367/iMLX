@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class UpSample1d {
+nonisolated class UpSample1d {
   private let layerType: String
   private let interpolate: Upsample
 

@@ -6,7 +6,7 @@ import MLX
 import MLXNN
 
 // Custom Albert Model
-class CustomAlbert {
+nonisolated class CustomAlbert {
   let config: AlbertModelArgs
   let embeddings: AlbertEmbeddings
   let encoder: AlbertEncoder

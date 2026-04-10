@@ -15,7 +15,7 @@ extension NpyContainer {
   ///   - count: The number of elements to read.
   ///   - endian: The endianness of the data (host, big, little, or not applicable).
   /// - Returns: An array of unsigned integers of type `T`, or `nil` if endianness is not applicable.
-  func loadUInts<T: MultiByteUInt>(data: Data, count: Int, endian: NpyHeader.Endian) -> [T]? {
+  nonisolated func loadUInts<T: MultiByteUInt>(data: Data, count: Int, endian: NpyHeader.Endian) -> [T]? {
     switch endian {
     case .host:
       let uints = data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
@@ -41,7 +41,7 @@ extension NpyContainer {
   ///   - data: The raw binary data to read from.
   ///   - count: The number of bytes to read.
   /// - Returns: An array of `UInt8` values.
-  func loadUInt8s(data: Data, count: Int) -> [UInt8] {
+  nonisolated func loadUInt8s(data: Data, count: Int) -> [UInt8] {
     let uints = data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
       Array(buffer.prefix(count))
     }

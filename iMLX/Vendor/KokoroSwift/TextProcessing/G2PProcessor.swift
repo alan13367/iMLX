@@ -4,7 +4,7 @@
 import Foundation
 
 /// Errors that can occur during G2P (grapheme-to-phoneme) processing.
-enum G2PProcessorError : Error {
+nonisolated enum G2PProcessorError : Error {
   /// The processor has not been initialized with a language.
   case processorNotInitialized
   /// The requested language is not supported by this processor.
@@ -15,7 +15,7 @@ enum G2PProcessorError : Error {
 /// G2P processors convert written text (graphemes) into phonetic representations (phonemes)
 /// for use in text-to-speech synthesis. Different implementations may use different
 /// underlying engines or libraries.
-protocol G2PProcessor {
+nonisolated protocol G2PProcessor {
   /// Configures the processor for a specific language.
   /// - Parameter language: The target language for phonemization.
   /// - Throws: `G2PProcessorError.unsupportedLanguage` if the language is not supported.

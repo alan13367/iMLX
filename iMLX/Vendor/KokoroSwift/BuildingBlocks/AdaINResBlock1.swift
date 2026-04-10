@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AdaINResBlock1 {
+nonisolated class AdaINResBlock1 {
   var convs1: [ConvWeighted] = []
   var convs2: [ConvWeighted] = []
   var adain1: [AdaIN1d] = []

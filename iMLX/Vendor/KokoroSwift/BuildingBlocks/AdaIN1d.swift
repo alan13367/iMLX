@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AdaIN1d {
+nonisolated class AdaIN1d {
   private let norm: InstanceNorm1d
   private let fc: Linear
 

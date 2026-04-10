@@ -6,7 +6,7 @@ import Foundation
 /// NumPy header metadata parser. Based on https://github.com/qoncept/swift-npy
 /// Represents and parses the header section of a NumPy `.npy` file, which contains metadata
 /// about the array including its shape, data type, endianness, and memory layout order.
-struct NpyHeader {
+nonisolated struct NpyHeader {
   /// Errors that can occur during header parsing.
   enum NpyHeaderError: Error {
     /// The header data is invalid or malformed.

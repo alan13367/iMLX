@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AdainResBlk1d {
+nonisolated class AdainResBlk1d {
   let actv: LeakyReLU
   let dimIn: Int
   let upsampleType: String

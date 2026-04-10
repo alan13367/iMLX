@@ -7,7 +7,7 @@ import Foundation
 /// This enum maps NumPy's type descriptor strings to Swift types. The raw values
 /// correspond to NumPy's format strings where the letter indicates the type category
 /// (b=boolean, u=unsigned int, i=signed int, f=float) and the number indicates byte size.
-enum NpyDataType: String {
+nonisolated enum NpyDataType: String {
   /// Boolean type (1 byte).
   case bool = "b1"
   /// Unsigned 8-bit integer (1 byte).

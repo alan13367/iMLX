@@ -5,7 +5,7 @@ import Foundation
 
 /// A G2P processor that uses the MisakiSwift library for English phonemization.
 /// Requires the MisakiSwift framework to be available at compile time.
-final class MisakiG2PProcessor : G2PProcessor {
+nonisolated final class MisakiG2PProcessor : G2PProcessor {
   /// The underlying MisakiSwift English G2P engine instance.
   /// This property is initialized when `setLanguage(_:)` is called and remains
   /// `nil` until the processor is properly configured.

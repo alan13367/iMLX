@@ -13,7 +13,7 @@ import Foundation
 /// - Vocabulary mappings
 ///
 /// Configuration is loaded from a JSON file bundled with the module.
-struct KokoroConfig: Decodable {
+nonisolated struct KokoroConfig: Decodable {
   /// Shared configuration instance cached after first load
   nonisolated(unsafe) static var config: KokoroConfig?
 

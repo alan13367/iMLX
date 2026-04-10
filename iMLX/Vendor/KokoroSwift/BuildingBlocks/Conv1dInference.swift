@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class Conv1dInference {
+nonisolated class Conv1dInference {
   public let weight: MLXArray
   public let bias: MLXArray?
   public let padding: Int

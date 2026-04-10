@@ -1,7 +1,7 @@
 import Foundation
 import NaturalLanguage
 
-final class Lexicon {
+nonisolated final class Lexicon {
   static let usVocab: Set<Character> = Set("AIOWYbdfhijklmnpstuvwzæðŋɑɔəɛɜɡɪɹɾʃʊʌʒʤʧˈˌθᵊᵻʔ")
   static let gbVocab: Set<Character> = Set("AIQWYabdfhijklmnpstuvwzðŋɑɒɔəɛɜɡɪɹʃʊʌʒʤʧˈˌːθᵊ")
   static let lexiconOrdinals: [Int] = [39, 45] + Array(65...90) + Array(97...122)

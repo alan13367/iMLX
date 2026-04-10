@@ -21,7 +21,7 @@ import Foundation
 ///     fileURL: URL(fileURLWithPath: "output.wav")
 /// )
 /// ```
-public final class AudioUtils {
+nonisolated public final class AudioUtils {
   /// Errors that can occur during audio file operations.
   enum AudioUtilsErrors: Error {
     /// Thrown when unable to create an AVAudioFormat with the specified parameters

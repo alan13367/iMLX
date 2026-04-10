@@ -1,6 +1,6 @@
 import Foundation
 
-final class DataResourcesUtil {
+nonisolated final class DataResourcesUtil {
     private init() {}
     
     static func loadGold(british: Bool) -> [String: Any] {

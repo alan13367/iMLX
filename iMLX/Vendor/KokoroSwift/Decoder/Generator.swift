@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class Generator {
+nonisolated class Generator {
   let numKernels: Int
   let numUpsamples: Int
   let mSource: SourceModuleHnNSF

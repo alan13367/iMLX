@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AlbertLayer {
+nonisolated class AlbertLayer {
   let attention: AlbertSelfAttention
   let fullLayerLayerNorm: LayerNorm
   let ffn: Linear

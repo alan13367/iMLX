@@ -14,13 +14,13 @@ import Foundation
 /// which handles concurrent access internally.
 ///
 /// - Parameter s: The string to print to the console
-@inline(__always) public func logPrint(_ s: String) {
+@inline(__always) nonisolated public func logPrint(_ s: String) {
   print(s)
 }
 
 #else
 
 /// No-op in RELEASE builds
-@inline(__always) public func logPrint(_ s: String) {}
+@inline(__always) nonisolated public func logPrint(_ s: String) {}
 
 #endif

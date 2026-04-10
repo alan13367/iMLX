@@ -7,7 +7,7 @@ import MLXFFT
 import MLXNN
 
 // Hanning window implementation to replace np.hanning
-func hanning(length: Int) -> MLXArray {
+nonisolated func hanning(length: Int) -> MLXArray {
   if length == 1 {
     return MLXArray(1.0)
   }
@@ -18,7 +18,7 @@ func hanning(length: Int) -> MLXArray {
 }
 
 // Unwrap implementation to replace np.unwrap
-func unwrap(p: MLXArray) -> MLXArray {
+nonisolated func unwrap(p: MLXArray) -> MLXArray {
   let period: Float = 2.0 * .pi
   let discont: Float = period / 2.0
 
@@ -43,7 +43,7 @@ func unwrap(p: MLXArray) -> MLXArray {
   return MLX.concatenated([p[0..., 0 ..< 1], p[0..., 1...] + phCorrect.cumsum(axis: 1)], axis: 1)
 }
 
-func mlxStft(
+nonisolated func mlxStft(
   x: MLXArray,
   nFft: Int = 800,
   hopLength: Int? = nil,
@@ -105,7 +105,7 @@ func mlxStft(
   return spec.transposed(1, 0)
 }
 
-func mlxIstft(
+nonisolated func mlxIstft(
   x: MLXArray,
   hopLength: Int? = nil,
   winLength: Int? = nil,
@@ -174,7 +174,7 @@ func mlxIstft(
   return reconstructed
 }
 
-class MLXSTFT {
+nonisolated class MLXSTFT {
   let filterLength: Int
   let hopLength: Int
   let winLength: Int

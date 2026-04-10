@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class _InstanceNorm {
+nonisolated class _InstanceNorm {
   let numFeatures: Int
   let eps: Float
   let momentum: Float
@@ -116,7 +116,7 @@ class _InstanceNorm {
   }
 }
 
-class InstanceNorm1d: _InstanceNorm {
+nonisolated class InstanceNorm1d: _InstanceNorm {
   override func getNoBatchDim() -> Int {
     return 2
   }

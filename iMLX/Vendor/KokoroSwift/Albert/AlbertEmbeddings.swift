@@ -5,7 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 
-class AlbertEmbeddings {
+nonisolated class AlbertEmbeddings {
   let wordEmbeddings: Embedding
   let positionEmbeddings: Embedding
   let tokenTypeEmbeddings: Embedding

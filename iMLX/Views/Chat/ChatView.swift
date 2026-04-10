@@ -16,6 +16,113 @@ private struct ChatScrollState: Equatable {
     let isPinnedToBottom: Bool
 }
 
+private struct WebSearchPillSwitch: View {
+    let isOn: Bool
+
+    var body: some View {
+        ZStack(alignment: isOn ? .trailing : .leading) {
+            Capsule()
+                .fill(isOn ? BrandPalette.accent : Color.secondary.opacity(0.24))
+                .overlay {
+                    Capsule()
+                        .stroke(Color.secondary.opacity(isOn ? 0 : 0.18), lineWidth: 1)
+                }
+
+            Circle()
+                .fill(.white)
+                .shadow(color: .black.opacity(0.16), radius: 2, x: 0, y: 1)
+                .padding(3)
+        }
+        .frame(width: 52, height: 32)
+        .animation(.spring(response: 0.24, dampingFraction: 0.82), value: isOn)
+    }
+}
+
+private struct WebSearchPrivacyConfirmationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onEnable: () -> Void
+    let onKeepLocal: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: "globe.badge.chevron.backward")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(BrandPalette.cyan)
+                            .frame(width: 44, height: 44)
+                            .liquidGlassSurface(
+                                tint: BrandPalette.cyan.opacity(0.18),
+                                in: Circle(),
+                                fallback: AnyShapeStyle(BrandPalette.cyan.opacity(0.10))
+                            )
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(String.appLocalized("web_search.privacy.title"))
+                                .font(.title3.weight(.semibold))
+                            Text(String.appLocalized("web_search.privacy.subtitle"))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        privacyPoint("network", String.appLocalized("web_search.privacy.point_message"))
+                        privacyPoint("safari", String.appLocalized("web_search.privacy.point_pages"))
+                        privacyPoint("lock.slash", String.appLocalized("web_search.privacy.point_boundary"))
+                        privacyPoint("checkmark.shield", String.appLocalized("web_search.privacy.point_local"))
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 28)
+                .padding(.bottom, 18)
+            }
+
+            VStack(spacing: 10) {
+                Button {
+                    onEnable()
+                    dismiss()
+                } label: {
+                    Text(String.appLocalized("web_search.privacy.enable"))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
+
+                Button {
+                    onKeepLocal()
+                    dismiss()
+                } label: {
+                    Text(String.appLocalized("web_search.privacy.keep_local"))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .liquidGlassButtonStyle(tint: BrandPalette.cyan)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
+        }
+        .presentationDetents([.fraction(0.82), .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func privacyPoint(_ systemImage: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BrandPalette.accent)
+                .frame(width: 24, height: 24)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 struct ChatView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var chatViewModel: ChatViewModel
@@ -26,6 +133,7 @@ struct ChatView: View {
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
     @State private var showDocumentImporter = false
+    @State private var showAttachmentPanel = false
     @State private var showWebSearchDisclosure = false
     @State private var showLiveVoice = false
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -184,14 +292,13 @@ struct ChatView: View {
         .sheet(isPresented: $showLiveVoice) {
             LiveVoiceConversationView(appState: appState, chatViewModel: chatViewModel)
         }
-        .alert("Enable web search?", isPresented: $showWebSearchDisclosure) {
-            Button("Cancel", role: .cancel) {}
-            Button("Enable") {
-                appState.markWebSearchDisclosureSeen()
+        .sheet(isPresented: $showWebSearchDisclosure) {
+            WebSearchPrivacyConfirmationSheet {
                 chatViewModel.setWebSearchEnabled(true)
+                showWebSearchDisclosure = false
+            } onKeepLocal: {
+                showWebSearchDisclosure = false
             }
-        } message: {
-            Text("Only the current raw user message is sent to DuckDuckGo. Persona, memory, prior transcript, and attached-document context stay local.")
         }
         .onDisappear {
             streamingScrollTask?.cancel()
@@ -779,30 +886,9 @@ struct ChatView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                Menu {
-                    Button {
-                        showDocumentImporter = true
-                    } label: {
-                        Label(String.appLocalized("chat.import_document"), systemImage: "doc.text")
-                    }
-
-                    if chatViewModel.canUseVision {
-                        Button {
-                            showCamera = true
-                        } label: {
-                            Label(String.appLocalized("chat.take_photo"), systemImage: "camera")
-                        }
-
-                        Button {
-                            showPhotoLibrary = true
-                        } label: {
-                            Label(String.appLocalized("chat.photo_library"), systemImage: "photo.on.rectangle")
-                        }
-                    }
-
-                    Toggle(isOn: webSearchMenuBinding) {
-                        Label("Web Search", systemImage: "globe")
-                    }
+                Button {
+                    isInputFocused = false
+                    showAttachmentPanel.toggle()
                 } label: {
                     Image(systemName: "plus")
                         .font(.title3.weight(.semibold))
@@ -817,6 +903,10 @@ struct ChatView: View {
                 }
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Add attachment")
+                .popover(isPresented: $showAttachmentPanel, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                    attachmentPanel
+                        .presentationCompactAdaptation(.popover)
+                }
 
                 if chatViewModel.canUseThinking {
                     Button {
@@ -861,6 +951,116 @@ struct ChatView: View {
         .padding(.horizontal)
     }
 
+    private var attachmentPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            attachmentPanelButton(
+                String.appLocalized("chat.import_document"),
+                systemImage: "doc.text"
+            ) {
+                closeAttachmentPanelThen {
+                    showDocumentImporter = true
+                }
+            }
+
+            if chatViewModel.canUseVision {
+                attachmentPanelButton(
+                    String.appLocalized("chat.take_photo"),
+                    systemImage: "camera"
+                ) {
+                    closeAttachmentPanelThen {
+                        showCamera = true
+                    }
+                }
+
+                attachmentPanelButton(
+                    String.appLocalized("chat.photo_library"),
+                    systemImage: "photo.on.rectangle"
+                ) {
+                    closeAttachmentPanelThen {
+                        showPhotoLibrary = true
+                    }
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 4)
+
+            webSearchToggleRow
+        }
+        .padding(10)
+        .frame(width: 286)
+        .liquidGlassSurface(
+            tint: BrandPalette.navy.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            fallback: AnyShapeStyle(.thinMaterial)
+        )
+    }
+
+    private func attachmentPanelButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.body)
+                    .foregroundStyle(BrandPalette.accent)
+                    .frame(width: 24, height: 24)
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+            }
+            .frame(minHeight: 44)
+            .padding(.horizontal, 8)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    private var webSearchToggleRow: some View {
+        Button {
+            handleWebSearchToggleTap()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "globe")
+                    .font(.body)
+                    .foregroundStyle(BrandPalette.cyan)
+                    .frame(width: 24, height: 24)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String.appLocalized("Web Search"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(String.appLocalized("web_search.menu.subtitle"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                WebSearchPillSwitch(isOn: chatViewModel.isWebSearchEnabled)
+            }
+            .frame(minHeight: 52)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String.appLocalized("Web Search"))
+        .accessibilityValue(
+            chatViewModel.isWebSearchEnabled
+                ? String.appLocalized("web_search.state.on")
+                : String.appLocalized("web_search.state.off")
+        )
+        .accessibilityHint(String.appLocalized("web_search.menu.accessibility_hint"))
+        .accessibilityAddTraits(.isButton)
+    }
+
     private var bottomChromeMaxWidth: CGFloat {
         horizontalSizeClass == .regular ? 760 : .infinity
     }
@@ -876,21 +1076,23 @@ struct ChatView: View {
             && !isRunningOnSimulator
     }
 
-    private var webSearchMenuBinding: Binding<Bool> {
-        Binding(
-            get: { chatViewModel.isWebSearchEnabled },
-            set: { isEnabled in
-                guard isEnabled != chatViewModel.isWebSearchEnabled else { return }
-
-                if !isEnabled {
-                    chatViewModel.setWebSearchEnabled(false)
-                } else if appState.hasSeenWebSearchDisclosure {
-                    chatViewModel.setWebSearchEnabled(true)
-                } else {
-                    showWebSearchDisclosure = true
-                }
+    private func handleWebSearchToggleTap() {
+        if chatViewModel.isWebSearchEnabled {
+            showAttachmentPanel = false
+            chatViewModel.setWebSearchEnabled(false)
+        } else {
+            closeAttachmentPanelThen {
+                showWebSearchDisclosure = true
             }
-        )
+        }
+    }
+
+    private func closeAttachmentPanelThen(_ action: @escaping () -> Void) {
+        showAttachmentPanel = false
+        Task { @MainActor in
+            await Task.yield()
+            action()
+        }
     }
 
     private var supportedDocumentTypes: [UTType] {

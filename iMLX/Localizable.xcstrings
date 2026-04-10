@@ -65,9 +65,6 @@
         }
       }
     },
-    "Cancel" : {
-
-    },
     "chat.add_to_conversation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -843,13 +840,7 @@
     "Download Voice Assets" : {
 
     },
-    "Enable" : {
-
-    },
     "Enable thinking" : {
-
-    },
-    "Enable web search?" : {
 
     },
     "error.chat.generation_memory_abort" : {
@@ -2435,9 +2426,6 @@
 
     },
     "Onboarding" : {
-
-    },
-    "Only the current raw user message is sent to DuckDuckGo. Persona, memory, prior transcript, and attached-document context stay local." : {
 
     },
     "Open app menu" : {
@@ -4311,8 +4299,304 @@
     "Voice locales" : {
 
     },
+    "web_search.menu.accessibility_hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Double-tap to change whether web search is used for this conversation."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Toca dos veces para cambiar si la búsqueda web se usa en esta conversación."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点两下以更改此对话是否使用网页搜索。"
+          }
+        }
+      }
+    },
+    "web_search.menu.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask online for this conversation"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consulta online en esta conversación"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为此对话联网查询"
+          }
+        }
+      }
+    },
+    "web_search.privacy.enable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable web search"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activar búsqueda web"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用网页搜索"
+          }
+        }
+      }
+    },
+    "web_search.privacy.keep_local" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep it local"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mantenerlo local"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保持本地处理"
+          }
+        }
+      }
+    },
+    "web_search.privacy.point_boundary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Those messages leave iMLX's local-only privacy boundary."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esos mensajes salen del límite de privacidad local de iMLX."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这些消息会离开 iMLX 的纯本地隐私边界。"
+          }
+        }
+      }
+    },
+    "web_search.privacy.point_local" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona, memory, prior transcript, and attached documents stay local."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La persona, la memoria, el historial previo y los documentos adjuntos permanecen locales."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "角色设定、记忆、之前的对话和附件文档仍保留在本地。"
+          }
+        }
+      }
+    },
+    "web_search.privacy.point_message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each message sent with web search enabled is used online. iMLX sends the current raw user message to DuckDuckGo."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cada mensaje enviado con búsqueda web activada se usa online. iMLX envía el mensaje actual sin procesar a DuckDuckGo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用网页搜索后发送的每条消息都会在线使用。iMLX 会把当前原始用户消息发送给 DuckDuckGo。"
+          }
+        }
+      }
+    },
+    "web_search.privacy.point_pages" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX may open result pages to read public text snippets."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX puede abrir páginas de resultados para leer fragmentos de texto públicos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX 可能会打开搜索结果页面以读取公开文本片段。"
+          }
+        }
+      }
+    },
+    "web_search.privacy.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Web search can be useful, but it is no longer fully private."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La búsqueda web puede ser útil, pero ya no es totalmente privada."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页搜索可能很有用，但不再完全私密。"
+          }
+        }
+      }
+    },
+    "web_search.privacy.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use data online?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Usar datos online?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在线使用数据？"
+          }
+        }
+      }
+    },
+    "web_search.state.off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
+    "web_search.state.on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启"
+          }
+        }
+      }
+    },
     "Web Search" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Web Search"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Búsqueda web"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页搜索"
+          }
+        }
+      }
     },
     "Welcome to iMLX" : {
 

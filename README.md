@@ -22,19 +22,39 @@ iMLX is a native app for streaming, multi-turn chat with curated MLX models: dow
 | **Models** | Browser, downloads, device-aware picks, load/unload from Chat and Models |
 | **Personas** | Reusable roles (goal, tone, optional default model); editor under **Settings → Personas**; per-chat persona + picker; starters + custom personas |
 | **Chat** | Saved conversations, history from the toolbar, chat-first launch |
+| **Memory** | Private on-device user memories, multilingual extraction, review queue, local retrieval for personalization |
 | **Thinking** | Per-model toggle where the model supports `enable_thinking` |
 | **UX** | Chat-first launch, brain-logo icon, cyan/magenta brand accents, EN / ES / zh-Hans + optional in-app language |
 
 ---
 
-## Recent updates
+## Memory
 
-- **Personas** replace a single global system prompt: choose or create a persona per chat; manage under **Settings → Personas** (guided fields or advanced sampling).
-- Chat opens into the current conversation; use the top-left list control for history.
-- The README and asset catalog use the same full-bleed high-resolution brain-logo icon so installed app icons do not show white padding.
-- Manifest validation prunes stale download entries; model paths tolerate symlinks and cache snapshots; broken links auto-heal.
-- Simulator shows a clear “unsupported” path instead of failing inside MLX load.
-- Generation uses safety caps, memory-aware stops, thinking budgets by model size, repetitive-thinking detection, and an answer-only follow-up when needed.
+iMLX includes a local memory vault for compact user facts that can help future chats feel more personal. Memories are stored on device and can be reviewed, edited, accepted, rejected, or cleared under **Settings → Memory**.
+
+The memory system is designed around source-grounded facts:
+
+- It extracts only from the user's message, not from assistant replies or recommendations.
+- It supports multilingual user input while storing canonical English memory text for consistency.
+- It keeps the original source quote and language metadata when available.
+- It filters low-value conversation events such as greetings, thanks, and generic requests.
+- High-confidence identity facts, such as the user's name, can be saved directly; broader inferred memories go through Pending Review.
+
+Retrieval stays local and synchronous. The app combines BM25-style sparse scoring, Natural Language embeddings, source-quote tokens, and relation-aware query hints so memories can be found even when the later query is in another supported language.
+
+---
+
+## How It Works
+
+iMLX keeps the main assistant loop local:
+
+- `InferenceService` serializes MLX model work and streams tokens back to the chat UI.
+- `ChatViewModel` rebuilds prompt context from the visible conversation, selected persona, relevant memories, and retrieved documents.
+- `MemoryService` stores compact user facts locally and retrieves only the memories that look relevant to the next turn.
+- `PersonaService` seeds built-in assistants and saves custom personas.
+- `DocumentLibraryService` imports local files, chunks content, indexes it, and retrieves relevant snippets for chat context.
+
+The app is designed to degrade clearly when a feature cannot run, such as MLX inference on Simulator.
 
 ---
 
@@ -90,7 +110,7 @@ xcodebuild build \
 iMLX/
 ├── App/
 ├── Models/          # Persona, Conversation, ChatMessage, …
-├── Services/        # PersonaService, InferenceService, …
+├── Services/        # Inference, downloads, memory, documents, personas
 ├── Utilities/
 ├── ViewModels/
 └── Views/
@@ -103,6 +123,8 @@ iMLX/
 ## Technical notes
 
 - MLX work is serialized through an **actor**-based inference service.
+- Memory extraction uses the active model or Apple Foundation Models when available, but retrieval is local and does not require a translation/generation pass.
+- Memory internals are split across `MemoryService.swift`, `MemoryService+Extraction.swift`, `MemoryService+Retrieval.swift`, `MemoryService+Shared.swift`, and `MemorySupport.swift`.
 - The Simulator is not a reliable stand-in for GPU behavior on device.
 - Inference is intended for **foreground** use.
 

@@ -45,6 +45,10 @@ nonisolated struct UserMemory: Identifiable, Codable, Hashable {
     var lastUsedAt: Date?
     var usageCount: Int
     var vector: [Double]?
+    var sourceLanguageCode: String?
+    var sourceQuote: String?
+    var factRelation: String?
+    var factValue: String?
 
     init(
         id: UUID = UUID(),
@@ -59,7 +63,11 @@ nonisolated struct UserMemory: Identifiable, Codable, Hashable {
         updatedAt: Date = Date(),
         lastUsedAt: Date? = nil,
         usageCount: Int = 0,
-        vector: [Double]? = nil
+        vector: [Double]? = nil,
+        sourceLanguageCode: String? = nil,
+        sourceQuote: String? = nil,
+        factRelation: String? = nil,
+        factValue: String? = nil
     ) {
         self.id = id
         self.content = content
@@ -74,6 +82,10 @@ nonisolated struct UserMemory: Identifiable, Codable, Hashable {
         self.lastUsedAt = lastUsedAt
         self.usageCount = usageCount
         self.vector = vector
+        self.sourceLanguageCode = sourceLanguageCode
+        self.sourceQuote = sourceQuote
+        self.factRelation = factRelation
+        self.factValue = factValue
     }
 
     var displayCategory: String {
@@ -85,6 +97,31 @@ nonisolated struct UserMemory: Identifiable, Codable, Hashable {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: updatedAt, relativeTo: Date())
+    }
+}
+
+nonisolated struct MemoryExtractionCandidate: Hashable {
+    let canonicalContent: String
+    let relation: String?
+    let value: String?
+    let sourceQuote: String?
+    let sourceLanguageCode: String?
+    let confidence: Double
+
+    init(
+        canonicalContent: String,
+        relation: String? = nil,
+        value: String? = nil,
+        sourceQuote: String? = nil,
+        sourceLanguageCode: String? = nil,
+        confidence: Double = 1
+    ) {
+        self.canonicalContent = canonicalContent
+        self.relation = relation
+        self.value = value
+        self.sourceQuote = sourceQuote
+        self.sourceLanguageCode = sourceLanguageCode
+        self.confidence = confidence
     }
 }
 

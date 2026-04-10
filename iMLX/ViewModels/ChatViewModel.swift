@@ -717,7 +717,8 @@ final class ChatViewModel {
                 captureType: .explicit,
                 personaId: activePersonaId,
                 sourceConversationId: activeConversationId,
-                sourceMessageId: userMessage.id
+                sourceMessageId: userMessage.id,
+                sourceQuote: text
             )
             if savedMemory != nil {
                 showMemoryNotice(
@@ -751,7 +752,8 @@ final class ChatViewModel {
                 captureType: .inferred,
                 personaId: activePersonaId,
                 sourceConversationId: activeConversationId,
-                sourceMessageId: userMessage.id
+                sourceMessageId: userMessage.id,
+                sourceQuote: text
             )
             if savedMemory != nil {
                 showMemoryNotice(
@@ -791,22 +793,36 @@ final class ChatViewModel {
                 guard !candidates.isEmpty else { return }
 
                 let pendingBefore = self.appState.memories.filter { $0.status == .pending }.count
+                let activeBefore = self.appState.memories.filter { $0.status == .active }.count
                 for candidate in candidates {
+                    let status: UserMemoryStatus = self.shouldAutoSaveExtractedMemory(candidate) ? .active : .pending
                     _ = self.appState.saveMemory(
-                        content: candidate,
-                        status: .pending,
+                        content: candidate.canonicalContent,
+                        status: status,
                         captureType: .inferred,
                         personaId: personaId,
                         sourceConversationId: conversationId,
-                        sourceMessageId: userMessage.id
+                        sourceMessageId: userMessage.id,
+                        sourceLanguageCode: candidate.sourceLanguageCode,
+                        sourceQuote: candidate.sourceQuote,
+                        factRelation: candidate.relation,
+                        factValue: candidate.value
                     )
                 }
 
-                let savedCount = max(0, self.appState.memories.filter { $0.status == .pending }.count - pendingBefore)
-                if savedCount > 0 {
+                let activeSavedCount = max(0, self.appState.memories.filter { $0.status == .active }.count - activeBefore)
+                let pendingSavedCount = max(0, self.appState.memories.filter { $0.status == .pending }.count - pendingBefore)
+                if activeSavedCount > 0 {
+                    self.showMemoryNotice(
+                        kind: .saved,
+                        message: String.appLocalized("memory.notice.saved"),
+                        eventKey: "saved:\(messageId.uuidString)"
+                    )
+                    Haptics.notificationSuccess()
+                } else if pendingSavedCount > 0 {
                     self.showMemoryNotice(
                         kind: .pending,
-                        message: String(format: String.appLocalized("memory.notice.pending"), savedCount),
+                        message: String(format: String.appLocalized("memory.notice.pending"), pendingSavedCount),
                         eventKey: "pending:\(messageId.uuidString)"
                     )
                 }
@@ -815,6 +831,14 @@ final class ChatViewModel {
             }
         }
         memoryExtractionTasks[messageId] = task
+    }
+
+    private func shouldAutoSaveExtractedMemory(_ candidate: MemoryExtractionCandidate) -> Bool {
+        let relation = candidate.relation?.lowercased()
+        return relation == "name"
+            && candidate.confidence >= 0.90
+            && candidate.sourceQuote?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && candidate.value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     @MainActor
@@ -827,7 +851,7 @@ final class ChatViewModel {
     private func extractMemoryCandidates(
         userMessage: ChatMessage,
         assistantMessage _: ChatMessage
-    ) async throws -> [String] {
+    ) async throws -> [MemoryExtractionCandidate] {
         if #available(iOS 26.0, *) {
             if let candidates = try await extractMemoryCandidatesWithAppleFoundationModel(
                 userMessage: userMessage
@@ -845,7 +869,7 @@ final class ChatViewModel {
     @available(iOS 26.0, *)
     private func extractMemoryCandidatesWithAppleFoundationModel(
         userMessage: ChatMessage
-    ) async throws -> [String]? {
+    ) async throws -> [MemoryExtractionCandidate]? {
         let model = SystemLanguageModel(useCase: .general)
         guard model.isAvailable else { return nil }
 
@@ -869,7 +893,7 @@ final class ChatViewModel {
 
     private func extractMemoryCandidatesWithLoadedMLXModel(
         userMessage: ChatMessage
-    ) async throws -> [String] {
+    ) async throws -> [MemoryExtractionCandidate] {
         let prompt = memoryExtractionPrompt(userMessage: userMessage)
         let stream = await inferenceService.generate(
             prompt: prompt,
@@ -1071,7 +1095,8 @@ final class ChatViewModel {
             in: text,
             minimumCharacters: 2,
             patterns: [
-                #"^\s*(?:(?:hi|hello|hey|hola)[,!\.\s]+)?(?:my\s+name\s+is|my\s+name(?:'|’)?s|i(?:'|’)?m\s+called|i\s+am\s+called)\s+(.+)$"#
+                #"^\s*(?:(?:hi|hello|hey|hola|buenas)[,!\.\s]+)?(?:my\s+name\s+is|my\s+name(?:'|’)?s|i(?:'|’)?m\s+called|i\s+am\s+called)\s+(.+)$"#,
+                #"^\s*(?:(?:hi|hello|hey|hola|buenas)[,!\.\s]+)?(?:me\s+llamo|mi\s+nombre\s+es|me\s+chamo|je\s+m(?:'|’)?appelle|ich\s+hei(?:ss|ß)e|mi\s+chiamo)\s+(.+)$"#
             ]
         ) {
             let phrase = normalizedMemoryPhrase(stableSelfFactPhrase(from: name))
@@ -1295,14 +1320,19 @@ final class ChatViewModel {
     private func memoryExtractionSystemPrompt() -> String {
         """
         You write durable user memories for a private on-device assistant. You are not a topic tagger.
-        Return only a compact JSON array of strings.
+        Return only a compact JSON array of objects.
         Read only the provided user message and decide whether it contains anything worth remembering for future conversations.
         Use only stable user facts, preferences, likes, dislikes, fandoms, goals, ongoing projects, names, roles, or constraints.
-        Rewrite every memory as a complete third-person sentence starting with "The user..." or "The user's...".
-        Example: "I'm a software engineer" becomes "The user is a software engineer."
-        Example: "I'm a FC Barcelona fan" becomes "The user is an FC Barcelona fan."
-        Example: "I love Nintendo games" becomes "The user likes Nintendo video games."
-        Example: "I want to learn Swift" becomes "The user wants to learn Swift."
+        Each object must use exactly these keys: canonicalContent, relation, value, sourceQuote, sourceLanguageCode, confidence.
+        canonicalContent must be English and must start with "The user..." or "The user's...".
+        relation must be one of: name, pronouns, residence, timezone, occupation, employer, education, language, likes, dislikes, goal, project, constraint, allergy, diet, identity, general.
+        value must be the short canonical English value for the relation.
+        sourceQuote must be an exact quote copied from the provided user message; never invent or paraphrase the source quote.
+        sourceLanguageCode should be a BCP-47 language code when clear.
+        confidence must be a number from 0 to 1.
+        Example: "Me llamo Alan" becomes {"canonicalContent":"The user's name is Alan.","relation":"name","value":"Alan","sourceQuote":"Me llamo Alan","sourceLanguageCode":"es","confidence":0.98}.
+        Example: "Odio el brócoli" becomes {"canonicalContent":"The user dislikes broccoli.","relation":"dislikes","value":"broccoli","sourceQuote":"Odio el brócoli","sourceLanguageCode":"es","confidence":0.95}.
+        Example: "Quiero apuntarme a un gimnasio" becomes {"canonicalContent":"The user wants to join a gym.","relation":"goal","value":"join a gym","sourceQuote":"Quiero apuntarme a un gimnasio","sourceLanguageCode":"es","confidence":0.90}.
         If a user message mixes a stable fact with a request, save only the stable fact.
         Do not output labels, topics, categories, keywords, or request types like "clarification request" or "sports recommendation".
         Do not save greetings, thanks, acknowledgements, small talk, or descriptions of what the user said, such as "The user says hi."

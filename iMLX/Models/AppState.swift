@@ -413,7 +413,11 @@ final class AppState {
         personaId: String? = nil,
         category: String? = nil,
         sourceConversationId: UUID? = nil,
-        sourceMessageId: UUID? = nil
+        sourceMessageId: UUID? = nil,
+        sourceLanguageCode: String? = nil,
+        sourceQuote: String? = nil,
+        factRelation: String? = nil,
+        factValue: String? = nil
     ) -> UserMemory? {
         let memory = memoryService.upsert(
             content: content,
@@ -422,7 +426,11 @@ final class AppState {
             personaId: personaId,
             category: category,
             sourceConversationId: sourceConversationId,
-            sourceMessageId: sourceMessageId
+            sourceMessageId: sourceMessageId,
+            sourceLanguageCode: sourceLanguageCode,
+            sourceQuote: sourceQuote,
+            factRelation: factRelation,
+            factValue: factValue
         )
         loadMemories()
         return memory

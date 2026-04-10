@@ -52,7 +52,7 @@ xcodebuild -downloadComponent MetalToolchain
 - Conversations: each generation rebuilds prompt/session state from visible conversation history rather than relying on hidden long-lived chat session state
 - Persona system: each conversation binds to a `Persona`; persona selection changes prompting behavior but does not auto-load a different model
 - Documents: local PDF/CSV/text files are imported, extracted, chunked, indexed, and retrieved locally through `DocumentLibraryService`
-- Memory: compact user memories are stored locally through `MemoryService`; retrieval is injected into prompt context when relevant
+- Memory: compact user memories are stored locally through `MemoryService`; extraction is source-grounded and multilingual, canonical memories are stored in English with optional source quote/language/relation metadata, and retrieval is injected into prompt context when relevant
 - Vision: vision-capable models must load through the VLM path, not the text-only loader
 
 ## Important Constraints
@@ -65,6 +65,7 @@ xcodebuild -downloadComponent MetalToolchain
 6. Deployment target is iOS 18+.
 7. The project currently uses `main` for both `mlx-swift` and `mlx-swift-lm`.
 8. The Xcode target defaults actor isolation to `MainActor`, so pure helpers that run off the main actor may need explicit `nonisolated` annotations.
+9. Memory extraction must only persist facts grounded in the user message. Do not turn assistant answers, recommendations, prices, or unquoted generated details into memories.
 
 ## Codebase Map
 
@@ -84,7 +85,22 @@ High-value files:
 - `iMLX/ViewModels/ChatViewModel.swift`
 - `iMLX/Services/InferenceService.swift`
 - `iMLX/Services/DocumentLibraryService.swift`
+- `iMLX/Services/MemoryService.swift`
+- `iMLX/Services/MemoryService+Extraction.swift`
+- `iMLX/Services/MemoryService+Retrieval.swift`
+- `iMLX/Services/MemoryService+Shared.swift`
+- `iMLX/Services/MemorySupport.swift`
 - `iMLX/Utilities/Constants.swift`
+
+## Memory Architecture
+
+- `MemoryService.swift` is the facade and persistence owner: listing, upserting, updating, status changes, deletion, clearing, and index cache invalidation.
+- `MemoryService+Extraction.swift` parses structured LLM extraction output, normalizes candidates, validates source quotes, rejects low-value facts, and handles legacy string outputs.
+- `MemoryService+Retrieval.swift` owns archive/forget matching, duplicate and contradiction handling, BM25/hybrid scoring, relation-aware retrieval, and candidate selection.
+- `MemoryService+Shared.swift` holds shared normalization, language detection, metadata cleanup, and Natural Language sentence embedding helpers.
+- `MemorySupport.swift` contains local support types and algorithms: memory relations, fact signatures, multilingual tokenization, vector math, vector sketching, fact parsing, and vault indexing.
+- New structured memories should prefer `factRelation` + `factValue` for deduplication and conflict handling. The English text parser remains a fallback for existing saved memories, manual edits, and legacy extraction output.
+- Retrieval should stay synchronous and local. Use lightweight aliases and local indexes for multilingual recall rather than adding an LLM translation step before every response.
 
 ## Models and Personas
 

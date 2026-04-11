@@ -1,26 +1,60 @@
 import Foundation
 
-nonisolated final class MemoryService {
+nonisolated final class MemorySystem: @unchecked Sendable {
+    private enum Keys {
+        static let blockedRelations = "memory.blockedRelations"
+        static let didResetMemoryStorage = "memory.didResetStorage.v3"
+    }
+
     private let fileManager = FileManager.default
     private let memoriesDirectory: URL
     private let memoriesURL: URL
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-    private var cachedIndex: MemoryVaultIndex?
+    private let store: MemoryStore
+    private let userDefaults = UserDefaults.standard
+
+    lazy var diagnosticsService = MemoryDiagnosticsService(system: self)
+    lazy var ingestionService = MemoryIngestionService(system: self, store: store, diagnosticsService: diagnosticsService)
+    lazy var retrievalService = MemoryRetrievalService(system: self, store: store, diagnosticsService: diagnosticsService)
 
     init() {
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
         memoriesDirectory = appSupport.appendingPathComponent(Constants.Storage.memoriesDirectory, isDirectory: true)
         memoriesURL = memoriesDirectory.appendingPathComponent(Constants.Storage.memoriesFilename)
+        Self.resetMemoryStorageIfNeeded(
+            fileManager: fileManager,
+            userDefaults: userDefaults,
+            memoriesDirectory: memoriesDirectory
+        )
         try? fileManager.createDirectory(at: memoriesDirectory, withIntermediateDirectories: true)
+        let dbURL = memoriesDirectory.appendingPathComponent("memories.sqlite")
+        store = MemoryStore(databaseURL: dbURL)
     }
 
     func listAll() -> [UserMemory] {
-        guard let data = try? Data(contentsOf: memoriesURL),
-              let memories = try? decoder.decode([UserMemory].self, from: data) else {
-            return []
-        }
-        return memories.sorted { $0.updatedAt > $1.updatedAt }
+        blocking { [self] in await self.store.listSummaries() }
+    }
+
+    func listAllAsync() async -> [UserMemory] {
+        await store.listSummaries()
+    }
+
+    func memoryDetail(id: UUID) -> MemoryDetail? {
+        let blockedRelations = blockedRelationSet()
+        return blocking { [self] in await self.store.detail(for: id, blockedRelations: blockedRelations) }
+    }
+
+    func retrieveMemoryResultAsync(
+        for query: String,
+        personaId: String?,
+        limit: Int,
+        maxCharacters: Int
+    ) async -> MemoryRetrievalResult {
+        await retrievalService.retrieve(
+            for: query,
+            personaId: personaId,
+            limit: limit,
+            maxCharacters: maxCharacters
+        )
     }
 
     func upsert(
@@ -36,165 +70,384 @@ nonisolated final class MemoryService {
         factRelation: String? = nil,
         factValue: String? = nil
     ) -> UserMemory? {
-        let normalizedContent = normalizedStoredMemoryContent(content)
-        guard !normalizedContent.isEmpty else { return nil }
-        guard captureType != .inferred || !isLowValueInferredMemory(normalizedContent) else { return nil }
-
-        let normalizedSourceQuote = normalizedMetadataValue(sourceQuote, maxLength: 320)
-        let normalizedSourceLanguageCode = normalizedLanguageCode(sourceLanguageCode)
-            ?? normalizedSourceQuote.flatMap(detectedLanguageCode)
-        let normalizedFactRelation = MemoryFactParser.normalizedRelationRawValue(factRelation)
-        let normalizedFactValue = normalizedMetadataValue(factValue, maxLength: 180)
-        var memories = listAll()
-        let index = searchIndex(for: memories)
-        let signature = MemoryFactParser.signature(relation: normalizedFactRelation, value: normalizedFactValue)
-            ?? MemoryFactParser.signature(for: normalizedContent)
-
-        if let signature, signature.isRetraction {
-            let archived = archiveContradictingMemories(
-                matching: signature,
-                in: &memories,
+        blocking { [self] in
+            await self.ingestionService.upsert(
+                content: content,
+                status: status,
+                captureType: captureType,
                 personaId: personaId,
-                now: Date()
+                category: category,
+                sourceConversationId: sourceConversationId,
+                sourceMessageId: sourceMessageId,
+                sourceLanguageCode: sourceLanguageCode,
+                sourceQuote: sourceQuote,
+                factRelation: factRelation,
+                factValue: factValue
             )
-            if archived > 0 {
-                persist(memories)
-            }
+        }
+    }
+
+    func update(_ memory: UserMemory) -> UserMemory {
+        blocking { [self] in
+            await self.ingestionService.update(memory)
+        }
+    }
+
+    func setStatus(id: UUID, status: UserMemoryStatus) -> UserMemory? {
+        let eventKind: MemoryEventKind
+        switch status {
+        case .active:
+            eventKind = .accepted
+        case .pending:
+            eventKind = .updated
+        case .archived:
+            eventKind = .rejected
+        }
+        return blocking { [self] in await self.store.setStatus(id: id, status: status, eventKind: eventKind) }
+    }
+
+    func delete(id: UUID) {
+        blockingVoid { [self] in await self.store.delete(id: id) }
+    }
+
+    func clearAll() {
+        blockingVoid { [self] in await self.store.clearAll() }
+    }
+
+    func pendingCount() -> Int {
+        blocking { [self] in await self.store.pendingCount() }
+    }
+
+    func blockRelation(_ relation: String) {
+        var blocked = blockedRelationSet()
+        blocked.insert(relation)
+        userDefaults.set(Array(blocked).sorted(), forKey: Keys.blockedRelations)
+    }
+
+    func unblockRelation(_ relation: String) {
+        var blocked = blockedRelationSet()
+        blocked.remove(relation)
+        userDefaults.set(Array(blocked).sorted(), forKey: Keys.blockedRelations)
+    }
+
+    func isRelationBlocked(_ relation: String?) -> Bool {
+        guard let relation else { return false }
+        return blockedRelationSet().contains(relation)
+    }
+
+    func canBlockRelation(_ relation: String?) -> Bool {
+        guard let relation = MemoryRelation(externalValue: relation) else { return false }
+        switch relation {
+        case .name, .pronouns, .residence, .timezone, .likes, .dislikes, .goal, .project, .constraint, .allergy, .diet, .occupation, .language:
+            return true
+        case .employer, .education, .identity, .general:
+            return false
+        }
+    }
+
+    nonisolated func blockedRelationSet() -> Set<String> {
+        Set(userDefaults.stringArray(forKey: Keys.blockedRelations) ?? [])
+    }
+
+    nonisolated func searchIndex(for memories: [UserMemory]) -> MemoryVaultIndex {
+        MemoryVaultIndex(memories: memories)
+    }
+
+    nonisolated func blocking<T>(_ operation: @escaping @Sendable () async -> T) -> T {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: T?
+        Task.detached(priority: .userInitiated) {
+            result = await operation()
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return result!
+    }
+
+    nonisolated func blockingVoid(_ operation: @escaping @Sendable () async -> Void) {
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached(priority: .userInitiated) {
+            await operation()
+            semaphore.signal()
+        }
+        semaphore.wait()
+    }
+
+    private static func resetMemoryStorageIfNeeded(
+        fileManager: FileManager,
+        userDefaults: UserDefaults,
+        memoriesDirectory: URL
+    ) {
+        guard !userDefaults.bool(forKey: Keys.didResetMemoryStorage) else { return }
+        if fileManager.fileExists(atPath: memoriesDirectory.path) {
+            try? fileManager.removeItem(at: memoriesDirectory)
+        }
+        userDefaults.set(true, forKey: Keys.didResetMemoryStorage)
+    }
+}
+
+typealias MemoryService = MemorySystem
+
+nonisolated final class MemoryDiagnosticsService: @unchecked Sendable {
+    unowned let system: MemorySystem
+
+    init(system: MemorySystem) {
+        self.system = system
+    }
+
+    func explanation(
+        memoryId: UUID,
+        kind: MemoryRetrievalExplanationKind,
+        score: Double,
+        detail: String
+    ) -> MemoryRetrievalExplanation {
+        MemoryRetrievalExplanation(
+            id: UUID(),
+            memoryId: memoryId,
+            kind: kind,
+            message: detail,
+            score: max(0, min(score, 1))
+        )
+    }
+
+    func trace(
+        candidateCount: Int,
+        selectedMemoryIDs: [UUID],
+        scoreBreakdown: [UUID: [String: Double]]
+    ) -> MemoryRetrievalTrace {
+        MemoryRetrievalTrace(
+            candidateCount: candidateCount,
+            selectedMemoryIDs: selectedMemoryIDs,
+            scoreBreakdown: scoreBreakdown
+        )
+    }
+}
+
+nonisolated final class MemoryIngestionService: @unchecked Sendable {
+    unowned let system: MemorySystem
+    let store: MemoryStore
+    let diagnosticsService: MemoryDiagnosticsService
+
+    init(system: MemorySystem, store: MemoryStore, diagnosticsService: MemoryDiagnosticsService) {
+        self.system = system
+        self.store = store
+        self.diagnosticsService = diagnosticsService
+    }
+
+    func upsert(
+        content: String,
+        status: UserMemoryStatus,
+        captureType: UserMemoryCaptureType,
+        personaId: String?,
+        category: String?,
+        sourceConversationId: UUID?,
+        sourceMessageId: UUID?,
+        sourceLanguageCode: String?,
+        sourceQuote: String?,
+        factRelation: String?,
+        factValue: String?
+    ) async -> UserMemory? {
+        let normalizedContent = system.normalizedStoredMemoryContent(content)
+        guard !normalizedContent.isEmpty else { return nil }
+        guard captureType != .inferred || !system.isLowValueInferredMemory(normalizedContent) else { return nil }
+
+        let normalizedSourceQuote = system.normalizedMetadataValue(sourceQuote, maxLength: 320) ?? normalizedContent
+        let normalizedSourceLanguageCode = system.normalizedLanguageCode(sourceLanguageCode)
+            ?? system.detectedLanguageCode(in: normalizedSourceQuote)
+        let normalizedFactRelation = MemoryFactParser.normalizedRelationRawValue(factRelation)
+        let normalizedFactValue = system.normalizedMetadataValue(factValue, maxLength: 180)
+
+        if system.isRelationBlocked(normalizedFactRelation) {
             return nil
         }
 
-        if let duplicateIndex = duplicateIndex(for: normalizedContent, signature: signature, in: memories, index: index) {
-            var duplicate = memories[duplicateIndex]
+        let signature = MemoryFactParser.signature(relation: normalizedFactRelation, value: normalizedFactValue)
+            ?? MemoryFactParser.signature(for: normalizedContent)
+        let now = Date()
+        let candidates = await store.candidateSummaries(
+            for: normalizedContent,
+            signature: signature,
+            personaId: personaId,
+            statuses: [.active, .pending, .archived],
+            mode: .conflict
+        )
+
+        if let signature, signature.isRetraction {
+            let archiveIDs = conflictingIDs(
+                matching: signature,
+                in: candidates,
+                personaId: personaId
+            )
+            await store.archive(ids: archiveIDs, supersededBy: nil, reason: .forgotten, at: now)
+            return nil
+        }
+
+        let index = system.searchIndex(for: candidates)
+        if let duplicateIndex = system.duplicateIndex(for: normalizedContent, signature: signature, in: candidates, index: index) {
+            var duplicate = candidates[duplicateIndex]
             if duplicate.status == .archived || (duplicate.status == .pending && status == .active) {
                 duplicate.status = status
             }
             duplicate.content = normalizedContent
             duplicate.personaId = duplicate.personaId ?? personaId
             duplicate.category = duplicate.category ?? category
-            duplicate.updatedAt = Date()
-            duplicate.vector = duplicate.vector ?? embedding(for: normalizedContent)
+            duplicate.updatedAt = now
+            duplicate.vector = duplicate.vector ?? system.embedding(for: normalizedContent)
             duplicate.sourceLanguageCode = duplicate.sourceLanguageCode ?? normalizedSourceLanguageCode
             duplicate.sourceQuote = duplicate.sourceQuote ?? normalizedSourceQuote
             duplicate.factRelation = duplicate.factRelation ?? normalizedFactRelation
             duplicate.factValue = duplicate.factValue ?? normalizedFactValue
-            memories[duplicateIndex] = duplicate
-            persist(memories)
-            return duplicate
-        }
 
-        if let signature {
-            _ = archiveContradictingMemories(
-                matching: signature,
-                in: &memories,
-                personaId: personaId,
-                now: Date()
+            let updated = await store.updateExistingMemory(
+                id: duplicate.id,
+                with: persistedInput(
+                    id: duplicate.id,
+                    content: duplicate.content,
+                    status: duplicate.status,
+                    captureType: duplicate.captureType,
+                    personaId: duplicate.personaId,
+                    category: duplicate.category,
+                    sourceConversationId: sourceConversationId,
+                    sourceMessageId: sourceMessageId,
+                    sourceLanguageCode: normalizedSourceLanguageCode,
+                    sourceQuote: normalizedSourceQuote,
+                    relation: duplicate.factRelation,
+                    valueDisplay: duplicate.factValue,
+                    createdAt: duplicate.createdAt,
+                    updatedAt: now,
+                    usageCount: duplicate.usageCount,
+                    vector: duplicate.vector,
+                    confidence: duplicate.captureType == .explicit ? 1.0 : 0.82
+                ),
+                eventKind: duplicate.status == .archived ? .reactivated : .updated
             )
+            return updated
         }
 
-        let memory = UserMemory(
-            content: normalizedContent,
-            status: status,
-            captureType: captureType,
-            personaId: personaId,
-            category: category,
-            sourceConversationId: sourceConversationId,
-            sourceMessageId: sourceMessageId,
-            vector: embedding(for: normalizedContent),
-            sourceLanguageCode: normalizedSourceLanguageCode,
-            sourceQuote: normalizedSourceQuote,
-            factRelation: normalizedFactRelation,
-            factValue: normalizedFactValue
+        let archiveIDs = signature.map { conflictingIDs(matching: $0, in: candidates, personaId: personaId) } ?? []
+        let memoryID = UUID()
+        return await store.createMemory(
+            persistedInput(
+                id: memoryID,
+                content: normalizedContent,
+                status: status,
+                captureType: captureType,
+                personaId: personaId,
+                category: category,
+                sourceConversationId: sourceConversationId,
+                sourceMessageId: sourceMessageId,
+                sourceLanguageCode: normalizedSourceLanguageCode,
+                sourceQuote: normalizedSourceQuote,
+                relation: normalizedFactRelation,
+                valueDisplay: normalizedFactValue,
+                createdAt: now,
+                updatedAt: now,
+                usageCount: 0,
+                vector: system.embedding(for: normalizedContent),
+                confidence: captureType == .explicit ? 1.0 : 0.78
+            ),
+            archivedIDs: archiveIDs,
+            archiveReason: .archived
         )
-        memories.insert(memory, at: 0)
-        persist(memories)
-        return memory
     }
 
-    func update(_ memory: UserMemory) -> UserMemory {
+    func update(_ memory: UserMemory) async -> UserMemory {
         var updated = memory
-        updated.content = normalizedStoredMemoryContent(memory.content)
-        updated.sourceLanguageCode = normalizedLanguageCode(memory.sourceLanguageCode)
-        updated.sourceQuote = normalizedMetadataValue(memory.sourceQuote, maxLength: 320)
+        updated.content = system.normalizedStoredMemoryContent(memory.content)
+        updated.sourceLanguageCode = system.normalizedLanguageCode(memory.sourceLanguageCode)
+        updated.sourceQuote = system.normalizedMetadataValue(memory.sourceQuote, maxLength: 320) ?? updated.content
         updated.factRelation = MemoryFactParser.normalizedRelationRawValue(memory.factRelation)
-        updated.factValue = normalizedMetadataValue(memory.factValue, maxLength: 180)
+        updated.factValue = system.normalizedMetadataValue(memory.factValue, maxLength: 180)
+        if let relation = updated.factRelation, system.isRelationBlocked(relation) {
+            updated.factRelation = nil
+            updated.factValue = nil
+        }
         if let factValue = updated.factValue,
            !MemoryText.valuesCompatible(MemoryText.valueKey(factValue), MemoryText.valueKey(updated.content)) {
             updated.factRelation = nil
             updated.factValue = nil
         }
         updated.updatedAt = Date()
-        updated.vector = embedding(for: updated.content)
-        replace(updated)
-        return updated
+        updated.vector = system.embedding(for: updated.content)
+        return await store.updateMemory(updated) ?? updated
     }
 
-    func setStatus(id: UUID, status: UserMemoryStatus) -> UserMemory? {
-        var memories = listAll()
-        guard let index = memories.firstIndex(where: { $0.id == id }) else { return nil }
-        memories[index].status = status
-        memories[index].updatedAt = Date()
-        let updated = memories[index]
-        persist(memories)
-        return updated
-    }
-
-    func delete(id: UUID) {
-        var memories = listAll()
-        memories.removeAll { $0.id == id }
-        persist(memories)
-    }
-
-    func clearAll() {
-        persist([])
-    }
-
-
-    func markUsed(ids: [UUID]) {
-        guard !ids.isEmpty else { return }
-        let idSet = Set(ids)
-        var memories = listAll()
-        var changed = false
-
-        for index in memories.indices where idSet.contains(memories[index].id) {
-            memories[index].usageCount += 1
-            memories[index].lastUsedAt = Date()
-            changed = true
+    private func conflictingIDs(
+        matching signature: MemoryFactSignature,
+        in memories: [UserMemory],
+        personaId: String?
+    ) -> [UUID] {
+        let candidates = memories.filter { candidate in
+            guard candidate.status != .archived else { return false }
+            guard system.memoryScopesCanConflict(existing: candidate.personaId, incoming: personaId) else { return false }
+            guard let existingSignature = MemoryFactParser.signature(for: candidate) else { return false }
+            return signature.isRetraction
+                ? signature.matchesForgetTarget(existingSignature)
+                : signature.conflicts(with: existingSignature)
         }
-
-        if changed {
-            persist(memories)
-        }
+        return candidates.map(\.id)
     }
 
-    func pendingCount() -> Int {
-        listAll().filter { $0.status == .pending }.count
+    private func persistedInput(
+        id: UUID,
+        content: String,
+        status: UserMemoryStatus,
+        captureType: UserMemoryCaptureType,
+        personaId: String?,
+        category: String?,
+        sourceConversationId: UUID?,
+        sourceMessageId: UUID?,
+        sourceLanguageCode: String?,
+        sourceQuote: String,
+        relation: String?,
+        valueDisplay: String?,
+        createdAt: Date,
+        updatedAt: Date,
+        usageCount: Int,
+        vector: [Double]?,
+        confidence: Double
+    ) -> MemoryPersistedInput {
+        MemoryPersistedInput(
+            id: id,
+            canonicalText: content,
+            status: status,
+            scopeType: personaId == nil ? .global : .persona,
+            personaId: personaId,
+            captureType: captureType,
+            category: category,
+            salience: captureType == .explicit ? 0.92 : 0.74,
+            confidence: confidence,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            lastUsedAt: nil,
+            usageCount: usageCount,
+            vector: vector,
+            sourceConversationId: sourceConversationId,
+            sourceMessageId: sourceMessageId,
+            sourceQuote: sourceQuote,
+            sourceLanguageCode: sourceLanguageCode,
+            relation: relation,
+            valueDisplay: valueDisplay,
+            isNegated: false,
+            extractionVersion: "memory-system-v2"
+        )
     }
+}
 
+nonisolated final class MemoryRetrievalService: @unchecked Sendable {
+    unowned let system: MemorySystem
+    let store: MemoryStore
+    let diagnosticsService: MemoryDiagnosticsService
 
-    private func replace(_ memory: UserMemory) {
-        var memories = listAll()
-        if let index = memories.firstIndex(where: { $0.id == memory.id }) {
-            memories[index] = memory
-        } else {
-            memories.insert(memory, at: 0)
-        }
-        persist(memories)
+    init(system: MemorySystem, store: MemoryStore, diagnosticsService: MemoryDiagnosticsService) {
+        self.system = system
+        self.store = store
+        self.diagnosticsService = diagnosticsService
     }
+}
 
-    func persist(_ memories: [UserMemory]) {
-        guard let data = try? encoder.encode(memories.sorted(by: { $0.updatedAt > $1.updatedAt })) else { return }
-        try? data.write(to: memoriesURL, options: .atomic)
-        cachedIndex = nil
+extension MemorySystem {
+    nonisolated func memoryScopesCanConflict(existing: String?, incoming: String?) -> Bool {
+        existing == incoming || existing == nil || incoming == nil
     }
-
-    func searchIndex(for memories: [UserMemory]) -> MemoryVaultIndex {
-        let fingerprint = MemoryVaultIndex.fingerprint(for: memories)
-        if let cachedIndex, cachedIndex.fingerprint == fingerprint {
-            return cachedIndex
-        }
-        let index = MemoryVaultIndex(memories: memories)
-        cachedIndex = index
-        return index
-    }
-
 }

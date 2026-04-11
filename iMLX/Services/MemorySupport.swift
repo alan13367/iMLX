@@ -923,4 +923,3 @@ nonisolated struct MemoryVaultIndex {
             .joined(separator: "|")
     }
 }
-

@@ -15,6 +15,7 @@
 		E74248D32F7D2670003ECA6B /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P006 /* MLXVLM */; };
 		E74248D42F7D2670003ECA6B /* MLXFFT in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P007 /* MLXFFT */; };
 		E74248D52F7D2670003ECA6B /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P008 /* ZIPFoundation */; };
+		E74248D62F7D2670003ECA6B /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P009 /* GRDB */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +35,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E74248D62F7D2670003ECA6B /* GRDB in Frameworks */,
 				E74248D52F7D2670003ECA6B /* ZIPFoundation in Frameworks */,
 				E74248D42F7D2670003ECA6B /* MLXFFT in Frameworks */,
 				E74248D32F7D2670003ECA6B /* MLXVLM in Frameworks */,
@@ -92,6 +94,7 @@
 				E7B001012F7D30000001P006 /* MLXVLM */,
 				E7B001012F7D30000001P007 /* MLXFFT */,
 				E7B001012F7D30000001P008 /* ZIPFoundation */,
+				E7B001012F7D30000001P009 /* GRDB */,
 			);
 			productName = iMLX;
 			productReference = E7306A002F7D21010061F6D5 /* iMLX.app */;
@@ -127,6 +130,7 @@
 				E7B002002F7D30000002P001 /* XCRemoteSwiftPackageReference "mlx-swift" */,
 				E7B002002F7D30000002P002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				E7B002002F7D30000002P004 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E7306A012F7D21010061F6D5 /* Products */;
@@ -398,6 +402,14 @@
 				minimumVersion = 0.9.0;
 			};
 		};
+		E7B002002F7D30000002P004 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -440,6 +452,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		E7B001012F7D30000001P009 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E7B002002F7D30000002P004 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

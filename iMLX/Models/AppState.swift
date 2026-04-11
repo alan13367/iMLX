@@ -26,7 +26,7 @@ final class AppState {
     let speechAssetService: SpeechAssetService
     let webSearchService = WebSearchService()
     let personaService = PersonaService()
-    let memoryService = MemoryService()
+    let memoryService = MemorySystem()
     let documentLibraryService = DocumentLibraryService()
     var conversations: [Conversation] = []
     var personas: [Persona] = []
@@ -78,7 +78,7 @@ final class AppState {
         userDefaults.string(forKey: Keys.selectedModelId) != nil
             || userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey) != nil
             || !ManifestService().getDownloadedModels().isEmpty
-            || !MemoryService().listAll().isEmpty
+            || !MemorySystem().listAll().isEmpty
             || !ConversationService().listAll().isEmpty
     }
 
@@ -308,6 +308,32 @@ final class AppState {
         memories = memoryService.listAll()
     }
 
+    @MainActor
+    func loadMemoriesAsync() async {
+        memories = await memoryService.listAllAsync()
+    }
+
+    func memoryDetail(id: UUID) -> MemoryDetail? {
+        memoryService.memoryDetail(id: id)
+    }
+
+    func isMemoryRelationBlocked(_ relation: String?) -> Bool {
+        memoryService.isRelationBlocked(relation)
+    }
+
+    func canBlockMemoryRelation(_ relation: String?) -> Bool {
+        memoryService.canBlockRelation(relation)
+    }
+
+    func setMemoryRelationBlocked(_ relation: String?, blocked: Bool) {
+        guard let relation else { return }
+        if blocked {
+            memoryService.blockRelation(relation)
+        } else {
+            memoryService.unblockRelation(relation)
+        }
+    }
+
     private func reconcileActiveConversationForChat() {
         if conversations.isEmpty {
             _ = createNewConversation()
@@ -472,29 +498,17 @@ final class AppState {
         for query: String,
         personaId: String?,
         maxCharacters: Int = Constants.Memory.maxContextCharacters
-    ) -> MemoryRetrievalResult {
-        let selectedMemories = memoryService.retrieveActiveMemories(
+    ) async -> MemoryRetrievalResult {
+        let result = await memoryService.retrieveMemoryResultAsync(
             for: query,
             personaId: personaId,
             limit: Constants.Memory.maxRetrievedMemories,
             maxCharacters: maxCharacters
         )
-        guard !selectedMemories.isEmpty else {
-            return MemoryRetrievalResult(contextBlock: "", memories: [])
+        guard !result.memories.isEmpty else {
+            return MemoryRetrievalResult(contextBlock: "", memories: [], explanations: [], trace: nil)
         }
-
-        memoryService.markUsed(ids: selectedMemories.map(\.id))
-        loadMemories()
-
-        let contextLines = selectedMemories.map { "- \($0.content)" }
-        let contextBlock = """
-        Relevant persistent user memories:
-        These memories were retrieved as potentially relevant. Use only the ones that directly help the current request, ignore any that do not fit, and do not mention stored memories unless the user asks.
-
-        \(contextLines.joined(separator: "\n"))
-        """
-
-        return MemoryRetrievalResult(contextBlock: contextBlock, memories: selectedMemories)
+        return result
     }
 
     func updateConversation(_ conversation: Conversation) {

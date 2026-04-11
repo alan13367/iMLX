@@ -1,6 +1,7 @@
 import Foundation
+import GRDB
 
-nonisolated enum UserMemoryStatus: String, Codable, CaseIterable {
+nonisolated enum UserMemoryStatus: String, Codable, CaseIterable, DatabaseValueConvertible {
     case pending
     case active
     case archived
@@ -17,7 +18,21 @@ nonisolated enum UserMemoryStatus: String, Codable, CaseIterable {
     }
 }
 
-nonisolated enum UserMemoryCaptureType: String, Codable, CaseIterable {
+nonisolated enum MemoryScopeType: String, Codable, CaseIterable, DatabaseValueConvertible {
+    case global
+    case persona
+
+    var displayName: String {
+        switch self {
+        case .global:
+            String.appLocalized("memory.scope.global")
+        case .persona:
+            String.appLocalized("memory.scope.persona")
+        }
+    }
+}
+
+nonisolated enum UserMemoryCaptureType: String, Codable, CaseIterable, DatabaseValueConvertible {
     case explicit
     case inferred
 
@@ -29,6 +44,26 @@ nonisolated enum UserMemoryCaptureType: String, Codable, CaseIterable {
             String.appLocalized("memory.capture.inferred")
         }
     }
+}
+
+nonisolated enum MemoryEventKind: String, Codable, CaseIterable, DatabaseValueConvertible {
+    case created
+    case updated
+    case archived
+    case forgotten
+    case reactivated
+    case retrieved
+    case accepted
+    case rejected
+    case deleted
+}
+
+nonisolated enum MemoryRetrievalExplanationKind: String, Codable, CaseIterable {
+    case matchedFact = "matched_fact"
+    case matchedTopic = "matched_topic"
+    case samePersona = "same_persona"
+    case recentRelevant = "recent_relevant"
+    case sourceQuoteOverlap = "source_quote_overlap"
 }
 
 nonisolated struct UserMemory: Identifiable, Codable, Hashable {
@@ -100,6 +135,52 @@ nonisolated struct UserMemory: Identifiable, Codable, Hashable {
     }
 }
 
+nonisolated struct MemoryEvidence: Identifiable, Codable, Hashable {
+    let id: UUID
+    let memoryId: UUID
+    let sourceConversationId: UUID?
+    let sourceMessageId: UUID?
+    let sourceQuote: String
+    let sourceLanguageCode: String?
+    let extractionVersion: String
+    let createdAt: Date
+}
+
+nonisolated struct MemoryEvent: Identifiable, Codable, Hashable {
+    let id: UUID
+    let memoryId: UUID
+    let kind: MemoryEventKind
+    let payload: String?
+    let createdAt: Date
+}
+
+nonisolated struct MemoryRetrievalExplanation: Identifiable, Codable, Hashable {
+    let id: UUID
+    let memoryId: UUID
+    let kind: MemoryRetrievalExplanationKind
+    let message: String
+    let score: Double
+}
+
+nonisolated struct MemoryRetrievalTrace: Codable, Hashable {
+    let candidateCount: Int
+    let selectedMemoryIDs: [UUID]
+    let scoreBreakdown: [UUID: [String: Double]]
+}
+
+nonisolated struct MemoryDetail: Identifiable, Codable, Hashable {
+    let id: UUID
+    let summary: UserMemory
+    let scopeType: MemoryScopeType
+    let salience: Double
+    let confidence: Double
+    let blockedByRelationPolicy: Bool
+    let evidence: [MemoryEvidence]
+    let events: [MemoryEvent]
+    let recentRetrievalExplanations: [MemoryRetrievalExplanation]
+    let latestRetrievalTrace: MemoryRetrievalTrace?
+}
+
 nonisolated struct MemoryExtractionCandidate: Hashable {
     let canonicalContent: String
     let relation: String?
@@ -128,4 +209,6 @@ nonisolated struct MemoryExtractionCandidate: Hashable {
 nonisolated struct MemoryRetrievalResult {
     let contextBlock: String
     let memories: [UserMemory]
+    let explanations: [MemoryRetrievalExplanation]
+    let trace: MemoryRetrievalTrace?
 }

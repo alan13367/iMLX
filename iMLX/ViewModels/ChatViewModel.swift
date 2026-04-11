@@ -215,11 +215,11 @@ final class ChatViewModel {
         } else {
             webRetrievalResult = MessageGroundingResult(contextBlock: "", sources: [])
         }
-        let memoryRetrievalResult = self.appState.retrieveMemoryContext(
-                for: text,
-                personaId: persona.id,
-                maxCharacters: self.memoryContextCharacterLimit(for: loadedModel)
-            )
+        let memoryRetrievalResult = await self.appState.retrieveMemoryContext(
+            for: text,
+            personaId: persona.id,
+            maxCharacters: self.memoryContextCharacterLimit(for: loadedModel)
+        )
         let memoryContext = self.promptMemoryContext(
                 memoryRetrievalResult.contextBlock,
                 for: loadedModel

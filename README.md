@@ -30,17 +30,17 @@ iMLX is a native app for streaming, multi-turn chat with curated MLX models: dow
 
 ## Memory
 
-iMLX includes a local memory vault for compact user facts that can help future chats feel more personal. Memories are stored on device and can be reviewed, edited, accepted, rejected, or cleared under **Settings → Memory**.
+iMLX includes a local memory vault for compact user facts that can help future chats feel more personal. Memories are stored on device and can be reviewed, edited, accepted, rejected, archived, or cleared under **Settings → Memory**.
 
 The memory system is designed around source-grounded facts:
 
 - It extracts only from the user's message, not from assistant replies or recommendations.
-- It supports multilingual user input while storing canonical English memory text for consistency.
-- It keeps the original source quote and language metadata when available.
+- It supports multilingual user input while storing normalized canonical memory text plus typed relation/value metadata.
+- It keeps source evidence, language metadata, and lifecycle events alongside the canonical memory item.
 - It filters low-value conversation events such as greetings, thanks, and generic requests.
 - High-confidence identity facts, such as the user's name, can be saved directly; broader inferred memories go through Pending Review.
 
-Retrieval stays local and synchronous. The app combines BM25-style sparse scoring, Natural Language embeddings, source-quote tokens, and relation-aware query hints so memories can be found even when the later query is in another supported language.
+Retrieval stays local and synchronous. The app uses a bounded local pipeline: FTS candidate lookup, typed fact matching, local semantic reranking, and retrieval explanations so selected memories can be inspected later.
 
 ---
 
@@ -50,7 +50,9 @@ iMLX keeps the main assistant loop local:
 
 - `InferenceService` serializes MLX model work and streams tokens back to the chat UI.
 - `ChatViewModel` rebuilds prompt context from the visible conversation, selected persona, relevant memories, and retrieved documents.
-- `MemoryService` stores compact user facts locally and retrieves only the memories that look relevant to the next turn.
+- `MemorySystem` is the app-facing memory facade.
+- `MemoryStore` owns GRDB persistence, migrations, and transactional writes.
+- `MemoryRetrievalService` retrieves only the memories that look relevant to the next turn and records why they were chosen.
 - `PersonaService` seeds built-in assistants and saves custom personas.
 - `DocumentLibraryService` imports local files, chunks content, indexes it, and retrieves relevant snippets for chat context.
 
@@ -124,7 +126,8 @@ iMLX/
 
 - MLX work is serialized through an **actor**-based inference service.
 - Memory extraction uses the active model or Apple Foundation Models when available, but retrieval is local and does not require a translation/generation pass.
-- Memory internals are split across `MemoryService.swift`, `MemoryService+Extraction.swift`, `MemoryService+Retrieval.swift`, `MemoryService+Shared.swift`, and `MemorySupport.swift`.
+- Memory internals are split across `MemoryService.swift`, `MemoryStore.swift`, `MemoryDatabase.swift`, `MemoryService+Extraction.swift`, `MemoryService+Retrieval.swift`, `MemoryService+Shared.swift`, and `MemorySupport.swift`.
+- A dedicated architecture note lives in `docs/memory-architecture.md`.
 - The Simulator is not a reliable stand-in for GPU behavior on device.
 - Inference is intended for **foreground** use.
 

@@ -36,7 +36,19 @@
     "%lld GB" : {
 
     },
+    "%lld percent" : {
+
+    },
+    "Actions" : {
+
+    },
     "Add attachment" : {
+
+    },
+    "Allow this memory type" : {
+
+    },
+    "Archive" : {
 
     },
     "Back" : {
@@ -64,6 +76,9 @@
           }
         }
       }
+    },
+    "Candidate count" : {
+
     },
     "chat.add_to_conversation" : {
       "extractionState" : "manual",
@@ -580,6 +595,9 @@
         }
       }
     },
+    "Confidence" : {
+
+    },
     "Continue" : {
 
     },
@@ -708,6 +726,9 @@
 
     },
     "Delete model" : {
+
+    },
+    "Details" : {
 
     },
     "device.tier.gb" : {
@@ -1119,7 +1140,19 @@
         }
       }
     },
+    "Evidence" : {
+
+    },
+    "Forget" : {
+
+    },
     "Installed" : {
+
+    },
+    "Keep" : {
+
+    },
+    "Keep Archived" : {
 
     },
     "Live Voice" : {
@@ -1129,6 +1162,9 @@
 
     },
     "Loads this model for chat" : {
+
+    },
+    "Memory Detail" : {
 
     },
     "memory.accept" : {
@@ -2419,6 +2455,9 @@
         }
       }
     },
+    "Never remember this type" : {
+
+    },
     "New conversation" : {
 
     },
@@ -3429,6 +3468,9 @@
     "Recommended starter models" : {
 
     },
+    "Relation" : {
+
+    },
     "Remove document" : {
 
     },
@@ -3441,7 +3483,16 @@
     "Resolved voice locale" : {
 
     },
+    "Retrieval diagnostics" : {
+
+    },
+    "Salience" : {
+
+    },
     "Scroll to bottom" : {
+
+    },
+    "Selected IDs" : {
 
     },
     "settings.active_model" : {
@@ -4293,11 +4344,37 @@
     "Unload model from memory" : {
 
     },
+    "Value" : {
+
+    },
     "Voice" : {
 
     },
     "Voice locales" : {
 
+    },
+    "Web Search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Web Search"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Búsqueda web"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页搜索"
+          }
+        }
+      }
     },
     "web_search.menu.accessibility_hint" : {
       "extractionState" : "manual",
@@ -4575,30 +4652,10 @@
         }
       }
     },
-    "Web Search" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Web Search"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Búsqueda web"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "网页搜索"
-          }
-        }
-      }
-    },
     "Welcome to iMLX" : {
+
+    },
+    "Why it was retrieved" : {
 
     }
   },

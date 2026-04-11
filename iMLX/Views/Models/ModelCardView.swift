@@ -21,23 +21,24 @@ struct ModelCardView: View {
                         .foregroundStyle(.secondary)
 
                     if model.supportsVision || model.supportsThinking {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             if model.supportsThinking {
                                 capabilityBadge(
                                     title: String.appLocalized("models.card.thinking"),
                                     systemImage: "brain.head.profile",
-                                    color: BrandPalette.magenta
+                                    color: BrandPalette.magenta,
+                                    gradient: [BrandPalette.magenta, BrandPalette.magenta.opacity(0.7)]
                                 )
                             }
                             if model.supportsVision {
                                 capabilityBadge(
                                     title: String.appLocalized("models.card.vision"),
                                     systemImage: "eye",
-                                    color: BrandPalette.cyan
+                                    color: BrandPalette.cyan,
+                                    gradient: [BrandPalette.cyan, BrandPalette.cyan.opacity(0.7)]
                                 )
                             }
                         }
-                        .liquidGlassContainer(spacing: 8)
                     }
                 }
 
@@ -50,7 +51,7 @@ struct ModelCardView: View {
 
                     if isDownloading {
                         Text(String(format: String.appLocalized("models.card.progress"), progress * 100))
-                            .font(.caption.weight(.semibold))
+                            .font(.caption.weight(.semibold).monospacedDigit())
                             .foregroundStyle(BrandPalette.accent)
                     } else {
                         modelActionButton
@@ -59,29 +60,47 @@ struct ModelCardView: View {
             }
 
             if isDownloading {
-                ProgressView(value: progress) {
-                    Text(String(format: String.appLocalized("models.card.progress"), progress * 100))
-                        .font(.caption)
-                }
-                .tint(BrandPalette.accent)
+                DownloadProgressBar(progress: CGFloat(progress))
             }
         }
         .padding(.vertical, 6)
     }
 
-    private func capabilityBadge(title: String, systemImage: String, color: Color) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .liquidGlassSurface(
-                tint: color.opacity(0.18),
-                in: Capsule(),
-                fallback: AnyShapeStyle(color.opacity(0.12))
-            )
+    private func capabilityBadge(title: String, systemImage: String, color: Color, gradient: [Color]) -> some View {
+        Label {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+        } icon: {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: gradient,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .foregroundStyle(color)
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
+        .background {
+            Capsule()
+                .fill(color.opacity(0.08))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [color.opacity(0.4), color.opacity(0.1)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.75
+                        )
+                )
+        }
     }
 
     @ViewBuilder
@@ -123,3 +142,63 @@ struct ModelCardView: View {
         }
     }
 }
+
+// MARK: - Custom Download Progress Bar
+
+private struct DownloadProgressBar: View {
+    let progress: CGFloat
+
+    @State private var shimmerPhase: CGFloat = -1
+
+    private let trackHeight: CGFloat = 6
+    private let barGradient = LinearGradient(
+        colors: [BrandPalette.accent, BrandPalette.cyan],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
+
+    var body: some View {
+        GeometryReader { geo in
+            let fillWidth = max(trackHeight, geo.size.width * min(progress, 1.0))
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.06))
+                    .frame(height: trackHeight)
+
+                Capsule()
+                    .fill(barGradient)
+                    .frame(width: fillWidth, height: trackHeight)
+                    .overlay(
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0),
+                                        .white.opacity(0.35),
+                                        .white.opacity(0)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: fillWidth * 0.5)
+                            .offset(x: fillWidth * shimmerPhase)
+                            .clipShape(Capsule())
+                    )
+                    .shadow(color: BrandPalette.accent.opacity(0.35), radius: 4, y: 1)
+            }
+        }
+        .frame(height: trackHeight)
+        .onAppear {
+            withAnimation(
+                .easeInOut(duration: 1.6)
+                .repeatForever(autoreverses: false)
+            ) {
+                shimmerPhase = 1
+            }
+        }
+        .accessibilityValue("\(Int(progress * 100)) percent")
+    }
+}
+

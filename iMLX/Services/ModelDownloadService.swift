@@ -800,6 +800,11 @@ actor ModelDownloadService {
         return (upPath + downPath).joined(separator: "/")
     }
 
+    private nonisolated static let infrastructureDirectoryNames: Set<String> = [
+        "models",
+        Constants.Storage.modelDownloadStagingDirectory,
+    ]
+
     private nonisolated static func migrateOldDownloads(fileManager: FileManager, modelsBaseURL: URL) {
         let entries = (try? fileManager.contentsOfDirectory(at: modelsBaseURL, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? []
         for entry in entries {
@@ -809,6 +814,9 @@ actor ModelDownloadService {
                 continue
             }
             if name.hasPrefix("models--") {
+                continue
+            }
+            if infrastructureDirectoryNames.contains(name) {
                 continue
             }
             var isDir: ObjCBool = false

@@ -52,7 +52,7 @@ xcodebuild -downloadComponent MetalToolchain
 - Conversations: each generation rebuilds prompt/session state from visible conversation history rather than relying on hidden long-lived chat session state
 - Persona system: each conversation binds to a `Persona`; persona selection changes prompting behavior but does not auto-load a different model
 - Documents: local PDF/CSV/text files are imported, extracted, chunked, indexed, and retrieved locally through `DocumentLibraryService`
-- Memory: compact user memories are stored locally through `MemoryService`; extraction is source-grounded and multilingual, canonical memories are stored in English with optional source quote/language/relation metadata, and retrieval is injected into prompt context when relevant
+- Memory: compact user memories are stored locally through `MemorySystem`; ingestion is source-grounded and multilingual, evidence and lifecycle events are persisted in SQLite/GRDB, and bounded retrieval explanations are injected into prompt context when relevant
 - Vision: vision-capable models must load through the VLM path, not the text-only loader
 
 ## Important Constraints
@@ -82,10 +82,13 @@ iMLX/
 
 High-value files:
 - `iMLX/Models/AppState.swift`
+- `iMLX/Models/UserMemory.swift`
 - `iMLX/ViewModels/ChatViewModel.swift`
 - `iMLX/Services/InferenceService.swift`
 - `iMLX/Services/DocumentLibraryService.swift`
 - `iMLX/Services/MemoryService.swift`
+- `iMLX/Services/MemoryStore.swift`
+- `iMLX/Services/MemoryDatabase.swift`
 - `iMLX/Services/MemoryService+Extraction.swift`
 - `iMLX/Services/MemoryService+Retrieval.swift`
 - `iMLX/Services/MemoryService+Shared.swift`
@@ -94,13 +97,17 @@ High-value files:
 
 ## Memory Architecture
 
-- `MemoryService.swift` is the facade and persistence owner: listing, upserting, updating, status changes, deletion, clearing, and index cache invalidation.
-- `MemoryService+Extraction.swift` parses structured LLM extraction output, normalizes candidates, validates source quotes, rejects low-value facts, and handles legacy string outputs.
-- `MemoryService+Retrieval.swift` owns archive/forget matching, duplicate and contradiction handling, BM25/hybrid scoring, relation-aware retrieval, and candidate selection.
+- `MemoryService.swift` now defines `MemorySystem`, the app-facing facade used by `AppState` and chat flows. It owns legacy JSON import, relation blocking policy, and synchronous bridges into the actor-backed store/services.
+- `MemoryStore.swift` is the persistence boundary (`actor`). It owns GRDB reads/writes, transactional inserts/updates, candidate generation, archive/status transitions, evidence/event loading, retrieval logging, and corruption recovery.
+- `MemoryDatabase.swift` owns the normalized SQLite schema and migrations. The durable source of truth is now the `memory_item`, `memory_fact`, `memory_evidence`, `memory_event`, `memory_embedding_cache`, and `memory_fts` tables. The legacy `user_memory` table remains only for migration/backfill compatibility.
+- `MemoryIngestionService` in `MemoryService.swift` orchestrates normalization, quote validation, duplicate detection, contradiction handling, and persistence of canonical memory rows plus evidence.
+- `MemoryService+Extraction.swift` still parses structured LLM extraction output, normalizes candidates, validates source quotes, rejects unsupported memories, and handles legacy string outputs before they reach ingestion.
+- `MemoryService+Retrieval.swift` owns archive/forget matching, candidate reranking, retrieval explanations, and trace generation. Candidate generation now starts from DB-bounded queries instead of a mutable whole-corpus cache.
 - `MemoryService+Shared.swift` holds shared normalization, language detection, metadata cleanup, and Natural Language sentence embedding helpers.
-- `MemorySupport.swift` contains local support types and algorithms: memory relations, fact signatures, multilingual tokenization, vector math, vector sketching, fact parsing, and vault indexing.
-- New structured memories should prefer `factRelation` + `factValue` for deduplication and conflict handling. The English text parser remains a fallback for existing saved memories, manual edits, and legacy extraction output.
-- Retrieval should stay synchronous and local. Use lightweight aliases and local indexes for multilingual recall rather than adding an LLM translation step before every response.
+- `MemorySupport.swift` contains local support types and algorithms: memory relations, fact signatures, multilingual tokenization, vector math, vector sketching, fact parsing, and vault indexing used for bounded reranking.
+- `UserMemory` is now a UI-facing summary/projection model. Rich detail lives in `MemoryDetail`, `MemoryEvidence`, `MemoryEvent`, and `MemoryRetrievalExplanation`.
+- New structured memories should prefer `factRelation` + `factValue` for deduplication and conflict handling. Every persisted memory should remain grounded in user text through at least one source quote.
+- Retrieval should stay synchronous and local. Use FTS + typed fact lookup + bounded reranking rather than loading the entire corpus into a mutable in-memory index.
 
 ## Models and Personas
 

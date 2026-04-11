@@ -494,25 +494,16 @@ struct ChatView: View {
                     streamingScrollTask = nil
                     streamingAutoscrollEnabled = false
                 }
-                .onChange(of: chatViewModel.messages.count) {
+                .task(id: chatViewModel.messages.count) {
                     guard streamingAutoscrollEnabled else { return }
                     streamingScrollTask?.cancel()
-                    withAnimation {
-                        proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
-                    }
+                    scrollToBottom(using: proxy)
                 }
-                .onChange(of: chatViewModel.currentResponse.count) {
+                .task(id: chatViewModel.currentResponse.count) {
                     guard streamingAutoscrollEnabled else { return }
                     guard chatViewModel.isGenerating else { return }
-                    guard streamingScrollTask == nil else { return }
-                    streamingScrollTask = Task { @MainActor in
-                        defer { streamingScrollTask = nil }
-                        try? await Task.sleep(for: .milliseconds(50))
-                        guard !Task.isCancelled else { return }
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
-                        }
-                    }
+                    guard !chatViewModel.currentResponse.isEmpty else { return }
+                    scheduleAutoscroll(using: proxy)
                 }
 
                 if contentOverflows && (!scrollPinnedToBottom || !streamingAutoscrollEnabled) {
@@ -545,17 +536,24 @@ struct ChatView: View {
 
     private func resumeAutoscroll(using proxy: ScrollViewProxy) {
         streamingScrollTask?.cancel()
-        withAnimation(.easeOut(duration: 0.15)) {
-            proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
-        }
+        scrollToBottom(using: proxy)
         streamingAutoscrollEnabled = true
+        scheduleAutoscroll(using: proxy)
+    }
+
+    private func scheduleAutoscroll(using proxy: ScrollViewProxy) {
+        streamingScrollTask?.cancel()
         streamingScrollTask = Task { @MainActor in
             defer { streamingScrollTask = nil }
             try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.15)) {
-                proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
-            }
+            scrollToBottom(using: proxy)
+        }
+    }
+
+    private func scrollToBottom(using proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
         }
     }
 

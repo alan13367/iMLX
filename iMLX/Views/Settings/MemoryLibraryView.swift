@@ -4,6 +4,7 @@ struct MemoryLibraryView: View {
     let appState: AppState
 
     @State private var editingMemory: UserMemory?
+    @State private var selectedMemoryDetail: MemoryDetail?
     @State private var showClearAlert = false
 
     private var pendingMemories: [UserMemory] {
@@ -78,6 +79,15 @@ struct MemoryLibraryView: View {
                 MemoryEditorView(appState: appState, memory: memory)
             }
         }
+        .sheet(item: $selectedMemoryDetail) { detail in
+            NavigationStack {
+                MemoryDetailView(
+                    appState: appState,
+                    detail: detail,
+                    onEdit: { editingMemory = detail.summary }
+                )
+            }
+        }
         .alert(String.appLocalized("memory.clear_alert_title"), isPresented: $showClearAlert) {
             Button(String.appLocalized("common.cancel"), role: .cancel) {}
             Button(String.appLocalized("memory.clear_all"), role: .destructive) {
@@ -130,6 +140,10 @@ struct MemoryLibraryView: View {
             }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedMemoryDetail = appState.memoryDetail(id: memory.id)
+        }
     }
 }
 
@@ -211,5 +225,149 @@ private struct MemoryEditorView: View {
         updated.personaId = personaScope.isEmpty ? nil : personaScope
         appState.updateMemory(updated)
         dismiss()
+    }
+}
+
+private struct MemoryDetailView: View {
+    let appState: AppState
+    let detail: MemoryDetail
+    let onEdit: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            Section {
+                Text(detail.summary.content)
+                    .font(.body)
+
+                if let relation = detail.summary.factRelation, !relation.isEmpty {
+                    LabeledContent("Relation") {
+                        Text(relation)
+                    }
+                }
+                if let value = detail.summary.factValue, !value.isEmpty {
+                    LabeledContent("Value") {
+                        Text(value)
+                    }
+                }
+            }
+
+            Section("Details") {
+                LabeledContent(String.appLocalized("memory.capture.type")) {
+                    Text(detail.summary.captureType.displayName)
+                }
+                LabeledContent(String.appLocalized("memory.editor.status")) {
+                    Text(detail.summary.status.displayName)
+                }
+                LabeledContent(String.appLocalized("memory.editor.scope")) {
+                    Text(detail.scopeType.displayName)
+                }
+                LabeledContent("Confidence") {
+                    Text(detail.confidence.formatted(.percent.precision(.fractionLength(0))))
+                }
+                LabeledContent("Salience") {
+                    Text(detail.salience.formatted(.number.precision(.fractionLength(2))))
+                }
+                LabeledContent(String.appLocalized("memory.usage_count")) {
+                    Text("\(detail.summary.usageCount)")
+                }
+            }
+
+            if !detail.evidence.isEmpty {
+                Section("Evidence") {
+                    ForEach(detail.evidence) { evidence in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(evidence.sourceQuote)
+                                .font(.body)
+                            HStack(spacing: 8) {
+                                if let language = evidence.sourceLanguageCode {
+                                    Text(language.uppercased())
+                                }
+                                if let conversationID = evidence.sourceConversationId {
+                                    Text(conversationID.uuidString.prefix(8))
+                                }
+                                Text(evidence.createdAt.formatted(date: .abbreviated, time: .shortened))
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
+            if !detail.recentRetrievalExplanations.isEmpty {
+                Section("Why it was retrieved") {
+                    ForEach(detail.recentRetrievalExplanations) { explanation in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(explanation.message)
+                            Text(explanation.kind.rawValue)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
+            if let trace = detail.latestRetrievalTrace {
+                Section("Retrieval diagnostics") {
+                    LabeledContent("Candidate count") {
+                        Text("\(trace.candidateCount)")
+                    }
+                    LabeledContent("Selected IDs") {
+                        Text(trace.selectedMemoryIDs.map { $0.uuidString.prefix(6) }.joined(separator: ", "))
+                    }
+                    if let breakdown = trace.scoreBreakdown[detail.id] {
+                        ForEach(breakdown.keys.sorted(), id: \.self) { key in
+                            LabeledContent(key.capitalized) {
+                                Text((breakdown[key] ?? 0).formatted(.number.precision(.fractionLength(2))))
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Actions") {
+                Button(String.appLocalized("memory.edit")) {
+                    dismiss()
+                    onEdit()
+                }
+
+                if detail.summary.status == .pending {
+                    Button("Keep") {
+                        appState.acceptMemory(id: detail.id)
+                        dismiss()
+                    }
+                }
+
+                Button(detail.summary.status == .archived ? "Keep Archived" : "Archive", role: detail.summary.status == .archived ? nil : .destructive) {
+                    appState.rejectMemory(id: detail.id)
+                    dismiss()
+                }
+
+                Button("Forget") {
+                    _ = appState.forgetMemory(matching: detail.summary.content)
+                    dismiss()
+                }
+
+                if appState.canBlockMemoryRelation(detail.summary.factRelation),
+                   let relation = detail.summary.factRelation {
+                    let isBlocked = appState.isMemoryRelationBlocked(relation)
+                    Button(isBlocked ? "Allow this memory type" : "Never remember this type") {
+                        appState.setMemoryRelationBlocked(relation, blocked: !isBlocked)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Memory Detail")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(String.appLocalized("common.done")) {
+                    dismiss()
+                }
+            }
+        }
     }
 }

@@ -1,47 +1,8 @@
 import Foundation
 
-extension MemoryService {
+extension MemorySystem {
     nonisolated func archiveMatching(_ query: String) -> Int {
-        let normalizedQuery = normalizedMemoryContent(query)
-        guard !normalizedQuery.isEmpty else { return 0 }
-
-        var memories = listAll()
-        let index = searchIndex(for: memories)
-        let queryTokens = MemoryText.tokens(normalizedQuery)
-        let queryVector = MemoryVectorMath.normalized(embedding(for: normalizedQuery))
-        let forgetSignature = MemoryFactParser.forgetSignature(for: normalizedQuery)
-        let candidateIndexes = archiveCandidateIndexes(
-            queryTokens: queryTokens,
-            queryVector: queryVector,
-            forgetSignature: forgetSignature,
-            index: index
-        )
-        var archivedCount = 0
-
-        for recordIndex in candidateIndexes {
-            let record = index.records[recordIndex]
-            guard record.memory.status != .archived else { continue }
-
-            if shouldArchive(
-                record: record,
-                recordIndex: recordIndex,
-                query: normalizedQuery,
-                queryTokens: queryTokens,
-                queryVector: queryVector,
-                forgetSignature: forgetSignature,
-                index: index
-            ) {
-                memories[record.memoryIndex].status = .archived
-                memories[record.memoryIndex].updatedAt = Date()
-                archivedCount += 1
-            }
-        }
-
-        if archivedCount > 0 {
-            persist(memories)
-        }
-
-        return archivedCount
+        blocking { [self] in await self.retrievalService.archiveMatching(query) }
     }
 
     nonisolated func retrieveActiveMemories(
@@ -50,65 +11,31 @@ extension MemoryService {
         limit: Int,
         maxCharacters: Int
     ) -> [UserMemory] {
-        let normalizedQuery = normalizedMemoryContent(query)
-        guard !normalizedQuery.isEmpty else { return [] }
-
-        let memories = listAll()
-        let index = searchIndex(for: memories)
-        let queryTokens = MemoryText.tokens(normalizedQuery)
-        let queryVector = MemoryVectorMath.normalized(embedding(for: normalizedQuery))
-        var querySignatures = MemoryFactParser.queryIntentSignatures(for: normalizedQuery)
-        if let querySignature = MemoryFactParser.forgetSignature(for: normalizedQuery) {
-            let retrievalSignature = MemoryFactSignature(
-                relation: querySignature.relation,
-                valueKey: querySignature.valueKey,
-                isRetraction: false
-            )
-            if !querySignatures.contains(retrievalSignature) {
-                querySignatures.append(retrievalSignature)
-            }
+        blocking { [self] in
+            await self.retrievalService.retrieve(
+                for: query,
+                personaId: personaId,
+                limit: limit,
+                maxCharacters: maxCharacters
+            ).memories
         }
-        let candidateIndexes = retrievalCandidateIndexes(
-            queryTokens: queryTokens,
-            queryVector: queryVector,
-            querySignatures: querySignatures,
-            index: index
-        )
-        var usedCharacters = 0
-
-        let ranked = candidateIndexes
-            .compactMap { recordIndex in
-                retrievalCandidate(
-                    query: normalizedQuery,
-                    queryTokens: queryTokens,
-                    queryVector: queryVector,
-                    record: index.records[recordIndex],
-                    recordIndex: recordIndex,
-                    index: index,
-                    querySignatures: querySignatures,
-                    personaId: personaId
-                )
-            }
-            .sorted {
-                if $0.score == $1.score {
-                    return $0.memory.updatedAt > $1.memory.updatedAt
-                }
-                return $0.score > $1.score
-            }
-
-        var selected: [UserMemory] = []
-        for candidate in ranked {
-            guard selected.count < limit else { break }
-            let addedCharacters = candidate.memory.content.count + 4
-            guard usedCharacters + addedCharacters <= maxCharacters || selected.isEmpty else { break }
-            selected.append(candidate.memory)
-            usedCharacters += addedCharacters
-        }
-
-        return selected
     }
 
-
+    nonisolated func retrieveMemoryResult(
+        for query: String,
+        personaId: String?,
+        limit: Int,
+        maxCharacters: Int
+    ) -> MemoryRetrievalResult {
+        blocking { [self] in
+            await self.retrievalService.retrieve(
+                for: query,
+                personaId: personaId,
+                limit: limit,
+                maxCharacters: maxCharacters
+            )
+        }
+    }
 
     nonisolated func duplicateIndex(
         for content: String,
@@ -170,66 +97,25 @@ extension MemoryService {
         return nil
     }
 
-    nonisolated func archiveContradictingMemories(
-        matching signature: MemoryFactSignature,
-        in memories: inout [UserMemory],
-        personaId: String?,
-        now: Date
-    ) -> Int {
-        let index = searchIndex(for: memories)
-        let candidateIndexes: Set<Int>
-        if signature.isRetraction {
-            candidateIndexes = index.factCandidateIndexes(for: signature)
-        } else if signature.relation.isSingleValued {
-            candidateIndexes = index.relationBuckets[signature.relation] ?? []
-        } else {
-            candidateIndexes = index.factCandidateIndexes(for: signature)
-        }
-        var archivedCount = 0
-
-        for recordIndex in candidateIndexes {
-            let record = index.records[recordIndex]
-            guard memories.indices.contains(record.memoryIndex),
-                  memories[record.memoryIndex].status != .archived,
-                  memoryScopesCanConflict(existing: memories[record.memoryIndex].personaId, incoming: personaId),
-                  let existingSignature = record.signature else {
-                continue
-            }
-
-            let shouldArchive = signature.isRetraction
-                ? signature.matchesForgetTarget(existingSignature)
-                : signature.conflicts(with: existingSignature)
-
-            if shouldArchive {
-                memories[record.memoryIndex].status = .archived
-                memories[record.memoryIndex].updatedAt = now
-                archivedCount += 1
-            }
-        }
-
-        return archivedCount
-    }
-
-    private nonisolated func archiveCandidateIndexes(
+    nonisolated func archiveCandidateIndexes(
         queryTokens: [String],
         queryVector: [Double]?,
         forgetSignature: MemoryFactSignature?,
         index: MemoryVaultIndex
     ) -> Set<Int> {
-        if index.nonArchivedRecordIndexes.count <= MemoryScoring.exactScanLimit {
-            return Set(index.nonArchivedRecordIndexes)
-        }
-
         var candidateIndexes = Set<Int>()
         if let forgetSignature {
             candidateIndexes.formUnion(index.factCandidateIndexes(for: forgetSignature))
         }
         candidateIndexes.formUnion(index.sparseCandidateIndexes(for: queryTokens, limit: MemoryScoring.sparseCandidateLimit))
         candidateIndexes.formUnion(index.semanticCandidateIndexes(for: queryVector, limit: MemoryScoring.semanticCandidateLimit))
+        if candidateIndexes.isEmpty {
+            return Set(index.nonArchivedRecordIndexes)
+        }
         return candidateIndexes
     }
 
-    private nonisolated func shouldArchive(
+    nonisolated func shouldArchive(
         record: IndexedMemoryRecord,
         recordIndex: Int,
         query: String,
@@ -259,16 +145,12 @@ extension MemoryService {
         return score >= Constants.Memory.forgetMatchThreshold
     }
 
-    private nonisolated func retrievalCandidateIndexes(
+    nonisolated func retrievalCandidateIndexes(
         queryTokens: [String],
         queryVector: [Double]?,
         querySignatures: [MemoryFactSignature],
         index: MemoryVaultIndex
     ) -> Set<Int> {
-        if index.activeRecordIndexes.count <= MemoryScoring.exactScanLimit {
-            return Set(index.activeRecordIndexes)
-        }
-
         var candidateIndexes = Set<Int>()
         candidateIndexes.formUnion(index.sparseCandidateIndexes(for: queryTokens, limit: MemoryScoring.sparseCandidateLimit))
         candidateIndexes.formUnion(index.semanticCandidateIndexes(for: queryVector, limit: MemoryScoring.semanticCandidateLimit))
@@ -278,10 +160,13 @@ extension MemoryService {
         }
 
         candidateIndexes.formUnion(index.recentActiveRecordIndexes(limit: MemoryScoring.fallbackRecentCandidateLimit))
+        if candidateIndexes.isEmpty {
+            candidateIndexes = Set(index.activeRecordIndexes)
+        }
         return candidateIndexes.filter { index.records[$0].memory.status == .active }
     }
 
-    private nonisolated func retrievalCandidate(
+    nonisolated func retrievalCandidate(
         query: String,
         queryTokens: [String],
         queryVector: [Double]?,
@@ -292,6 +177,9 @@ extension MemoryService {
         personaId: String?
     ) -> MemoryRetrievalCandidate? {
         guard record.memory.status == .active else { return nil }
+        if let memoryPersonaId = record.memory.personaId {
+            guard let personaId, memoryPersonaId == personaId else { return nil }
+        }
 
         let baseScore = relevanceScore(
             query: query,
@@ -320,7 +208,7 @@ extension MemoryService {
         return MemoryRetrievalCandidate(memory: record.memory, score: min(score, 1.0))
     }
 
-    private nonisolated func relevanceScore(
+    nonisolated func relevanceScore(
         query: String,
         queryTokens: [String],
         queryVector: [Double]?,
@@ -354,88 +242,57 @@ extension MemoryService {
         return min(score, 1.0)
     }
 
-    private nonisolated func normalizedBM25Score(_ score: Double) -> Double {
+    nonisolated func normalizedBM25Score(_ score: Double) -> Double {
         guard score > 0 else { return 0 }
         return score / (score + MemoryScoring.bm25Saturation)
     }
 
-    private nonisolated func relationIntentScore(querySignatures: [MemoryFactSignature], record: IndexedMemoryRecord) -> Double {
-        guard let memorySignature = record.signature, !querySignatures.isEmpty else { return 0 }
-
-        for querySignature in querySignatures {
-            if querySignature.relation == memorySignature.relation,
-               querySignature.valueKey.isEmpty || querySignature.matchesForgetTarget(memorySignature) {
-                return MemoryScoring.relationIntentRetrievalScore
-            }
-        }
-
-        return 0
+    nonisolated func termCoverageScore(queryTokens: [String], documentTokens: [String]) -> Double {
+        guard !queryTokens.isEmpty, !documentTokens.isEmpty else { return 0 }
+        let querySet = Set(queryTokens)
+        let documentSet = Set(documentTokens)
+        return Double(querySet.intersection(documentSet).count) / Double(querySet.count)
     }
 
-    private nonisolated func termCoverageScore(queryTokens: [String], documentTokens: [String]) -> Double {
-        let queryTerms = Set(queryTokens)
-        let documentTerms = Set(documentTokens)
-        guard !queryTerms.isEmpty, !documentTerms.isEmpty else { return 0 }
-
-        let overlap = queryTerms.intersection(documentTerms).count
-        guard overlap > 0 else { return 0 }
-        return Double(overlap) / Double(queryTerms.count)
+    nonisolated func topicalAffinityScore(query: String, memoryContent: String) -> Double {
+        let queryTopics = topicKeywords(in: query)
+        let memoryTopics = topicKeywords(in: memoryContent)
+        guard !queryTopics.isEmpty, !memoryTopics.isEmpty else { return 0 }
+        let overlap = queryTopics.intersection(memoryTopics)
+        guard !overlap.isEmpty else { return 0 }
+        return min(0.48, Double(overlap.count) / Double(max(queryTopics.count, memoryTopics.count)))
     }
 
-    private nonisolated func topicalAffinityScore(query: String, memoryContent: String) -> Double {
-        let sharedTopics = topicCategories(for: query).intersection(topicCategories(for: memoryContent))
-        return sharedTopics.isEmpty ? 0 : Constants.Memory.topicalAffinityScore
-    }
-
-    private nonisolated func identityAffinityScore(query: String, memoryContent: String) -> Double {
+    nonisolated func identityAffinityScore(query: String, memoryContent: String) -> Double {
         guard isUserNameMemory(memoryContent) else { return 0 }
-        let queryTerms = Set(MemoryText.tokens(query))
-        return queryTerms.contains("name") || queryTerms.contains("identity") || query.lowercased().contains("who am i")
-            ? Constants.Memory.coreIdentityRetrievalScore
-            : 0
+        let normalizedQuery = normalizedMemoryContent(query)
+        guard containsAny(["name", "called", "who am i"], in: normalizedQuery.lowercased()) else { return 0 }
+        return 0.56
     }
 
-    private nonisolated func topicCategories(for text: String) -> Set<String> {
+    nonisolated func relationIntentScore(querySignatures: [MemoryFactSignature], record: IndexedMemoryRecord) -> Double {
+        guard !querySignatures.isEmpty, let signature = record.signature else { return 0 }
+        guard querySignatures.contains(where: { $0.relation == signature.relation }) else { return 0 }
+        if querySignatures.contains(where: { $0.matchesForgetTarget(signature) || $0.isDuplicate(of: signature) }) {
+            return 0.62
+        }
+        return MemoryScoring.relationIntentRetrievalScore
+    }
+
+    private nonisolated func topicKeywords(in text: String) -> Set<String> {
         let normalized = normalizedMemoryContent(text).lowercased()
         var topics = Set<String>()
 
-        if containsAny(
-            [
-                "breakfast", "carb", "cook", "cuisine", "dessert", "dinner", "dish", "eat", "food",
-                "italian", "lunch", "meal", "pasta", "pizza", "recipe", "restaurant", "snack", "sushi",
-                "vegan", "vegetarian"
-            ],
-            in: normalized
-        ) {
+        if containsAny(["travel", "trip", "flight", "hotel", "vacation"], in: normalized) {
+            topics.insert("travel")
+        }
+        if containsAny(["food", "eat", "cuisine", "restaurant", "coffee"], in: normalized) {
             topics.insert("food")
         }
-
-        if containsAny(
-            [
-                "barca", "barcelona", "champions league", "club", "fc ", "football", "goal", "la liga",
-                "laliga", "league", "madrid", "match", "messi", "player", "soccer", "sport", "team"
-            ],
-            in: normalized
-        ) {
-            topics.insert("sports")
+        if containsAny(["work", "job", "team", "career", "company"], in: normalized) {
+            topics.insert("work")
         }
-
-        if containsAny(
-            [
-                "game", "gaming", "mario", "nintendo", "playstation", "pokemon", "switch", "videogame",
-                "video game", "xbox", "zelda"
-            ],
-            in: normalized
-        ) {
-            topics.insert("gaming")
-        }
-
-        if containsAny(
-            [
-                "code", "developer", "engineer", "programming", "rust", "software", "swift", "xcode"
-            ],
-            in: normalized
-        ) {
+        if containsAny(["code", "app", "swift", "ios", "model", "tech"], in: normalized) {
             topics.insert("tech")
         }
 
@@ -448,9 +305,260 @@ extension MemoryService {
             || normalized.hasPrefix("the user’s name is ")
             || normalized.hasPrefix("my name is ")
     }
+}
 
+extension MemoryRetrievalService {
+    func archiveMatching(_ query: String) async -> Int {
+        let normalizedQuery = system.normalizedMemoryContent(query)
+        guard !normalizedQuery.isEmpty else { return 0 }
 
-    private nonisolated func memoryScopesCanConflict(existing: String?, incoming: String?) -> Bool {
-        existing == incoming || existing == nil || incoming == nil
+        let forgetSignature = MemoryFactParser.forgetSignature(for: normalizedQuery)
+        let candidates = await store.candidateSummaries(
+            for: normalizedQuery,
+            signature: forgetSignature,
+            personaId: nil,
+            statuses: [.active, .pending],
+            mode: .conflict
+        )
+        guard !candidates.isEmpty else { return 0 }
+
+        let index = system.searchIndex(for: candidates)
+        let queryTokens = MemoryText.tokens(normalizedQuery)
+        let queryVector = MemoryVectorMath.normalized(system.embedding(for: normalizedQuery))
+        let candidateIndexes = system.archiveCandidateIndexes(
+            queryTokens: queryTokens,
+            queryVector: queryVector,
+            forgetSignature: forgetSignature,
+            index: index
+        )
+
+        let archiveIDs = candidateIndexes.compactMap { recordIndex -> UUID? in
+            let record = index.records[recordIndex]
+            guard system.shouldArchive(
+                record: record,
+                recordIndex: recordIndex,
+                query: normalizedQuery,
+                queryTokens: queryTokens,
+                queryVector: queryVector,
+                forgetSignature: forgetSignature,
+                index: index
+            ) else {
+                return nil
+            }
+            return record.memory.id
+        }
+
+        await store.archive(ids: archiveIDs, supersededBy: nil, reason: .forgotten, at: Date())
+        return archiveIDs.count
+    }
+
+    func retrieve(
+        for query: String,
+        personaId: String?,
+        limit: Int,
+        maxCharacters: Int
+    ) async -> MemoryRetrievalResult {
+        let normalizedQuery = system.normalizedMemoryContent(query)
+        guard !normalizedQuery.isEmpty else {
+            return MemoryRetrievalResult(contextBlock: "", memories: [], explanations: [], trace: nil)
+        }
+
+        let queryTokens = MemoryText.tokens(normalizedQuery)
+        let queryVector = MemoryVectorMath.normalized(system.embedding(for: normalizedQuery))
+        var querySignatures = MemoryFactParser.queryIntentSignatures(for: normalizedQuery)
+        if let querySignature = MemoryFactParser.forgetSignature(for: normalizedQuery) {
+            let retrievalSignature = MemoryFactSignature(
+                relation: querySignature.relation,
+                valueKey: querySignature.valueKey,
+                isRetraction: false
+            )
+            if !querySignatures.contains(retrievalSignature) {
+                querySignatures.append(retrievalSignature)
+            }
+        }
+
+        var combinedCandidates = await store.candidateSummaries(
+            for: normalizedQuery,
+            signature: nil,
+            personaId: personaId,
+            statuses: [.active],
+            mode: .retrieval
+        )
+        for signature in querySignatures {
+            let more = await store.candidateSummaries(
+                for: normalizedQuery,
+                signature: signature,
+                personaId: personaId,
+                statuses: [.active],
+                mode: .retrieval
+            )
+            for candidate in more where !combinedCandidates.contains(where: { $0.id == candidate.id }) {
+                combinedCandidates.append(candidate)
+            }
+        }
+
+        guard !combinedCandidates.isEmpty else {
+            return MemoryRetrievalResult(contextBlock: "", memories: [], explanations: [], trace: nil)
+        }
+
+        let index = system.searchIndex(for: combinedCandidates)
+        let candidateIndexes = system.retrievalCandidateIndexes(
+            queryTokens: queryTokens,
+            queryVector: queryVector,
+            querySignatures: querySignatures,
+            index: index
+        )
+
+        let ranked = candidateIndexes
+            .compactMap { recordIndex in
+                system.retrievalCandidate(
+                    query: normalizedQuery,
+                    queryTokens: queryTokens,
+                    queryVector: queryVector,
+                    record: index.records[recordIndex],
+                    recordIndex: recordIndex,
+                    index: index,
+                    querySignatures: querySignatures,
+                    personaId: personaId
+                )
+            }
+            .sorted {
+                if $0.score == $1.score {
+                    return $0.memory.updatedAt > $1.memory.updatedAt
+                }
+                return $0.score > $1.score
+            }
+
+        var selected: [UserMemory] = []
+        var explanations: [MemoryRetrievalExplanation] = []
+        var scoreBreakdown: [UUID: [String: Double]] = [:]
+        var usedCharacters = 0
+
+        for candidate in ranked {
+            guard selected.count < limit else { break }
+            let addedCharacters = candidate.memory.content.count + 4
+            guard usedCharacters + addedCharacters <= maxCharacters || selected.isEmpty else { break }
+            selected.append(candidate.memory)
+            usedCharacters += addedCharacters
+
+            let explanationBundle = explanationBundle(
+                query: normalizedQuery,
+                queryTokens: queryTokens,
+                queryVector: queryVector,
+                memory: candidate.memory,
+                score: candidate.score,
+                personaId: personaId
+            )
+            explanations.append(contentsOf: explanationBundle.explanations)
+            scoreBreakdown[candidate.memory.id] = explanationBundle.breakdown
+        }
+
+        guard !selected.isEmpty else {
+            return MemoryRetrievalResult(contextBlock: "", memories: [], explanations: [], trace: nil)
+        }
+
+        let trace = diagnosticsService.trace(
+            candidateCount: combinedCandidates.count,
+            selectedMemoryIDs: selected.map(\.id),
+            scoreBreakdown: scoreBreakdown
+        )
+        await store.markRetrieved(ids: selected.map(\.id), explanations: explanations, trace: trace)
+
+        let contextLines = selected.map { "- \($0.content)" }
+        let contextBlock = """
+        Relevant persistent user memories:
+        These memories were retrieved as potentially relevant. Use only the ones that directly help the current request, ignore any that do not fit, and do not mention stored memories unless the user asks.
+
+        \(contextLines.joined(separator: "\n"))
+        """
+
+        return MemoryRetrievalResult(
+            contextBlock: contextBlock,
+            memories: selected,
+            explanations: explanations,
+            trace: trace
+        )
+    }
+
+    private func explanationBundle(
+        query: String,
+        queryTokens: [String],
+        queryVector: [Double]?,
+        memory: UserMemory,
+        score: Double,
+        personaId: String?
+    ) -> (explanations: [MemoryRetrievalExplanation], breakdown: [String: Double]) {
+        let normalizedMemory = system.normalizedMemoryContent(memory.content)
+        let memoryTokens = MemoryText.tokens([memory.content, memory.sourceQuote].compactMap { $0 }.joined(separator: " "))
+        let memoryVector = MemoryVectorMath.normalized(memory.vector)
+        let coverage = system.termCoverageScore(queryTokens: queryTokens, documentTokens: memoryTokens)
+        let semantic = MemoryVectorMath.cosine(normalizedQuery: queryVector, normalizedMemory: memoryVector)
+        let sparse = coverage
+
+        var explanations: [MemoryRetrievalExplanation] = []
+        if let relation = memory.factRelation,
+           let relationEnum = MemoryRelation(externalValue: relation),
+           MemoryFactParser.queryIntentSignatures(for: query).contains(where: { $0.relation == relationEnum }) {
+            explanations.append(
+                diagnosticsService.explanation(
+                    memoryId: memory.id,
+                    kind: .matchedFact,
+                    score: score,
+                    detail: "Matched the same memory fact category."
+                )
+            )
+        }
+        if memory.personaId != nil, memory.personaId == personaId {
+            explanations.append(
+                diagnosticsService.explanation(
+                    memoryId: memory.id,
+                    kind: .samePersona,
+                    score: score,
+                    detail: "Scoped to the same persona as this conversation."
+                )
+            )
+        }
+        if coverage >= 0.45 {
+            explanations.append(
+                diagnosticsService.explanation(
+                    memoryId: memory.id,
+                    kind: .matchedTopic,
+                    score: coverage,
+                    detail: "Overlapped with the same topic terms."
+                )
+            )
+        }
+        if memory.updatedAt > Date().addingTimeInterval(-60 * 60 * 24 * 30) {
+            explanations.append(
+                diagnosticsService.explanation(
+                    memoryId: memory.id,
+                    kind: .recentRelevant,
+                    score: 0.4,
+                    detail: "Recently updated and still relevant."
+                )
+            )
+        }
+        if let sourceQuote = memory.sourceQuote,
+           !sourceQuote.isEmpty,
+           normalizedMemory.contains(query) || query.contains(normalizedMemory) || sourceQuote.lowercased().contains(query.lowercased()) {
+            explanations.append(
+                diagnosticsService.explanation(
+                    memoryId: memory.id,
+                    kind: .sourceQuoteOverlap,
+                    score: 0.5,
+                    detail: "The original evidence quote overlaps with this query."
+                )
+            )
+        }
+
+        return (
+            explanations,
+            [
+                "coverage": coverage,
+                "semantic": semantic,
+                "sparse": sparse,
+                "final": score
+            ]
+        )
     }
 }

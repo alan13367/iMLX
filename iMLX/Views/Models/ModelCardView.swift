@@ -49,18 +49,25 @@ struct ModelCardView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    if isDownloading {
-                        Text(String(format: String.appLocalized("models.card.progress"), progress * 100))
-                            .font(.caption.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(BrandPalette.accent)
-                    } else {
+                    if !isDownloading {
                         modelActionButton
                     }
                 }
             }
 
             if isDownloading {
-                DownloadProgressBar(progress: CGFloat(progress))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Spacer()
+
+                        Text(String(format: String.appLocalized("models.card.progress"), progress * 100))
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(BrandPalette.accent)
+                    }
+
+                    DownloadProgressBar(progress: CGFloat(progress))
+                }
+                .padding(.top, 8)
             }
         }
         .padding(.vertical, 6)
@@ -201,4 +208,3 @@ private struct DownloadProgressBar: View {
         .accessibilityValue("\(Int(progress * 100)) percent")
     }
 }
-

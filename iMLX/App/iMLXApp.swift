@@ -17,6 +17,7 @@ struct iMLXApp: App {
 }
 
 struct AppRootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     let appState: AppState
 
     var body: some View {
@@ -27,6 +28,16 @@ struct AppRootView: View {
                 set: { _ in }
             )) {
                 OnboardingFlowView(appState: appState)
+            }
+            .onAppear {
+                appState.refreshPendingShortcutRoute()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                appState.refreshPendingShortcutRoute()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+                appState.refreshPendingShortcutRoute()
             }
     }
 }

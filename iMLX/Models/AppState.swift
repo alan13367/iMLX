@@ -18,6 +18,7 @@ final class AppState {
     var pendingStarterModelId: String?
     var hasSeenWebSearchDisclosure: Bool
     var voiceSessionInvalidationSeed: Int = 0
+    var pendingShortcutRoute: AppShortcutRoute?
 
     let conversationService = ConversationService()
     let inferenceService = InferenceService()
@@ -48,6 +49,7 @@ final class AppState {
         }
         pendingStarterModelId = userDefaults.string(forKey: Keys.pendingStarterModelId)
         hasSeenWebSearchDisclosure = userDefaults.bool(forKey: Keys.hasSeenWebSearchDisclosure)
+        pendingShortcutRoute = AppShortcutRouteStore.loadPendingRoute(userDefaults: userDefaults)
         loadPersonas()
         loadMemories()
         loadConversationsFromDisk()
@@ -116,6 +118,15 @@ final class AppState {
     func markWebSearchDisclosureSeen() {
         hasSeenWebSearchDisclosure = true
         userDefaults.set(true, forKey: Keys.hasSeenWebSearchDisclosure)
+    }
+
+    func refreshPendingShortcutRoute() {
+        pendingShortcutRoute = AppShortcutRouteStore.loadPendingRoute(userDefaults: userDefaults)
+    }
+
+    func clearPendingShortcutRoute() {
+        AppShortcutRouteStore.clearPendingRoute(userDefaults: userDefaults)
+        pendingShortcutRoute = nil
     }
 
     func recommendedStarterModels(deviceCapabilityService: DeviceCapabilityService = DeviceCapabilityService()) -> [ModelInfo] {

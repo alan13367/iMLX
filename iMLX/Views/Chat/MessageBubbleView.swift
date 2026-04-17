@@ -6,12 +6,26 @@ import UniformTypeIdentifiers
 
 struct MessageBubbleView: View, Equatable {
     @Environment(\.openURL) private var openURL
+
     let message: ChatMessage
     let isStreaming: Bool
     let parsedAssistantContent: ParsedAssistantContent?
+
     @State private var showCopyFeedback = false
     @State private var isThinkingExpanded = false
     @State private var userBubbleWidth: CGFloat = 0
+
+    private var resolvedParsedContent: ParsedAssistantContent {
+        parsedAssistantContent ?? ParsedAssistantContent(message.content, isStreaming: isStreaming)
+    }
+
+    private var hasAttachments: Bool {
+        (message.attachedDocuments?.isEmpty == false) || (message.attachedImages?.isEmpty == false)
+    }
+
+    private var shouldMeasureUserBubbleWidth: Bool {
+        message.role == .user && (message.attachedImages?.count == 1)
+    }
 
     init(message: ChatMessage, isStreaming: Bool = false, parsedAssistantContent: ParsedAssistantContent? = nil) {
         self.message = message
@@ -27,100 +41,172 @@ struct MessageBubbleView: View, Equatable {
 
     var body: some View {
         HStack {
-            if message.role == .user { Spacer(minLength: 60) }
+            if message.role == .user {
+                Spacer(minLength: 60)
+            }
+
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                attachmentStrip
+                if hasAttachments {
+                    MessageAttachmentStrip(
+                        role: message.role,
+                        attachedDocuments: message.attachedDocuments ?? [],
+                        attachedImages: message.attachedImages ?? [],
+                        userBubbleWidth: userBubbleWidth,
+                        iconName: iconName(for:)
+                    )
+                }
 
                 if message.role == .assistant {
-                    assistantContent
+                    AssistantMessageContent(
+                        parsedContent: resolvedParsedContent,
+                        isStreaming: isStreaming,
+                        retrievedSources: message.retrievedSources ?? [],
+                        generationStats: message.generationStats,
+                        isThinkingExpanded: $isThinkingExpanded,
+                        showCopyFeedback: $showCopyFeedback,
+                        openSourceURL: openSourceURL
+                    )
                 } else if !message.content.isEmpty {
-                    bubble(text: message.content, foregroundStyle: .white, measureWidth: shouldMeasureUserBubbleWidth)
+                    MessageTextBubble(
+                        text: message.content,
+                        role: message.role,
+                        isStreaming: isStreaming,
+                        foregroundStyle: .white,
+                        measureWidth: shouldMeasureUserBubbleWidth,
+                        measuredWidth: $userBubbleWidth
+                    )
                 }
             }
-            if message.role == .assistant { Spacer(minLength: 36) }
-        }
-        .overlay(copyFeedback, alignment: .bottom)
-    }
 
-    @ViewBuilder
-    private var attachmentStrip: some View {
-        if hasAttachments {
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                if let attachedDocuments = message.attachedDocuments, !attachedDocuments.isEmpty {
-                    documentAttachmentStrip(attachedDocuments)
-                }
-                if let attachedImages = message.attachedImages, !attachedImages.isEmpty {
-                    imageAttachmentStrip(attachedImages)
-                }
+            if message.role == .assistant {
+                Spacer(minLength: 36)
             }
+        }
+        .overlay(alignment: .bottom) {
+            MessageCopyFeedbackView(showCopyFeedback: showCopyFeedback)
         }
     }
 
-    @ViewBuilder
-    private func imageAttachmentStrip(_ attachedImages: [ChatAttachmentImage]) -> some View {
-        if message.role == .user, attachedImages.count == 1 {
-            attachmentStripContent(attachedImages)
+    private func openSourceURL(_ url: URL?) {
+        guard let url else { return }
+        openURL(url)
+    }
+
+    private func iconName(for kind: ConversationDocumentKind) -> String {
+        switch kind {
+        case .pdf:
+            "doc.richtext"
+        case .csv:
+            "tablecells"
+        case .text:
+            "doc.text"
+        }
+    }
+}
+
+private struct MessageAttachmentStrip: View {
+    let role: ChatMessage.Role
+    let attachedDocuments: [ConversationDocumentReference]
+    let attachedImages: [ChatAttachmentImage]
+    let userBubbleWidth: CGFloat
+    let iconName: (ConversationDocumentKind) -> String
+
+    var body: some View {
+        VStack(alignment: role == .user ? .trailing : .leading, spacing: 8) {
+            if !attachedDocuments.isEmpty {
+                MessageDocumentAttachmentStrip(
+                    role: role,
+                    attachedDocuments: attachedDocuments,
+                    iconName: iconName
+                )
+            }
+
+            if !attachedImages.isEmpty {
+                MessageImageAttachmentStrip(
+                    role: role,
+                    attachedImages: attachedImages,
+                    userBubbleWidth: userBubbleWidth
+                )
+            }
+        }
+    }
+}
+
+private struct MessageImageAttachmentStrip: View {
+    let role: ChatMessage.Role
+    let attachedImages: [ChatAttachmentImage]
+    let userBubbleWidth: CGFloat
+
+    var body: some View {
+        if role == .user, attachedImages.count == 1 {
+            attachmentStripContent
                 .frame(width: max(userBubbleWidth, 80), alignment: .center)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
             HStack {
-                if message.role == .assistant {
-                    attachmentStripContent(attachedImages)
+                if role == .assistant {
+                    attachmentStripContent
                     Spacer(minLength: 0)
                 } else {
                     Spacer(minLength: 0)
-                    attachmentStripContent(attachedImages)
+                    attachmentStripContent
                 }
             }
             .frame(maxWidth: .infinity)
         }
     }
 
-    private func attachmentStripContent(_ attachedImages: [ChatAttachmentImage]) -> some View {
+    private var attachmentStripContent: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(attachedImages) { image in
                     AttachmentImageThumbnailView(imageData: image.data, size: 80, cornerRadius: 12)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+            .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
         }
         .frame(maxWidth: 220)
     }
+}
 
-    private func documentAttachmentStrip(_ attachedDocuments: [ConversationDocumentReference]) -> some View {
+private struct MessageDocumentAttachmentStrip: View {
+    let role: ChatMessage.Role
+    let attachedDocuments: [ConversationDocumentReference]
+    let iconName: (ConversationDocumentKind) -> String
+
+    var body: some View {
         HStack {
-            if message.role == .assistant {
-                documentAttachmentContent(attachedDocuments)
+            if role == .assistant {
+                content
                 Spacer(minLength: 0)
             } else {
                 Spacer(minLength: 0)
-                documentAttachmentContent(attachedDocuments)
+                content
             }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func documentAttachmentContent(_ attachedDocuments: [ConversationDocumentReference]) -> some View {
+    private var content: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(attachedDocuments) { document in
                     HStack(spacing: 8) {
-                        Image(systemName: iconName(for: document.kind))
-                            .foregroundStyle(message.role == .user ? .white : BrandPalette.cyan)
+                        Image(systemName: iconName(document.kind))
+                            .foregroundStyle(role == .user ? .white : BrandPalette.cyan)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(document.displayName)
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(1)
                             Text(document.kind.displayName)
                                 .font(.caption2)
-                                .foregroundStyle(message.role == .user ? .white.opacity(0.8) : .secondary)
+                                .foregroundStyle(role == .user ? .white.opacity(0.8) : .secondary)
                         }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .background {
-                        if message.role == .user {
+                        if role == .user {
                             BrandPalette.primaryGradient
                         } else {
                             Color(.tertiarySystemFill)
@@ -129,18 +215,26 @@ struct MessageBubbleView: View, Equatable {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
-            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+            .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
         }
         .frame(maxWidth: 260)
     }
+}
 
-    private var assistantContent: some View {
-        let parsedContent = parsedAssistantContent ?? ParsedAssistantContent(message.content, isStreaming: isStreaming)
+private struct AssistantMessageContent: View {
+    let parsedContent: ParsedAssistantContent
+    let isStreaming: Bool
+    let retrievedSources: [MessageSource]
+    let generationStats: GenerationStats?
+    @Binding var isThinkingExpanded: Bool
+    @Binding var showCopyFeedback: Bool
+    let openSourceURL: (URL?) -> Void
 
-        return VStack(alignment: .leading, spacing: 8) {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
             if let thinking = parsedContent.thinking, !thinking.isEmpty {
                 DisclosureGroup(isExpanded: $isThinkingExpanded) {
-                    assistantText(thinking)
+                    MessageTextBody(text: thinking, isStreaming: isStreaming)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
@@ -164,39 +258,54 @@ struct MessageBubbleView: View, Equatable {
 
             if !parsedContent.response.isEmpty {
                 HStack(alignment: .bottom, spacing: 8) {
-                    bubble(text: parsedContent.response, foregroundStyle: .primary)
+                    MessageTextBubble(
+                        text: parsedContent.response,
+                        role: .assistant,
+                        isStreaming: isStreaming,
+                        foregroundStyle: .primary
+                    )
                     if !isStreaming {
-                        copyButton(copyText: parsedContent.copyableText)
-                            .padding(.bottom, 4)
+                        MessageCopyButton(
+                            copyText: parsedContent.copyableText,
+                            showCopyFeedback: $showCopyFeedback
+                        )
+                        .padding(.bottom, 4)
                     }
                 }
             }
 
             if !isStreaming {
                 VStack(alignment: .leading, spacing: 6) {
-                    if let sources = message.retrievedSources, !sources.isEmpty {
-                        sourcesSection(sources)
+                    if !retrievedSources.isEmpty {
+                        MessageSourcesSection(
+                            sources: retrievedSources,
+                            openSourceURL: openSourceURL
+                        )
                     }
-                    if let generationStats = message.generationStats {
+                    if let generationStats {
                         StatsOverlayView(stats: generationStats, isLive: false)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if parsedContent.response.isEmpty {
                         HStack {
                             Spacer()
-                            copyButton(copyText: parsedContent.copyableText)
+                            MessageCopyButton(
+                                copyText: parsedContent.copyableText,
+                                showCopyFeedback: $showCopyFeedback
+                            )
                         }
                     }
                 }
             }
         }
     }
+}
 
-    private var shouldMeasureUserBubbleWidth: Bool {
-        message.role == .user && (message.attachedImages?.count == 1)
-    }
+private struct MessageSourcesSection: View {
+    let sources: [MessageSource]
+    let openSourceURL: (URL?) -> Void
 
-    private func sourcesSection(_ sources: [MessageSource]) -> some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(String.appLocalized("message.sources"), systemImage: "doc.text.magnifyingglass")
                 .font(.caption.weight(.semibold))
@@ -204,9 +313,7 @@ struct MessageBubbleView: View, Equatable {
 
             ForEach(sources) { source in
                 Button {
-                    if let url = source.url {
-                        openURL(url)
-                    }
+                    openSourceURL(source.url)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(sourceTitle(for: source))
@@ -229,14 +336,45 @@ struct MessageBubbleView: View, Equatable {
         }
     }
 
-    @ViewBuilder
-    private func bubble(text: String, foregroundStyle: Color, measureWidth: Bool = false) -> some View {
-        assistantText(text)
+    private func sourceTitle(for source: MessageSource) -> String {
+        if let location = source.location, !location.isEmpty {
+            return "\(source.title) | \(location)"
+        }
+        return source.title
+    }
+}
+
+private struct MessageTextBubble: View {
+    let text: String
+    let role: ChatMessage.Role
+    let isStreaming: Bool
+    let foregroundStyle: Color
+    var measureWidth: Bool = false
+    @Binding var measuredWidth: CGFloat
+
+    init(
+        text: String,
+        role: ChatMessage.Role,
+        isStreaming: Bool,
+        foregroundStyle: Color,
+        measureWidth: Bool = false,
+        measuredWidth: Binding<CGFloat> = .constant(0)
+    ) {
+        self.text = text
+        self.role = role
+        self.isStreaming = isStreaming
+        self.foregroundStyle = foregroundStyle
+        self.measureWidth = measureWidth
+        self._measuredWidth = measuredWidth
+    }
+
+    var body: some View {
+        MessageTextBody(text: text, isStreaming: isStreaming)
             .foregroundStyle(foregroundStyle)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(
-                message.role == .user
+                role == .user
                     ? AnyShapeStyle(BrandPalette.primaryGradient)
                     : AnyShapeStyle(.fill.tertiary)
             )
@@ -246,22 +384,29 @@ struct MessageBubbleView: View, Equatable {
                     GeometryReader { proxy in
                         Color.clear
                             .onAppear {
-                                userBubbleWidth = proxy.size.width
+                                measuredWidth = proxy.size.width
                             }
-                            .onChange(of: proxy.size.width) {
-                                userBubbleWidth = proxy.size.width
+                            .onChange(of: proxy.size.width) { _, width in
+                                measuredWidth = width
                             }
                     }
                 }
             }
     }
+}
 
-    @ViewBuilder
-    private func assistantText(_ text: String) -> some View {
+private struct MessageTextBody: View {
+    let text: String
+    let isStreaming: Bool
+
+    var body: some View {
         if isStreaming {
             Text(text)
                 .font(.body)
-        } else if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+        } else if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
             Text(attributed)
                 .font(.body)
                 .tint(BrandPalette.accent)
@@ -270,17 +415,14 @@ struct MessageBubbleView: View, Equatable {
                 .font(.body)
         }
     }
+}
 
-    private func copyButton(copyText: String) -> some View {
-        Button {
-            UIPasteboard.general.setValue(copyText, forPasteboardType: UTType.plainText.identifier)
-            showCopyFeedback = true
-            Haptics.impactLight()
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(1.5))
-                showCopyFeedback = false
-            }
-        } label: {
+private struct MessageCopyButton: View {
+    let copyText: String
+    @Binding var showCopyFeedback: Bool
+
+    var body: some View {
+        Button(action: copy) {
             Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -292,7 +434,21 @@ struct MessageBubbleView: View, Equatable {
         .accessibilityLabel("Copy response")
     }
 
-    private var copyFeedback: some View {
+    private func copy() {
+        UIPasteboard.general.setValue(copyText, forPasteboardType: UTType.plainText.identifier)
+        showCopyFeedback = true
+        Haptics.impactLight()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            showCopyFeedback = false
+        }
+    }
+}
+
+private struct MessageCopyFeedbackView: View {
+    let showCopyFeedback: Bool
+
+    var body: some View {
         Group {
             if showCopyFeedback {
                 Text(String.appLocalized("message.copied"))
@@ -305,34 +461,13 @@ struct MessageBubbleView: View, Equatable {
             }
         }
     }
-
-    private var hasAttachments: Bool {
-        (message.attachedDocuments?.isEmpty == false) || (message.attachedImages?.isEmpty == false)
-    }
-
-    private func iconName(for kind: ConversationDocumentKind) -> String {
-        switch kind {
-        case .pdf:
-            "doc.richtext"
-        case .csv:
-            "tablecells"
-        case .text:
-            "doc.text"
-        }
-    }
-
-    private func sourceTitle(for source: MessageSource) -> String {
-        if let location = source.location, !location.isEmpty {
-            return "\(source.title) | \(location)"
-        }
-        return source.title
-    }
 }
 
 struct AttachmentImageThumbnailView: View {
     let imageData: Data
     let size: CGFloat
     let cornerRadius: CGFloat
+
     @State private var image: UIImage?
 
     private var maxPixelSize: CGFloat {
@@ -410,4 +545,24 @@ nonisolated private final class AttachmentImageThumbnailCache {
 
         return UIImage(cgImage: cgImage)
     }
+}
+
+#Preview("Assistant Message") {
+    MessageBubbleView(
+        message: ChatMessage(
+            role: .assistant,
+            content: "Here is a **formatted** answer with a source-backed summary."
+        )
+    )
+    .padding()
+}
+
+#Preview("User Message") {
+    MessageBubbleView(
+        message: ChatMessage(
+            role: .user,
+            content: "Summarize my notes from today."
+        )
+    )
+    .padding()
 }

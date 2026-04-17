@@ -133,15 +133,10 @@ struct ChatView: View {
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
     @State private var showDocumentImporter = false
-    @State private var showAttachmentPanel = false
     @State private var showWebSearchDisclosure = false
     @State private var showLiveVoice = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var utilitySheet: ChatUtilitySheet?
-    @State private var streamingScrollTask: Task<Void, Never>?
-    @State private var streamingAutoscrollEnabled = true
-    @State private var contentOverflows = false
-    @State private var scrollPinnedToBottom = true
     let appState: AppState
     let conversationId: UUID
 
@@ -152,72 +147,71 @@ struct ChatView: View {
     }
 
     var body: some View {
-        contentView
+        chatContent
         .navigationTitle(conversationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            bottomAccessoryStack
+            ChatAccessoryStackView(
+                horizontalSizeClass: horizontalSizeClass,
+                errorMessage: chatViewModel.errorMessage,
+                webSearchNotice: chatViewModel.webSearchNotice,
+                isModelLoading: chatViewModel.isModelLoading,
+                selectedModelDisplayName: appState.selectedModel?.displayName,
+                isGenerating: chatViewModel.isGenerating,
+                memoryNotice: chatViewModel.memoryNotice,
+                activePersona: chatViewModel.activePersona,
+                pendingDocuments: chatViewModel.pendingDocuments,
+                pendingImages: chatViewModel.pendingImages,
+                canUseThinking: chatViewModel.canUseThinking,
+                isThinkingEnabled: chatViewModel.isThinkingEnabled,
+                canSendMessage: canSendMessage,
+                canPresentLiveVoice: canPresentLiveVoice,
+                canUseVision: chatViewModel.canUseVision,
+                isWebSearchEnabled: chatViewModel.isWebSearchEnabled,
+                inputText: $inputText,
+                isInputFocused: $isInputFocused,
+                onDismissError: dismissError,
+                onDismissWebSearchNotice: dismissWebSearchNotice,
+                onDismissMemoryNotice: chatViewModel.dismissMemoryNotice,
+                onOpenMemoryLibrary: openMemoryLibrary,
+                onOpenPersonaPicker: openPersonaPicker,
+                onRemoveDocument: chatViewModel.removeDocument,
+                onRemovePendingImage: chatViewModel.removePendingImage(id:),
+                onOpenAttachmentImporter: openDocumentImporter,
+                onOpenCamera: openCamera,
+                onOpenPhotoLibrary: openPhotoLibrary,
+                onToggleThinking: chatViewModel.toggleThinking,
+                onVoiceTap: openLiveVoice,
+                onSend: sendMessage,
+                onStop: chatViewModel.stopGeneration,
+                onToggleWebSearch: handleWebSearchToggleTap
+            )
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    Button {
-                        isInputFocused = false
-                        utilitySheet = .conversations
-                    } label: {
-                        Label(String.appLocalized("conversation.title.chats"), systemImage: "bubble.left.and.bubble.right")
-                    }
-
-                    Button {
-                        isInputFocused = false
-                        utilitySheet = .models
-                    } label: {
-                        Label(String.appLocalized("tab.models"), systemImage: "arrow.down.circle")
-                    }
-
-                    Button {
-                        isInputFocused = false
-                        utilitySheet = .settings
-                    } label: {
-                        Label(String.appLocalized("tab.settings"), systemImage: "gearshape")
-                    }
-                } label: {
-                    Image(systemName: "line.3.horizontal")
-                }
-                .accessibilityLabel("Open app menu")
+                ChatToolbarMenu(
+                    onOpenConversations: openConversationHistory,
+                    onOpenModels: openModels,
+                    onOpenSettings: openSettings
+                )
             }
             ToolbarItem(placement: .principal) {
                 modelStatus
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if appState.loadedModelId != nil {
-                    Button {
-                        Task {
-                            await chatViewModel.unloadModel()
-                        }
-                    } label: {
-                        Image(systemName: "eject")
-                            .font(.body)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Unload model")
+                    ChatToolbarIconButton(
+                        systemImage: "eject",
+                        accessibilityLabel: "Unload model",
+                        action: unloadModel
+                    )
                 }
 
-                Button {
-                    isInputFocused = false
-                    streamingAutoscrollEnabled = true
-                    chatViewModel.startNewConversation()
-                    inputText = ""
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                        .font(.body)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New conversation")
+                ChatToolbarIconButton(
+                    systemImage: "square.and.pencil",
+                    accessibilityLabel: "New conversation",
+                    action: startNewConversation
+                )
             }
         }
         .scrollDismissesKeyboard(.interactively)
@@ -239,8 +233,14 @@ struct ChatView: View {
                 chatViewModel.loadConversation(conversation)
             }
         }
-        .onChange(of: appState.activeConversationId) { _, _ in
-            streamingAutoscrollEnabled = true
+        .task(id: appState.pendingShortcutRoute) {
+            handlePendingShortcutRoute()
+        }
+        .onChange(of: appState.loadedModelId) { _, _ in
+            handlePendingShortcutRoute()
+        }
+        .onChange(of: chatViewModel.isModelLoading) { _, _ in
+            handlePendingShortcutRoute()
         }
         .onChange(of: selectedPhotoItem) {
             if let item = selectedPhotoItem {
@@ -300,17 +300,27 @@ struct ChatView: View {
                 showWebSearchDisclosure = false
             }
         }
-        .onDisappear {
-            streamingScrollTask?.cancel()
-        }
     }
 
-    @ViewBuilder
-    private var contentView: some View {
-        if chatViewModel.messages.isEmpty && !chatViewModel.isGenerating && chatViewModel.currentResponse.isEmpty {
-            emptyState
-        } else {
-            messageList
+    private var isShowingEmptyState: Bool {
+        chatViewModel.messages.isEmpty && !chatViewModel.isGenerating && chatViewModel.currentResponse.isEmpty
+    }
+
+    private var chatContent: some View {
+        ZStack {
+            ChatEmptyStateView()
+                .opacity(isShowingEmptyState ? 1 : 0)
+                .allowsHitTesting(false)
+
+            ChatMessageListSection(
+                messages: chatViewModel.messages,
+                currentResponse: chatViewModel.currentResponse,
+                isGenerating: chatViewModel.isGenerating,
+                parsedResponse: chatViewModel.currentParsedResponse,
+                conversationResetKey: appState.activeConversationId ?? conversationId
+            )
+            .opacity(isShowingEmptyState ? 0 : 1)
+            .allowsHitTesting(!isShowingEmptyState)
         }
     }
 
@@ -368,23 +378,220 @@ struct ChatView: View {
     }
 
     private var modelStatus: some View {
-        Button {
+        ChatModelStatusButton(
+            isModelLoading: chatViewModel.isModelLoading,
+            selectedModelDisplayName: appState.selectedModel?.displayName,
+            loadedModelID: appState.loadedModelId,
+            onTap: { showModelPicker = true }
+        )
+        .sheet(isPresented: $showModelPicker) {
+            ModelPickerSheet(
+                appState: appState,
+                chatViewModel: chatViewModel,
+                isPresented: $showModelPicker
+            )
+        }
+    }
+
+    private func sendMessage() {
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canSendMessage else { return }
+        inputText = ""
+        chatViewModel.sendMessage(text)
+    }
+
+    private func dismissError() {
+        chatViewModel.errorMessage = nil
+    }
+
+    private func dismissWebSearchNotice() {
+        chatViewModel.webSearchNotice = nil
+    }
+
+    private func openMemoryLibrary() {
+        isInputFocused = false
+        utilitySheet = .memoryLibrary
+    }
+
+    private func openPersonaPicker() {
+        isInputFocused = false
+        showPersonaPicker = true
+    }
+
+    private func openDocumentImporter() {
+        isInputFocused = false
+        showDocumentImporter = true
+    }
+
+    private func openCamera() {
+        isInputFocused = false
+        showCamera = true
+    }
+
+    private func openPhotoLibrary() {
+        isInputFocused = false
+        showPhotoLibrary = true
+    }
+
+    private func openLiveVoice() {
+        showLiveVoice = true
+    }
+
+    private func openConversationHistory() {
+        isInputFocused = false
+        utilitySheet = .conversations
+    }
+
+    private func openModels() {
+        isInputFocused = false
+        utilitySheet = .models
+    }
+
+    private func openSettings() {
+        isInputFocused = false
+        utilitySheet = .settings
+    }
+
+    private func unloadModel() {
+        Task {
+            await chatViewModel.unloadModel()
+        }
+    }
+
+    private func startNewConversation() {
+        isInputFocused = false
+        chatViewModel.startNewConversation()
+        inputText = ""
+    }
+
+    private var canSendMessage: Bool {
+        !chatViewModel.isModelLoading && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canPresentLiveVoice: Bool {
+        !chatViewModel.isModelLoading
+            && !chatViewModel.isGenerating
+            && appState.loadedModelId != nil
+            && !isRunningOnSimulator
+    }
+
+    private func handleWebSearchToggleTap() {
+        if chatViewModel.isWebSearchEnabled {
+            chatViewModel.setWebSearchEnabled(false)
+        } else {
+            showWebSearchDisclosure = true
+        }
+    }
+
+    private func handlePendingShortcutRoute() {
+        guard appState.pendingShortcutRoute == .openLiveVoice else { return }
+        guard appState.hasCompletedOnboarding else { return }
+        guard !showLiveVoice else {
+            appState.clearPendingShortcutRoute()
+            return
+        }
+        guard !isRunningOnSimulator else { return }
+
+        if canPresentLiveVoice {
+            showLiveVoice = true
+            appState.clearPendingShortcutRoute()
+            return
+        }
+
+        if appState.selectedModel == nil && !showModelPicker {
             showModelPicker = true
+        }
+    }
+
+    private var supportedDocumentTypes: [UTType] {
+        Self.cachedSupportedDocumentTypes
+    }
+
+    private static let cachedSupportedDocumentTypes: [UTType] = {
+        var types: [UTType] = [.pdf, .plainText, .commaSeparatedText]
+        if let markdown = UTType(filenameExtension: "md") {
+            types.append(markdown)
+        }
+        return types
+    }()
+
+    private var isRunningOnSimulator: Bool {
+        #if targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
+    }
+}
+
+private struct ChatToolbarMenu: View {
+    let onOpenConversations: () -> Void
+    let onOpenModels: () -> Void
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        Menu {
+            Button(action: onOpenConversations) {
+                Label(String.appLocalized("conversation.title.chats"), systemImage: "bubble.left.and.bubble.right")
+            }
+
+            Button(action: onOpenModels) {
+                Label(String.appLocalized("tab.models"), systemImage: "arrow.down.circle")
+            }
+
+            Button(action: onOpenSettings) {
+                Label(String.appLocalized("tab.settings"), systemImage: "gearshape")
+            }
         } label: {
+            Image(systemName: "line.3.horizontal")
+        }
+        .accessibilityLabel("Open app menu")
+    }
+}
+
+private struct ChatToolbarIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.body)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct ChatModelStatusButton: View {
+    let isModelLoading: Bool
+    let selectedModelDisplayName: String?
+    let loadedModelID: String?
+    let onTap: () -> Void
+
+    private var loadedModelDisplayName: String? {
+        guard let loadedModelID else { return nil }
+        return Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelID })?.displayName
+    }
+
+    var body: some View {
+        Button(action: onTap) {
             HStack(spacing: 6) {
-                if chatViewModel.isModelLoading {
+                if isModelLoading {
                     ProgressView()
                         .controlSize(.small)
-                    Text(appState.selectedModel?.displayName ?? String.appLocalized("chat.loading_model"))
+                    Text(selectedModelDisplayName ?? String.appLocalized("chat.loading_model"))
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .lineLimit(1)
-                } else if appState.loadedModelId != nil,
-                          let loadedModel = Constants.ModelRegistry.curatedModels.first(where: { $0.id == appState.loadedModelId }) {
+                } else if let loadedModelDisplayName {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.green)
-                    Text(loadedModel.displayName)
+                    Text(loadedModelDisplayName)
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .lineLimit(1)
@@ -411,21 +618,16 @@ struct ChatView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
-            appState.loadedModelId == nil
+            loadedModelID == nil
                 ? String.appLocalized("chat.select_model")
                 : String.appLocalized("chat.change_model_a11y")
         )
         .accessibilityHint(String.appLocalized("chat.model_picker_hint"))
-        .sheet(isPresented: $showModelPicker) {
-            ModelPickerSheet(
-                appState: appState,
-                chatViewModel: chatViewModel,
-                isPresented: $showModelPicker
-            )
-        }
     }
+}
 
-    private var emptyState: some View {
+private struct ChatEmptyStateView: View {
+    var body: some View {
         VStack(spacing: 20) {
             Spacer()
             Image(systemName: "bubble.left.and.bubble.right")
@@ -445,30 +647,45 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 40)
     }
+}
 
-    private var messageList: some View {
+private struct ChatMessageListSection: View {
+    let messages: [ChatMessage]
+    let currentResponse: String
+    let isGenerating: Bool
+    let parsedResponse: ParsedAssistantContent
+    let conversationResetKey: UUID
+
+    @State private var streamingScrollTask: Task<Void, Never>?
+    @State private var streamingAutoscrollEnabled = true
+    @State private var contentOverflows = false
+    @State private var scrollPinnedToBottom = true
+
+    var body: some View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(chatViewModel.messages) { message in
+                        ForEach(messages) { message in
                             MessageBubbleView(message: message)
                                 .equatable()
                                 .id(message.id)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
-                        if !chatViewModel.currentResponse.isEmpty {
+
+                        if !currentResponse.isEmpty {
                             MessageBubbleView(
                                 message: ChatMessage(
                                     role: .assistant,
-                                    content: chatViewModel.currentResponse + (chatViewModel.isGenerating ? "▊" : "")
+                                    content: currentResponse + (isGenerating ? "▊" : "")
                                 ),
                                 isStreaming: true,
-                                parsedAssistantContent: chatViewModel.currentParsedResponse
+                                parsedAssistantContent: parsedResponse
                             )
                             .id("streaming")
                             .transition(.opacity)
                         }
+
                         Color.clear
                             .frame(height: 1)
                             .id("chatBottomAnchor")
@@ -488,22 +705,28 @@ struct ChatView: View {
                 })
                 .onScrollPhaseChange { _, newPhase in
                     guard newPhase == .tracking || newPhase == .interacting else { return }
-                    guard chatViewModel.isGenerating else { return }
+                    guard isGenerating else { return }
                     guard streamingAutoscrollEnabled else { return }
                     streamingScrollTask?.cancel()
                     streamingScrollTask = nil
                     streamingAutoscrollEnabled = false
                 }
-                .task(id: chatViewModel.messages.count) {
+                .task(id: conversationResetKey) {
+                    streamingAutoscrollEnabled = true
+                }
+                .task(id: messages.count) {
                     guard streamingAutoscrollEnabled else { return }
                     streamingScrollTask?.cancel()
                     scrollToBottom(using: proxy)
                 }
-                .task(id: chatViewModel.currentResponse.count) {
+                .task(id: currentResponse.count) {
                     guard streamingAutoscrollEnabled else { return }
-                    guard chatViewModel.isGenerating else { return }
-                    guard !chatViewModel.currentResponse.isEmpty else { return }
+                    guard isGenerating else { return }
+                    guard !currentResponse.isEmpty else { return }
                     scheduleAutoscroll(using: proxy)
+                }
+                .onDisappear {
+                    streamingScrollTask?.cancel()
                 }
 
                 if contentOverflows && (!scrollPinnedToBottom || !streamingAutoscrollEnabled) {
@@ -556,257 +779,121 @@ struct ChatView: View {
             proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
         }
     }
+}
 
-    private var bottomAccessoryStack: some View {
-        bottomAccessoryContent
-            .liquidGlassContainer(spacing: 16)
-            .padding(.top, 8)
+private struct ChatAccessoryStackView: View {
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let errorMessage: String?
+    let webSearchNotice: String?
+    let isModelLoading: Bool
+    let selectedModelDisplayName: String?
+    let isGenerating: Bool
+    let memoryNotice: ChatMemoryNotice?
+    let activePersona: Persona
+    let pendingDocuments: [ConversationDocumentReference]
+    let pendingImages: [ChatAttachmentImage]
+    let canUseThinking: Bool
+    let isThinkingEnabled: Bool
+    let canSendMessage: Bool
+    let canPresentLiveVoice: Bool
+    let canUseVision: Bool
+    let isWebSearchEnabled: Bool
+    @Binding var inputText: String
+    @FocusState.Binding var isInputFocused: Bool
+    let onDismissError: () -> Void
+    let onDismissWebSearchNotice: () -> Void
+    let onDismissMemoryNotice: () -> Void
+    let onOpenMemoryLibrary: () -> Void
+    let onOpenPersonaPicker: () -> Void
+    let onRemoveDocument: (ConversationDocumentReference) -> Void
+    let onRemovePendingImage: (UUID) -> Void
+    let onOpenAttachmentImporter: () -> Void
+    let onOpenCamera: () -> Void
+    let onOpenPhotoLibrary: () -> Void
+    let onToggleThinking: () -> Void
+    let onVoiceTap: () -> Void
+    let onSend: () -> Void
+    let onStop: () -> Void
+    let onToggleWebSearch: () -> Void
+
+    private var maxWidth: CGFloat {
+        horizontalSizeClass == .regular ? 760 : .infinity
     }
 
-    private var bottomAccessoryContent: some View {
+    var body: some View {
         VStack(spacing: 8) {
-            if let errorMessage = chatViewModel.errorMessage {
-                errorBanner(message: errorMessage)
-            }
-
-            if let webSearchNotice = chatViewModel.webSearchNotice {
-                infoBanner(message: webSearchNotice)
-            }
-
-            if chatViewModel.isModelLoading {
-                modelLoadingCard
-            }
-
-            if chatViewModel.isGenerating {
-                generatingIndicator
-            }
-
-            if let memoryNotice = chatViewModel.memoryNotice {
-                memoryNoticeCard(memoryNotice)
-            }
-
-            inputBar
-        }
-    }
-
-    private var composerPersonaRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: chatViewModel.activePersona.symbolName)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(BrandPalette.primaryGradient)
-                .frame(width: 30, height: 30)
-                .liquidGlassSurface(
-                    tint: BrandPalette.accent.opacity(0.14),
-                    in: Circle(),
-                    fallback: AnyShapeStyle(BrandPalette.accent.opacity(0.10))
+            if let errorMessage {
+                ChatNoticeBanner(
+                    style: .error(isOOM: isOOMError(errorMessage)),
+                    message: isOOMError(errorMessage) ? String.appLocalized("chat.oom_suggestion") : errorMessage,
+                    title: isOOMError(errorMessage) ? String.appLocalized("chat.out_of_memory") : nil,
+                    onDismiss: onDismissError
                 )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(chatViewModel.activePersona.localizedName)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                if !chatViewModel.activePersona.localizedDisplaySummary.isEmpty {
-                    Text(chatViewModel.activePersona.localizedDisplaySummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                .frame(maxWidth: maxWidth)
             }
-            Spacer(minLength: 8)
-            Button {
-                isInputFocused = false
-                showPersonaPicker = true
-            } label: {
-                Text(String.appLocalized("common.change"))
-                    .font(.caption.weight(.semibold))
-            }
-            .liquidGlassButtonStyle(tint: BrandPalette.accent)
-            .controlSize(.small)
-            .frame(minHeight: 36)
-        }
-    }
 
-    private var modelLoadingCard: some View {
-        HStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.small)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String.appLocalized("chat.loading_model_title"))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                Text(appState.selectedModel?.displayName ?? String.appLocalized("chat.preparing_model"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            Spacer()
-        }
-        .frame(maxWidth: bottomChromeMaxWidth)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .liquidGlassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .padding(.horizontal)
-    }
-
-    private var generatingIndicator: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(BrandPalette.cyan)
-            Text(String.appLocalized("chat.generating"))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: bottomChromeMaxWidth)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 2)
-        .padding(.horizontal)
-        .accessibilityElement(children: .combine)
-    }
-
-    private func errorBanner(message: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: isOOMError(message) ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(isOOMError(message) ? .red : .orange)
-            VStack(alignment: .leading, spacing: 2) {
-                if isOOMError(message) {
-                    Text(String.appLocalized("chat.out_of_memory"))
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.red)
-                }
-                Text(isOOMError(message) ? String.appLocalized("chat.oom_suggestion") : message)
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-                    .lineLimit(4)
-            }
-            Spacer()
-            Button {
-                chatViewModel.errorMessage = nil
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .frame(width: 44, height: 44)
-            .accessibilityLabel("Dismiss error")
-        }
-        .frame(maxWidth: bottomChromeMaxWidth)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .liquidGlassSurface(
-            tint: isOOMError(message) ? .red.opacity(0.18) : .orange.opacity(0.18),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous),
-            fallback: AnyShapeStyle(isOOMError(message) ? Color.red.opacity(0.1) : Color.orange.opacity(0.12))
-        )
-        .padding(.horizontal)
-    }
-
-    private func infoBanner(message: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "globe")
-                .foregroundStyle(BrandPalette.cyan)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.primary)
-            Spacer()
-            Button {
-                chatViewModel.webSearchNotice = nil
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: bottomChromeMaxWidth)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .liquidGlassSurface(
-            tint: BrandPalette.cyan.opacity(0.16),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous),
-            fallback: AnyShapeStyle(BrandPalette.cyan.opacity(0.08))
-        )
-        .padding(.horizontal)
-    }
-
-    private func memoryNoticeCard(_ notice: ChatMemoryNotice) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: notice.kind == .pending ? "brain.head.profile" : "checkmark.circle.fill")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(notice.kind == .pending ? BrandPalette.cyan : .green)
-                .frame(width: 30, height: 30)
-                .liquidGlassSurface(
-                    tint: notice.kind == .pending ? BrandPalette.cyan.opacity(0.18) : Color.green.opacity(0.18),
-                    in: Circle(),
-                    fallback: AnyShapeStyle(notice.kind == .pending ? BrandPalette.cyan.opacity(0.1) : Color.green.opacity(0.1))
+            if let webSearchNotice {
+                ChatNoticeBanner(
+                    style: .info,
+                    message: webSearchNotice,
+                    title: nil,
+                    onDismiss: onDismissWebSearchNotice
                 )
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(memoryNoticeTitle(for: notice))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Text(notice.message)
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if notice.kind == .pending {
-                    Button(String.appLocalized("settings.manage_memory")) {
-                        isInputFocused = false
-                        utilitySheet = .memoryLibrary
-                    }
-                    .liquidGlassButtonStyle(tint: BrandPalette.cyan)
-                    .controlSize(.small)
-                    .frame(minHeight: 32)
-                }
+                .frame(maxWidth: maxWidth)
             }
 
-            Spacer(minLength: 8)
-
-            Button {
-                chatViewModel.dismissMemoryNotice()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .liquidGlassSurface(
-                        in: Circle(),
-                        fallback: AnyShapeStyle(Color.secondary.opacity(0.1)),
-                        interactive: true
-                    )
+            if isModelLoading {
+                ChatStatusCard(
+                    title: String.appLocalized("chat.loading_model_title"),
+                    subtitle: selectedModelDisplayName ?? String.appLocalized("chat.preparing_model")
+                )
+                .frame(maxWidth: maxWidth)
             }
-            .buttonStyle(.plain)
-            .frame(width: 44, height: 44)
-            .contentShape(Rectangle())
-            .accessibilityLabel(String.appLocalized("memory.notice.dismiss"))
-        }
-        .frame(maxWidth: bottomChromeMaxWidth, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(notice.kind == .pending ? BrandPalette.cyan.opacity(0.18) : Color.green.opacity(0.16))
-            }
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .stroke(notice.kind == .pending ? BrandPalette.cyan.opacity(0.30) : Color.green.opacity(0.24), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
-        .padding(.horizontal)
-    }
 
-    private func sendMessage() {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSendMessage else { return }
-        inputText = ""
-        streamingAutoscrollEnabled = true
-        chatViewModel.sendMessage(text)
+            if isGenerating {
+                ChatGeneratingIndicator()
+                    .frame(maxWidth: maxWidth)
+            }
+
+            if let memoryNotice {
+                ChatMemoryNoticeView(
+                    notice: memoryNotice,
+                    title: memoryNoticeTitle(for: memoryNotice),
+                    onOpenMemoryLibrary: onOpenMemoryLibrary,
+                    onDismiss: onDismissMemoryNotice
+                )
+                .frame(maxWidth: maxWidth)
+            }
+
+            ChatComposerSection(
+                maxWidth: maxWidth,
+                activePersona: activePersona,
+                pendingDocuments: pendingDocuments,
+                pendingImages: pendingImages,
+                canUseThinking: canUseThinking,
+                isThinkingEnabled: isThinkingEnabled,
+                isGenerating: isGenerating,
+                canSendMessage: canSendMessage,
+                canPresentLiveVoice: canPresentLiveVoice,
+                canUseVision: canUseVision,
+                isWebSearchEnabled: isWebSearchEnabled,
+                inputText: $inputText,
+                isInputFocused: $isInputFocused,
+                onOpenPersonaPicker: onOpenPersonaPicker,
+                onRemoveDocument: onRemoveDocument,
+                onRemovePendingImage: onRemovePendingImage,
+                onOpenAttachmentImporter: onOpenAttachmentImporter,
+                onOpenCamera: onOpenCamera,
+                onOpenPhotoLibrary: onOpenPhotoLibrary,
+                onToggleThinking: onToggleThinking,
+                onVoiceTap: onVoiceTap,
+                onSend: onSend,
+                onStop: onStop,
+                onToggleWebSearch: onToggleWebSearch
+            )
+        }
+        .liquidGlassContainer(spacing: 16)
+        .padding(.top, 8)
     }
 
     private func isOOMError(_ message: String) -> Bool {
@@ -825,78 +912,57 @@ struct ChatView: View {
             String.appLocalized("memory.section.pending")
         }
     }
+}
 
-    private var inputBar: some View {
+private struct ChatComposerSection: View {
+    let maxWidth: CGFloat
+    let activePersona: Persona
+    let pendingDocuments: [ConversationDocumentReference]
+    let pendingImages: [ChatAttachmentImage]
+    let canUseThinking: Bool
+    let isThinkingEnabled: Bool
+    let isGenerating: Bool
+    let canSendMessage: Bool
+    let canPresentLiveVoice: Bool
+    let canUseVision: Bool
+    let isWebSearchEnabled: Bool
+    @Binding var inputText: String
+    @FocusState.Binding var isInputFocused: Bool
+    let onOpenPersonaPicker: () -> Void
+    let onRemoveDocument: (ConversationDocumentReference) -> Void
+    let onRemovePendingImage: (UUID) -> Void
+    let onOpenAttachmentImporter: () -> Void
+    let onOpenCamera: () -> Void
+    let onOpenPhotoLibrary: () -> Void
+    let onToggleThinking: () -> Void
+    let onVoiceTap: () -> Void
+    let onSend: () -> Void
+    let onStop: () -> Void
+    let onToggleWebSearch: () -> Void
+
+    @State private var showAttachmentPanel = false
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            composerPersonaRow
+            ChatComposerPersonaRow(persona: activePersona, onChangePersona: openPersonaPicker)
 
-            if !chatViewModel.pendingDocuments.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(chatViewModel.pendingDocuments) { document in
-                            HStack(spacing: 6) {
-                                Image(systemName: iconName(for: document.kind))
-                                    .foregroundStyle(BrandPalette.cyan)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(document.displayName)
-                                        .font(.caption.weight(.semibold))
-                                        .lineLimit(1)
-                                    Text(document.kind.displayName)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Button {
-                                    chatViewModel.removeDocument(document)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(width: 44, height: 44)
-                                .accessibilityLabel("Remove document")
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .liquidGlassSurface(
-                                tint: BrandPalette.cyan.opacity(0.18),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous),
-                                fallback: AnyShapeStyle(BrandPalette.cyan.opacity(0.1))
-                            )
-                        }
-                    }
-                    .liquidGlassContainer(spacing: 10)
-                    .padding(.horizontal, 4)
-                }
+            if !pendingDocuments.isEmpty {
+                ChatPendingDocumentStrip(
+                    pendingDocuments: pendingDocuments,
+                    onRemoveDocument: onRemoveDocument,
+                    iconName: iconName(for:)
+                )
             }
 
-            if !chatViewModel.pendingImages.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(chatViewModel.pendingImages) { image in
-                            ZStack(alignment: .topTrailing) {
-                                AttachmentImageThumbnailView(imageData: image.data, size: 60, cornerRadius: 8)
-
-                                Button {
-                                    chatViewModel.removePendingImage(id: image.id)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(.white, .black.opacity(0.6))
-                                        .font(.caption)
-                                }
-                                .frame(width: 44, height: 44)
-                                .accessibilityLabel("Remove image")
-                                .offset(x: 4, y: -4)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 4)
-                }
+            if !pendingImages.isEmpty {
+                ChatPendingImageStrip(
+                    pendingImages: pendingImages,
+                    onRemoveImage: onRemovePendingImage
+                )
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                Button {
-                    isInputFocused = false
-                    showAttachmentPanel.toggle()
-                } label: {
+                Button(action: toggleAttachmentPanel) {
                     Image(systemName: "plus")
                         .font(.title3.weight(.semibold))
                         .frame(width: 32, height: 32)
@@ -911,42 +977,47 @@ struct ChatView: View {
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Add attachment")
                 .popover(isPresented: $showAttachmentPanel, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-                    attachmentPanel
-                        .presentationCompactAdaptation(.popover)
+                    ChatAttachmentPanel(
+                        canUseVision: canUseVision,
+                        isWebSearchEnabled: isWebSearchEnabled,
+                        onImportDocument: openDocumentImporter,
+                        onTakePhoto: openCamera,
+                        onOpenPhotoLibrary: openPhotoLibrary,
+                        onToggleWebSearch: toggleWebSearch
+                    )
+                    .presentationCompactAdaptation(.popover)
                 }
 
-                if chatViewModel.canUseThinking {
-                    Button {
-                        chatViewModel.toggleThinking()
-                    } label: {
-                        Image(systemName: chatViewModel.isThinkingEnabled ? "lightbulb.fill" : "lightbulb")
+                if canUseThinking {
+                    Button(action: onToggleThinking) {
+                        Image(systemName: isThinkingEnabled ? "lightbulb.fill" : "lightbulb")
                             .font(.title3)
                             .frame(width: 32, height: 32)
-                            .foregroundStyle(chatViewModel.isThinkingEnabled ? .orange : .secondary)
+                            .foregroundStyle(isThinkingEnabled ? .orange : .secondary)
                             .liquidGlassSurface(
-                                tint: chatViewModel.isThinkingEnabled ? .orange.opacity(0.2) : nil,
+                                tint: isThinkingEnabled ? .orange.opacity(0.2) : nil,
                                 in: Circle(),
-                                fallback: AnyShapeStyle(chatViewModel.isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)),
+                                fallback: AnyShapeStyle(isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)),
                                 interactive: true
                             )
                     }
                     .frame(width: 44, height: 44)
-                    .accessibilityLabel(chatViewModel.isThinkingEnabled ? "Disable thinking" : "Enable thinking")
+                    .accessibilityLabel(isThinkingEnabled ? "Disable thinking" : "Enable thinking")
                 }
 
                 InputBarView(
                     text: $inputText,
-                    isGenerating: chatViewModel.isGenerating,
+                    isGenerating: isGenerating,
                     isSendEnabled: canSendMessage,
                     isVoiceEnabled: canPresentLiveVoice,
                     isFocused: $isInputFocused,
-                    onVoiceTap: { showLiveVoice = true },
-                    onSend: sendMessage,
-                    onStop: chatViewModel.stopGeneration
+                    onVoiceTap: onVoiceTap,
+                    onSend: onSend,
+                    onStop: onStop
                 )
             }
         }
-        .frame(maxWidth: bottomChromeMaxWidth)
+        .frame(maxWidth: maxWidth)
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 10)
@@ -958,41 +1029,230 @@ struct ChatView: View {
         .padding(.horizontal)
     }
 
-    private var attachmentPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            attachmentPanelButton(
-                String.appLocalized("chat.import_document"),
-                systemImage: "doc.text"
-            ) {
-                closeAttachmentPanelThen {
-                    showDocumentImporter = true
+    private func iconName(for kind: ConversationDocumentKind) -> String {
+        switch kind {
+        case .pdf:
+            "doc.richtext"
+        case .csv:
+            "tablecells"
+        case .text:
+            "doc.text"
+        }
+    }
+
+    private func toggleAttachmentPanel() {
+        isInputFocused = false
+        showAttachmentPanel.toggle()
+    }
+
+    private func openPersonaPicker() {
+        isInputFocused = false
+        onOpenPersonaPicker()
+    }
+
+    private func openDocumentImporter() {
+        closeAttachmentPanelThen(onOpenAttachmentImporter)
+    }
+
+    private func openCamera() {
+        closeAttachmentPanelThen(onOpenCamera)
+    }
+
+    private func openPhotoLibrary() {
+        closeAttachmentPanelThen(onOpenPhotoLibrary)
+    }
+
+    private func toggleWebSearch() {
+        closeAttachmentPanelThen(onToggleWebSearch)
+    }
+
+    private func closeAttachmentPanelThen(_ action: @escaping () -> Void) {
+        showAttachmentPanel = false
+        Task { @MainActor in
+            await Task.yield()
+            action()
+        }
+    }
+}
+
+private struct ChatComposerPersonaRow: View {
+    let persona: Persona
+    let onChangePersona: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: persona.symbolName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BrandPalette.primaryGradient)
+                .frame(width: 30, height: 30)
+                .liquidGlassSurface(
+                    tint: BrandPalette.accent.opacity(0.14),
+                    in: Circle(),
+                    fallback: AnyShapeStyle(BrandPalette.accent.opacity(0.10))
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(persona.localizedName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if !persona.localizedDisplaySummary.isEmpty {
+                    Text(persona.localizedDisplaySummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
+            Spacer(minLength: 8)
+            Button(String.appLocalized("common.change"), action: onChangePersona)
+                .font(.caption.weight(.semibold))
+                .liquidGlassButtonStyle(tint: BrandPalette.accent)
+                .controlSize(.small)
+                .frame(minHeight: 36)
+        }
+    }
+}
 
-            if chatViewModel.canUseVision {
-                attachmentPanelButton(
-                    String.appLocalized("chat.take_photo"),
-                    systemImage: "camera"
-                ) {
-                    closeAttachmentPanelThen {
-                        showCamera = true
+private struct ChatPendingDocumentStrip: View {
+    let pendingDocuments: [ConversationDocumentReference]
+    let onRemoveDocument: (ConversationDocumentReference) -> Void
+    let iconName: (ConversationDocumentKind) -> String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(pendingDocuments) { document in
+                    HStack(spacing: 6) {
+                        Image(systemName: iconName(document.kind))
+                            .foregroundStyle(BrandPalette.cyan)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(document.displayName)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                            Text(document.kind.displayName)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Button {
+                            onRemoveDocument(document)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(width: 44, height: 44)
+                        .accessibilityLabel("Remove document")
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .liquidGlassSurface(
+                        tint: BrandPalette.cyan.opacity(0.18),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                        fallback: AnyShapeStyle(BrandPalette.cyan.opacity(0.1))
+                    )
+                }
+            }
+            .liquidGlassContainer(spacing: 10)
+            .padding(.horizontal, 4)
+        }
+    }
+}
+
+private struct ChatPendingImageStrip: View {
+    let pendingImages: [ChatAttachmentImage]
+    let onRemoveImage: (UUID) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(pendingImages) { image in
+                    ZStack(alignment: .topTrailing) {
+                        AttachmentImageThumbnailView(imageData: image.data, size: 60, cornerRadius: 8)
+
+                        Button {
+                            onRemoveImage(image.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.white, .black.opacity(0.6))
+                                .font(.caption)
+                        }
+                        .frame(width: 44, height: 44)
+                        .accessibilityLabel("Remove image")
+                        .offset(x: 4, y: -4)
                     }
                 }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+}
 
-                attachmentPanelButton(
-                    String.appLocalized("chat.photo_library"),
-                    systemImage: "photo.on.rectangle"
-                ) {
-                    closeAttachmentPanelThen {
-                        showPhotoLibrary = true
-                    }
-                }
+private struct ChatAttachmentPanel: View {
+    let canUseVision: Bool
+    let isWebSearchEnabled: Bool
+    let onImportDocument: () -> Void
+    let onTakePhoto: () -> Void
+    let onOpenPhotoLibrary: () -> Void
+    let onToggleWebSearch: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ChatAttachmentPanelButton(
+                title: String.appLocalized("chat.import_document"),
+                systemImage: "doc.text",
+                action: onImportDocument
+            )
+
+            if canUseVision {
+                ChatAttachmentPanelButton(
+                    title: String.appLocalized("chat.take_photo"),
+                    systemImage: "camera",
+                    action: onTakePhoto
+                )
+
+                ChatAttachmentPanelButton(
+                    title: String.appLocalized("chat.photo_library"),
+                    systemImage: "photo.on.rectangle",
+                    action: onOpenPhotoLibrary
+                )
             }
 
             Divider()
                 .padding(.vertical, 4)
 
-            webSearchToggleRow
+            Button(action: onToggleWebSearch) {
+                HStack(spacing: 12) {
+                    Image(systemName: "globe")
+                        .font(.body)
+                        .foregroundStyle(BrandPalette.cyan)
+                        .frame(width: 24, height: 24)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String.appLocalized("Web Search"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(String.appLocalized("web_search.menu.subtitle"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    WebSearchPillSwitch(isOn: isWebSearchEnabled)
+                }
+                .frame(minHeight: 52)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String.appLocalized("Web Search"))
+            .accessibilityValue(
+                isWebSearchEnabled
+                    ? String.appLocalized("web_search.state.on")
+                    : String.appLocalized("web_search.state.off")
+            )
+            .accessibilityHint(String.appLocalized("web_search.menu.accessibility_hint"))
+            .accessibilityAddTraits(.isButton)
         }
         .padding(10)
         .frame(width: 286)
@@ -1002,12 +1262,14 @@ struct ChatView: View {
             fallback: AnyShapeStyle(.thinMaterial)
         )
     }
+}
 
-    private func attachmentPanelButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
+private struct ChatAttachmentPanelButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: systemImage)
@@ -1026,110 +1288,224 @@ struct ChatView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
     }
+}
 
-    private var webSearchToggleRow: some View {
-        Button {
-            handleWebSearchToggleTap()
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "globe")
-                    .font(.body)
-                    .foregroundStyle(BrandPalette.cyan)
-                    .frame(width: 24, height: 24)
+private struct ChatStatusCard: View {
+    let title: String
+    let subtitle: String
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String.appLocalized("Web Search"))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(String.appLocalized("web_search.menu.subtitle"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+    var body: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .liquidGlassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal)
+    }
+}
+
+private struct ChatGeneratingIndicator: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(BrandPalette.cyan)
+            Text(String.appLocalized("chat.generating"))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 2)
+        .padding(.horizontal)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ChatNoticeBanner: View {
+    enum Style {
+        case error(isOOM: Bool)
+        case info
+    }
+
+    let style: Style
+    let message: String
+    let title: String?
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+                .foregroundStyle(iconColor)
+            VStack(alignment: .leading, spacing: 2) {
+                if let title {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(titleColor)
                 }
-
-                Spacer(minLength: 8)
-
-                WebSearchPillSwitch(isOn: chatViewModel.isWebSearchEnabled)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(4)
             }
-            .frame(minHeight: 52)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .accessibilityLabel(dismissLabel)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(String.appLocalized("Web Search"))
-        .accessibilityValue(
-            chatViewModel.isWebSearchEnabled
-                ? String.appLocalized("web_search.state.on")
-                : String.appLocalized("web_search.state.off")
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .liquidGlassSurface(
+            tint: tintColor,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous),
+            fallback: AnyShapeStyle(fallbackColor)
         )
-        .accessibilityHint(String.appLocalized("web_search.menu.accessibility_hint"))
-        .accessibilityAddTraits(.isButton)
+        .padding(.horizontal)
     }
 
-    private var bottomChromeMaxWidth: CGFloat {
-        horizontalSizeClass == .regular ? 760 : .infinity
+    private var iconName: String {
+        switch style {
+        case .error(let isOOM):
+            isOOM ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill"
+        case .info:
+            "globe"
+        }
     }
 
-    private var canSendMessage: Bool {
-        !chatViewModel.isModelLoading && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var iconColor: Color {
+        switch style {
+        case .error(let isOOM):
+            isOOM ? .red : .orange
+        case .info:
+            BrandPalette.cyan
+        }
     }
 
-    private var canPresentLiveVoice: Bool {
-        !chatViewModel.isModelLoading
-            && !chatViewModel.isGenerating
-            && appState.loadedModelId != nil
-            && !isRunningOnSimulator
+    private var titleColor: Color {
+        switch style {
+        case .error:
+            .red
+        case .info:
+            .primary
+        }
     }
 
-    private func handleWebSearchToggleTap() {
-        if chatViewModel.isWebSearchEnabled {
-            showAttachmentPanel = false
-            chatViewModel.setWebSearchEnabled(false)
-        } else {
-            closeAttachmentPanelThen {
-                showWebSearchDisclosure = true
+    private var tintColor: Color {
+        switch style {
+        case .error(let isOOM):
+            return isOOM ? .red.opacity(0.18) : .orange.opacity(0.18)
+        case .info:
+            return BrandPalette.cyan.opacity(0.16)
+        }
+    }
+
+    private var fallbackColor: Color {
+        switch style {
+        case .error(let isOOM):
+            return isOOM ? Color.red.opacity(0.1) : Color.orange.opacity(0.12)
+        case .info:
+            return BrandPalette.cyan.opacity(0.08)
+        }
+    }
+
+    private var dismissLabel: String {
+        switch style {
+        case .error:
+            "Dismiss error"
+        case .info:
+            "Dismiss notice"
+        }
+    }
+}
+
+private struct ChatMemoryNoticeView: View {
+    let notice: ChatMemoryNotice
+    let title: String
+    let onOpenMemoryLibrary: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: notice.kind == .pending ? "brain.head.profile" : "checkmark.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(notice.kind == .pending ? BrandPalette.cyan : .green)
+                .frame(width: 30, height: 30)
+                .liquidGlassSurface(
+                    tint: notice.kind == .pending ? BrandPalette.cyan.opacity(0.18) : Color.green.opacity(0.18),
+                    in: Circle(),
+                    fallback: AnyShapeStyle(notice.kind == .pending ? BrandPalette.cyan.opacity(0.1) : Color.green.opacity(0.1))
+                )
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(notice.message)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if notice.kind == .pending {
+                    Button(String.appLocalized("settings.manage_memory"), action: onOpenMemoryLibrary)
+                        .liquidGlassButtonStyle(tint: BrandPalette.cyan)
+                        .controlSize(.small)
+                        .frame(minHeight: 32)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .liquidGlassSurface(
+                        in: Circle(),
+                        fallback: AnyShapeStyle(Color.secondary.opacity(0.1)),
+                        interactive: true
+                    )
+            }
+            .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel(String.appLocalized("memory.notice.dismiss"))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(notice.kind == .pending ? BrandPalette.cyan.opacity(0.18) : Color.green.opacity(0.16))
             }
         }
-    }
-
-    private func closeAttachmentPanelThen(_ action: @escaping () -> Void) {
-        showAttachmentPanel = false
-        Task { @MainActor in
-            await Task.yield()
-            action()
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(notice.kind == .pending ? BrandPalette.cyan.opacity(0.30) : Color.green.opacity(0.24), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
+        .padding(.horizontal)
     }
+}
 
-    private var supportedDocumentTypes: [UTType] {
-        Self.cachedSupportedDocumentTypes
-    }
-
-    private static let cachedSupportedDocumentTypes: [UTType] = {
-        var types: [UTType] = [.pdf, .plainText, .commaSeparatedText]
-        if let markdown = UTType(filenameExtension: "md") {
-            types.append(markdown)
-        }
-        return types
-    }()
-
-    private func iconName(for kind: ConversationDocumentKind) -> String {
-        switch kind {
-        case .pdf:
-            "doc.richtext"
-        case .csv:
-            "tablecells"
-        case .text:
-            "doc.text"
-        }
-    }
-
-    private var isRunningOnSimulator: Bool {
-        #if targetEnvironment(simulator)
-        true
-        #else
-        false
-        #endif
-    }
+#Preview("Chat Empty State") {
+    ChatEmptyStateView()
 }

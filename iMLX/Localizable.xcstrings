@@ -1149,6 +1149,9 @@
     "Keep Archived" : {
 
     },
+    "Live Voice" : {
+
+    },
     "Load %@" : {
 
     },
@@ -2462,6 +2465,12 @@
 
     },
     "Open conversation" : {
+
+    },
+    "Open iMLX directly in a live voice conversation." : {
+
+    },
+    "Open Live Voice" : {
 
     },
     "persona.code-reviewer.goal" : {
@@ -4332,9 +4341,6 @@
         }
       }
     },
-    "Unload model" : {
-
-    },
     "Unload model from memory" : {
 
     },
@@ -4757,9 +4763,6 @@
           }
         }
       }
-    },
-    "Welcome to iMLX" : {
-
     },
     "Why it was retrieved" : {
 

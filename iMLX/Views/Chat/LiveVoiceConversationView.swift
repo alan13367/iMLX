@@ -2,8 +2,9 @@ import SwiftUI
 
 struct LiveVoiceConversationView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var viewModel: LiveVoiceSessionViewModel
+
     let appState: AppState
+    @State private var viewModel: LiveVoiceSessionViewModel
 
     init(appState: AppState, chatViewModel: ChatViewModel) {
         self.appState = appState
@@ -12,28 +13,46 @@ struct LiveVoiceConversationView: View {
 
     var body: some View {
         ZStack {
-            background
+            LiveVoiceBackground()
 
             VStack(spacing: 0) {
-                navigationBar
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
+                LiveVoiceHeaderBar(
+                    voiceLocaleName: viewModel.voiceLocale.displayName,
+                    onClose: close
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
 
                 Spacer(minLength: 12)
 
                 VoiceOrbView(state: viewModel.orbState, size: 200)
                     .padding(.bottom, 8)
 
-                statusLabel
+                LiveVoiceStatusLabel(statusText: viewModel.statusText)
                     .padding(.bottom, 20)
 
-                transcriptArea
-                    .padding(.horizontal, 20)
+                LiveVoiceTranscriptArea(
+                    lastUserTranscript: viewModel.lastUserTranscript,
+                    partialTranscript: viewModel.partialTranscript,
+                    unavailableReason: viewModel.unavailableReason,
+                    memoryWarningMessage: viewModel.memoryWarningMessage,
+                    errorMessage: viewModel.errorMessage,
+                    needsAssetDownload: viewModel.needsAssetDownload,
+                    showAssetDownloadCard: viewModel.unavailableReason == nil,
+                    voiceLocaleName: viewModel.voiceLocale.displayName,
+                    isPreparingAssets: viewModel.isPreparingAssets,
+                    onDownloadAssets: downloadAssets
+                )
+                .padding(.horizontal, 20)
 
                 Spacer(minLength: 20)
 
-                micButton
-                    .padding(.bottom, 40)
+                LiveVoiceMicButton(
+                    isListening: viewModel.isListening,
+                    isEnabled: micButtonEnabled,
+                    onTap: toggleListening
+                )
+                .padding(.bottom, 40)
             }
         }
         .task {
@@ -52,9 +71,35 @@ struct LiveVoiceConversationView: View {
         }
     }
 
-    // MARK: - Background
+    private var micButtonEnabled: Bool {
+        viewModel.canStartListening || viewModel.isListening
+    }
 
-    private var background: some View {
+    private func close() {
+        Haptics.impactLight()
+        Task {
+            await viewModel.close()
+            dismiss()
+        }
+    }
+
+    private func downloadAssets() {
+        Haptics.impactMedium()
+        Task {
+            await viewModel.downloadAssets()
+        }
+    }
+
+    private func toggleListening() {
+        Haptics.impactMedium()
+        Task {
+            await viewModel.toggleListening()
+        }
+    }
+}
+
+private struct LiveVoiceBackground: View {
+    var body: some View {
         LinearGradient(
             colors: [
                 BrandPalette.navy,
@@ -66,12 +111,15 @@ struct LiveVoiceConversationView: View {
         )
         .ignoresSafeArea()
     }
+}
 
-    // MARK: - Navigation Bar
+private struct LiveVoiceHeaderBar: View {
+    let voiceLocaleName: String
+    let onClose: () -> Void
 
-    private var navigationBar: some View {
+    var body: some View {
         HStack {
-            Text(viewModel.voiceLocale.displayName)
+            Text(voiceLocaleName)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.9))
                 .padding(.horizontal, 14)
@@ -84,13 +132,7 @@ struct LiveVoiceConversationView: View {
 
             Spacer()
 
-            Button {
-                Haptics.impactLight()
-                Task {
-                    await viewModel.close()
-                    dismiss()
-                }
-            } label: {
+            Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.7))
@@ -105,122 +147,157 @@ struct LiveVoiceConversationView: View {
             .accessibilityLabel(String.appLocalized("voice.close"))
         }
     }
+}
 
-    // MARK: - Status Label
+private struct LiveVoiceStatusLabel: View {
+    let statusText: String
 
-    private var statusLabel: some View {
-        Text(viewModel.statusText)
+    var body: some View {
+        Text(statusText)
             .font(.subheadline.weight(.medium))
             .foregroundStyle(.white.opacity(0.5))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 40)
-            .animation(.easeInOut(duration: 0.3), value: viewModel.statusText)
+            .animation(.easeInOut(duration: 0.3), value: statusText)
     }
+}
 
-    // MARK: - Transcript Area
+private struct LiveVoiceTranscriptArea: View {
+    let lastUserTranscript: String
+    let partialTranscript: String
+    let unavailableReason: String?
+    let memoryWarningMessage: String?
+    let errorMessage: String?
+    let needsAssetDownload: Bool
+    let showAssetDownloadCard: Bool
+    let voiceLocaleName: String
+    let isPreparingAssets: Bool
+    let onDownloadAssets: () -> Void
 
-    private var transcriptArea: some View {
+    var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                if !viewModel.lastUserTranscript.isEmpty {
-                    userTranscriptCard
+                if !lastUserTranscript.isEmpty {
+                    LiveVoiceTranscriptCard(
+                        title: String.appLocalized("voice.you_said"),
+                        text: lastUserTranscript,
+                        titleColor: BrandPalette.accent.opacity(0.8),
+                        textColor: .white,
+                        alignment: .trailing,
+                        horizontalSpacer: 48,
+                        tint: BrandPalette.accent.opacity(0.14)
+                    )
                 }
 
-                if !viewModel.partialTranscript.isEmpty {
-                    listeningTranscriptCard
+                if !partialTranscript.isEmpty {
+                    LiveVoiceTranscriptCard(
+                        title: String.appLocalized("voice.listening"),
+                        text: partialTranscript,
+                        titleColor: BrandPalette.cyan.opacity(0.8),
+                        textColor: .white.opacity(0.85),
+                        alignment: .leading,
+                        horizontalSpacer: 48,
+                        tint: BrandPalette.cyan.opacity(0.12)
+                    )
                 }
 
-                if let unavailableReason = viewModel.unavailableReason {
-                    noticeCard(
+                if let unavailableReason {
+                    LiveVoiceNoticeCard(
                         icon: "exclamationmark.triangle.fill",
                         tint: .orange,
-                        body: unavailableReason
+                        bodyText: unavailableReason
                     )
                 }
 
-                if let memoryWarningMessage = viewModel.memoryWarningMessage {
-                    noticeCard(
+                if let memoryWarningMessage {
+                    LiveVoiceNoticeCard(
                         icon: "memorychip.fill",
                         tint: BrandPalette.cyan,
-                        body: memoryWarningMessage
+                        bodyText: memoryWarningMessage
                     )
                 }
 
-                if let errorMessage = viewModel.errorMessage {
-                    noticeCard(
+                if let errorMessage {
+                    LiveVoiceNoticeCard(
                         icon: "exclamationmark.circle.fill",
                         tint: .red,
-                        body: errorMessage
+                        bodyText: errorMessage
                     )
                 }
 
-                if viewModel.needsAssetDownload && viewModel.unavailableReason == nil {
-                    assetDownloadCard
+                if needsAssetDownload && showAssetDownloadCard {
+                    LiveVoiceAssetDownloadCard(
+                        voiceLocaleName: voiceLocaleName,
+                        isPreparingAssets: isPreparingAssets,
+                        onDownloadAssets: onDownloadAssets
+                    )
                 }
             }
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
     }
+}
 
-    private var userTranscriptCard: some View {
+private struct LiveVoiceTranscriptCard: View {
+    let title: String
+    let text: String
+    let titleColor: Color
+    let textColor: Color
+    let alignment: HorizontalAlignment
+    let horizontalSpacer: CGFloat
+    let tint: Color
+
+    private var isTrailing: Bool {
+        alignment == .trailing
+    }
+
+    var body: some View {
         HStack {
-            Spacer(minLength: 48)
-            VStack(alignment: .trailing, spacing: 6) {
-                Text(String.appLocalized("voice.you_said"))
+            if isTrailing {
+                Spacer(minLength: horizontalSpacer)
+            }
+
+            VStack(alignment: alignment, spacing: 6) {
+                Text(title)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(BrandPalette.accent.opacity(0.8))
-                Text(viewModel.lastUserTranscript)
+                    .foregroundStyle(titleColor)
+                Text(text)
                     .font(.body)
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(textColor)
+                    .multilineTextAlignment(isTrailing ? .trailing : .leading)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .liquidGlassSurface(
-                tint: BrandPalette.accent.opacity(0.14),
+                tint: tint,
                 in: RoundedRectangle(cornerRadius: 20, style: .continuous),
                 fallback: AnyShapeStyle(.ultraThinMaterial)
             )
-        }
-        .transition(.asymmetric(
-            insertion: .move(edge: .trailing).combined(with: .opacity),
-            removal: .opacity
-        ))
-    }
 
-    private var listeningTranscriptCard: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(String.appLocalized("voice.listening"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BrandPalette.cyan.opacity(0.8))
-                Text(viewModel.partialTranscript)
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.85))
+            if !isTrailing {
+                Spacer(minLength: horizontalSpacer)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .liquidGlassSurface(
-                tint: BrandPalette.cyan.opacity(0.12),
-                in: RoundedRectangle(cornerRadius: 20, style: .continuous),
-                fallback: AnyShapeStyle(.ultraThinMaterial)
-            )
-            Spacer(minLength: 48)
         }
         .transition(.asymmetric(
-            insertion: .move(edge: .leading).combined(with: .opacity),
+            insertion: .move(edge: isTrailing ? .trailing : .leading).combined(with: .opacity),
             removal: .opacity
         ))
     }
+}
 
-    private func noticeCard(icon: String, tint: Color, body: String) -> some View {
+private struct LiveVoiceNoticeCard: View {
+    let icon: String
+    let tint: Color
+    let bodyText: String
+
+    var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
-            Text(body)
+            Text(bodyText)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.8))
                 .fixedSize(horizontal: false, vertical: true)
@@ -234,22 +311,23 @@ struct LiveVoiceConversationView: View {
             fallback: AnyShapeStyle(.ultraThinMaterial)
         )
     }
+}
 
-    private var assetDownloadCard: some View {
+private struct LiveVoiceAssetDownloadCard: View {
+    let voiceLocaleName: String
+    let isPreparingAssets: Bool
+    let onDownloadAssets: () -> Void
+
+    var body: some View {
         VStack(spacing: 14) {
-            Text(String(format: String.appLocalized("voice.download_body"), viewModel.voiceLocale.displayName))
+            Text(String(format: String.appLocalized("voice.download_body"), voiceLocaleName))
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
 
-            Button {
-                Haptics.impactMedium()
-                Task {
-                    await viewModel.downloadAssets()
-                }
-            } label: {
+            Button(action: onDownloadAssets) {
                 Group {
-                    if viewModel.isPreparingAssets {
+                    if isPreparingAssets {
                         ProgressView()
                             .tint(.white)
                             .frame(maxWidth: .infinity, minHeight: 44)
@@ -261,7 +339,7 @@ struct LiveVoiceConversationView: View {
                 }
             }
             .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
-            .disabled(viewModel.isPreparingAssets)
+            .disabled(isPreparingAssets)
         }
         .padding(20)
         .liquidGlassSurface(
@@ -270,18 +348,37 @@ struct LiveVoiceConversationView: View {
             fallback: AnyShapeStyle(.ultraThinMaterial)
         )
     }
+}
 
-    // MARK: - Mic Button
+private struct LiveVoiceMicButton: View {
+    let isListening: Bool
+    let isEnabled: Bool
+    let onTap: () -> Void
 
-    private var micButton: some View {
-        Button {
-            Haptics.impactMedium()
-            Task {
-                await viewModel.toggleListening()
-            }
-        } label: {
+    private var tint: Color? {
+        guard isEnabled else { return nil }
+        return isListening ? .red.opacity(0.3) : BrandPalette.cyan.opacity(0.22)
+    }
+
+    private var fallback: some ShapeStyle {
+        if !isEnabled {
+            return AnyShapeStyle(Color.secondary.opacity(0.15))
+        }
+        if isListening {
+            return AnyShapeStyle(Color.red)
+        }
+        return AnyShapeStyle(BrandPalette.cyan.opacity(0.9))
+    }
+
+    private var glow: Color {
+        guard isEnabled else { return .clear }
+        return isListening ? .red.opacity(0.4) : BrandPalette.cyan.opacity(0.3)
+    }
+
+    var body: some View {
+        Button(action: onTap) {
             ZStack {
-                if viewModel.isListening {
+                if isListening {
                     Circle()
                         .fill(Color.red.opacity(0.15))
                         .frame(width: 108, height: 108)
@@ -291,55 +388,43 @@ struct LiveVoiceConversationView: View {
                         .frame(width: 108, height: 108)
                 }
 
-                Image(systemName: viewModel.isListening ? "stop.fill" : "mic.fill")
+                Image(systemName: isListening ? "stop.fill" : "mic.fill")
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 88, height: 88)
                     .liquidGlassSurface(
-                        tint: micButtonTint,
+                        tint: tint,
                         in: Circle(),
-                        fallback: AnyShapeStyle(micButtonFallback),
+                        fallback: AnyShapeStyle(fallback),
                         interactive: true
                     )
             }
-            .shadow(
-                color: micButtonGlow,
-                radius: viewModel.isListening ? 20 : 12,
-                x: 0,
-                y: 4
-            )
+            .shadow(color: glow, radius: isListening ? 20 : 12, x: 0, y: 4)
         }
         .buttonStyle(.plain)
-        .disabled(!viewModel.canStartListening && !viewModel.isListening)
-        .opacity(micButtonEnabled ? 1.0 : 0.4)
-        .animation(.easeInOut(duration: 0.3), value: viewModel.isListening)
-        .animation(.easeInOut(duration: 0.3), value: micButtonEnabled)
-        .accessibilityLabel(viewModel.isListening ? "Stop listening" : "Start listening")
+        .disabled(!isEnabled && !isListening)
+        .opacity(isEnabled ? 1.0 : 0.4)
+        .animation(.easeInOut(duration: 0.3), value: isListening)
+        .animation(.easeInOut(duration: 0.3), value: isEnabled)
+        .accessibilityLabel(isListening ? "Stop listening" : "Start listening")
     }
+}
 
-    private var micButtonEnabled: Bool {
-        viewModel.canStartListening || viewModel.isListening
+#Preview("Voice Notice Card") {
+    ZStack {
+        LiveVoiceBackground()
+        LiveVoiceNoticeCard(
+            icon: "memorychip.fill",
+            tint: BrandPalette.cyan,
+            bodyText: "Voice mode may pause if available memory drops too low."
+        )
+        .padding()
     }
+}
 
-    private var micButtonTint: Color? {
-        guard micButtonEnabled else { return nil }
-        return viewModel.isListening ? .red.opacity(0.3) : BrandPalette.cyan.opacity(0.22)
-    }
-
-    private var micButtonFallback: some ShapeStyle {
-        if !micButtonEnabled {
-            return AnyShapeStyle(Color.secondary.opacity(0.15))
-        }
-        if viewModel.isListening {
-            return AnyShapeStyle(Color.red)
-        }
-        return AnyShapeStyle(BrandPalette.cyan.opacity(0.9))
-    }
-
-    private var micButtonGlow: Color {
-        guard micButtonEnabled else { return .clear }
-        return viewModel.isListening
-            ? .red.opacity(0.4)
-            : BrandPalette.cyan.opacity(0.3)
+#Preview("Voice Mic Button") {
+    ZStack {
+        LiveVoiceBackground()
+        LiveVoiceMicButton(isListening: false, isEnabled: true, onTap: {})
     }
 }

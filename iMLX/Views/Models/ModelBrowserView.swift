@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ModelBrowserView: View {
-    @State private var viewModel: ModelManagerViewModel
     let appState: AppState
+    @State private var viewModel: ModelManagerViewModel
 
     init(appState: AppState) {
         self.appState = appState
@@ -13,7 +13,7 @@ struct ModelBrowserView: View {
         List {
             if let error = viewModel.errorMessage {
                 Section {
-                    errorRow(message: error)
+                    ModelBrowserErrorRow(message: error, onDismiss: dismissError)
                 }
             }
 
@@ -24,36 +24,33 @@ struct ModelBrowserView: View {
                         viewModel: viewModel
                     )
                 } label: {
-                    familyRow(family: group.family, models: group.models)
+                    ModelFamilyRow(family: group.family, modelCount: group.models.count)
                 }
             }
         }
         .navigationTitle(String.appLocalized("models.browser.title"))
         .task {
-            viewModel.refreshDownloadStatusFromDisk()
+            refreshDownloadStatus()
         }
         .task(id: appState.modelDownloadSnapshots.count) {
-            viewModel.refreshDownloadStatusFromDisk()
+            refreshDownloadStatus()
         }
     }
 
-    private func familyRow(family: ModelInfo.ModelFamily, models: [ModelInfo]) -> some View {
-        HStack(spacing: 12) {
-            ModelLogoView(family: family)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(family.displayName)
-                    .font(.headline)
-                Text(String(format: String.appLocalized("models.family.model_count"), models.count))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-        }
-        .padding(.vertical, 4)
+    private func refreshDownloadStatus() {
+        viewModel.refreshDownloadStatusFromDisk()
     }
 
-    private func errorRow(message: String) -> some View {
+    private func dismissError() {
+        viewModel.errorMessage = nil
+    }
+}
+
+private struct ModelBrowserErrorRow: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
@@ -62,15 +59,33 @@ struct ModelBrowserView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(4)
             Spacer()
-            Button {
-                viewModel.errorMessage = nil
-            } label: {
+            Button(action: onDismiss) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .frame(width: 44, height: 44)
             .accessibilityLabel("Dismiss error")
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct ModelFamilyRow: View {
+    let family: ModelInfo.ModelFamily
+    let modelCount: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ModelLogoView(family: family)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(family.displayName)
+                    .font(.headline)
+                Text(String(format: String.appLocalized("models.family.model_count"), modelCount))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 4)
     }

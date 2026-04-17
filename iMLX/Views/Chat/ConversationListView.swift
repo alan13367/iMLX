@@ -9,6 +9,7 @@ struct ConversationListView: View {
     let appState: AppState
     var presentation: ConversationListPresentation = .rootNavigation
     var onSelect: (UUID) -> Void
+
     @State private var conversationPendingDeletion: Conversation?
 
     private var isShowingDeleteAlert: Binding<Bool> {
@@ -38,52 +39,23 @@ struct ConversationListView: View {
                 emptyContent
             } else {
                 ForEach(appState.conversations) { conversation in
-                    HStack(spacing: 8) {
-                        Button {
-                            appState.selectConversation(conversation.id)
-                            onSelect(conversation.id)
-                        } label: {
-                            ConversationRow(
-                                conversation: conversation,
-                                isActive: appState.activeConversationId == conversation.id,
-                                showsDeleteControl: false,
-                                onDelete: {}
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(conversation.displayTitle)
-                        .accessibilityHint("Open conversation")
-
-                        if showsInlineDeleteButton {
-                            Button(role: .destructive) {
-                                conversationPendingDeletion = conversation
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 28, height: 28)
-                                    .liquidGlassSurface(
-                                        tint: .red.opacity(0.14),
-                                        in: Circle(),
-                                        fallback: AnyShapeStyle(.fill.tertiary),
-                                        interactive: true
-                                    )
-                            }
-                            .buttonStyle(.borderless)
-                            .frame(width: 44, height: 44)
-                            .accessibilityLabel("Delete conversation")
-                        }
-                    }
+                    ConversationListItem(
+                        conversation: conversation,
+                        isActive: appState.activeConversationId == conversation.id,
+                        showsInlineDeleteButton: showsInlineDeleteButton,
+                        onOpen: { selectConversation(conversation.id) },
+                        onDelete: { confirmDeletion(for: conversation) }
+                    )
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
-                            conversationPendingDeletion = conversation
+                            confirmDeletion(for: conversation)
                         } label: {
                             Label(String.appLocalized("common.delete"), systemImage: "trash")
                         }
                     }
                     .contextMenu {
                         Button(role: .destructive) {
-                            conversationPendingDeletion = conversation
+                            confirmDeletion(for: conversation)
                         } label: {
                             Label(String.appLocalized("common.delete"), systemImage: "trash")
                         }
@@ -94,10 +66,7 @@ struct ConversationListView: View {
         .navigationTitle(navigationTitle)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    let id = appState.createNewConversation()
-                    onSelect(id)
-                } label: {
+                Button(action: createConversation) {
                     Image(systemName: "plus")
                 }
                 .accessibilityLabel("New conversation")
@@ -126,6 +95,20 @@ struct ConversationListView: View {
         }
     }
 
+    private func selectConversation(_ id: UUID) {
+        appState.selectConversation(id)
+        onSelect(id)
+    }
+
+    private func createConversation() {
+        let id = appState.createNewConversation()
+        onSelect(id)
+    }
+
+    private func confirmDeletion(for conversation: Conversation) {
+        conversationPendingDeletion = conversation
+    }
+
     private var emptyContent: some View {
         VStack(spacing: 16) {
             Image(systemName: "bubble.left.and.bubble.right")
@@ -138,6 +121,48 @@ struct ConversationListView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
         .listRowBackground(Color.clear)
+    }
+}
+
+private struct ConversationListItem: View {
+    let conversation: Conversation
+    let isActive: Bool
+    let showsInlineDeleteButton: Bool
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onOpen) {
+                ConversationRow(
+                    conversation: conversation,
+                    isActive: isActive,
+                    showsDeleteControl: false,
+                    onDelete: {}
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(conversation.displayTitle)
+            .accessibilityHint("Open conversation")
+
+            if showsInlineDeleteButton {
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .liquidGlassSurface(
+                            tint: .red.opacity(0.14),
+                            in: Circle(),
+                            fallback: AnyShapeStyle(.fill.tertiary),
+                            interactive: true
+                        )
+                }
+                .buttonStyle(.borderless)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Delete conversation")
+            }
+        }
     }
 }
 

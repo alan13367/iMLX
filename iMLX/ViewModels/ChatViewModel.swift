@@ -119,16 +119,16 @@ final class ChatViewModel {
         let normalizedText = prepareToSendMessage(text)
         guard let normalizedText else { return }
         generationTask = Task<ChatMessage?, Never> { @MainActor [self] in
-            return await self.performSendMessage(normalizedText)
+            return await self.performSendMessage(normalizedText, allowPostReplyTasks: true)
         }
     }
 
     @MainActor
-    func sendMessageAndWait(_ text: String) async -> ChatMessage? {
+    func sendMessageAndWait(_ text: String, allowPostReplyTasks: Bool = true) async -> ChatMessage? {
         let normalizedText = prepareToSendMessage(text)
         guard let normalizedText else { return nil }
         let task = Task<ChatMessage?, Never> { @MainActor [self] in
-            return await self.performSendMessage(normalizedText)
+            return await self.performSendMessage(normalizedText, allowPostReplyTasks: allowPostReplyTasks)
         }
         generationTask = task
         return await task.value
@@ -170,7 +170,7 @@ final class ChatViewModel {
     }
 
     @MainActor
-    private func performSendMessage(_ text: String) async -> ChatMessage? {
+    private func performSendMessage(_ text: String, allowPostReplyTasks: Bool) async -> ChatMessage? {
         let loadedModel = resolvedCurrentModel()
         let history = promptHistory(from: messages, for: loadedModel)
         let userMessage = ChatMessage(
@@ -372,19 +372,23 @@ final class ChatViewModel {
                         generationStats: generationStats
                     )
                 self.messages.append(assistantMessage)
-                self.scheduleMemoryExtraction(
-                    userMessage: userMessage,
-                    assistantMessage: assistantMessage,
-                    personaId: persona.id,
-                    conversationId: self.activeConversationId,
-                    isEnabled: !handledExplicitMemoryCommand
-                )
+                if allowPostReplyTasks {
+                    self.scheduleMemoryExtraction(
+                        userMessage: userMessage,
+                        assistantMessage: assistantMessage,
+                        personaId: persona.id,
+                        conversationId: self.activeConversationId,
+                        isEnabled: !handledExplicitMemoryCommand
+                    )
+                }
                 completedAssistantMessage = assistantMessage
                 self.saveCurrentConversation()
-                self.scheduleConversationTitleGeneration(
-                    userMessage: userMessage,
-                    assistantMessage: assistantMessage
-                )
+                if allowPostReplyTasks {
+                    self.scheduleConversationTitleGeneration(
+                        userMessage: userMessage,
+                        assistantMessage: assistantMessage
+                    )
+                }
             } else {
                 self.saveCurrentConversation()
             }

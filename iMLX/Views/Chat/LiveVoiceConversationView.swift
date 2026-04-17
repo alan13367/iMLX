@@ -138,6 +138,14 @@ struct LiveVoiceConversationView: View {
                     )
                 }
 
+                if let memoryWarningMessage = viewModel.memoryWarningMessage {
+                    noticeCard(
+                        icon: "memorychip.fill",
+                        tint: BrandPalette.cyan,
+                        body: memoryWarningMessage
+                    )
+                }
+
                 if let errorMessage = viewModel.errorMessage {
                     noticeCard(
                         icon: "exclamationmark.circle.fill",

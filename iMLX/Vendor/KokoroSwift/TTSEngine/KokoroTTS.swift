@@ -174,10 +174,6 @@ nonisolated public final class KokoroTTS {
     // Update language if it has changed
     try updateLanguageIfNeeded(language)
 
-    // Start performance timing
-    BenchmarkTimer.reset()
-    BenchmarkTimer.startTimer(Constants.bm_TTS)
-
     // Step 1: Convert text to phonemes
     let (phonemizedText, tokenArray) = try phonemizeText(text)
     
@@ -195,6 +191,8 @@ nonisolated public final class KokoroTTS {
       textMask: textMask,
       style: globalStyle
     )
+    MLX.eval(durationFeatures)
+    MLX.Memory.clearCache()
     
     // Step 5: Predict phoneme durations
     let (predictedDurations, alignmentTarget) = predictDurations(
@@ -202,16 +200,24 @@ nonisolated public final class KokoroTTS {
       batchSize: paddedInputIds.shape[1],
       speed: speed
     )
+    MLX.eval(predictedDurations, alignmentTarget)
+    MLX.Memory.clearCache()
     
     // Step 6: Generate aligned encodings
     let alignedEncoding = durationFeatures.transposed(0, 2, 1).matmul(alignmentTarget)
+    MLX.eval(alignedEncoding)
+    MLX.Memory.clearCache()
     
     // Step 7: Predict prosody (F0, pitch)
     let (f0Prediction, nPrediction) = prosodyPredictor.F0NTrain(x: alignedEncoding, s: globalStyle)
+    MLX.eval(f0Prediction, nPrediction)
+    MLX.Memory.clearCache()
     
     // Step 8: Encode text for decoder
     let textEncoding = textEncoder(paddedInputIds, inputLengths: inputLengths, m: textMask)
     let asrFeatures = MLX.matmul(textEncoding, alignmentTarget)
+    MLX.eval(asrFeatures)
+    MLX.Memory.clearCache()
     
     // Step 9: Generate audio
     let audio = decoder(
@@ -220,14 +226,13 @@ nonisolated public final class KokoroTTS {
       N: nPrediction,
       s: acousticStyle
     )[0]
+    MLX.eval(audio)
+    MLX.Memory.clearCache()
     
     // Try to predict timestamp of each token if G2P processor returns tokens
     if let tokenArray {
       TimestampPredictor.preditTimestamps(tokens: tokenArray, predictionDuration: predictedDurations)
     }
-    
-    // Stop performance timing
-    BenchmarkTimer.stopTimer(Constants.bm_TTS)
 
     return (audio[0].asArray(Float.self), tokenArray)
   }
@@ -361,21 +366,21 @@ nonisolated public final class KokoroTTS {
   ///   - batchSize: Size of the input batch
   /// - Returns: Alignment matrix [batchSize × totalFrames]
   private func createAlignmentTarget(durations: MLXArray, batchSize: Int) -> MLXArray {
-    // Create indices array by repeating each index according to its duration
-    let indices = MLX.concatenated(
-      durations.enumerated().map { index, duration in
-        let frameCount: Int = duration.item()
-        return MLX.repeated(MLXArray([index]), count: frameCount)
-      }
-    )
-
-    // Create one-hot encoded alignment matrix
-    let totalFrames = indices.shape[0]
+    let durationsArray = durations.asArray(Int32.self)
+    var totalFrames = 0
+    for duration in durationsArray {
+        totalFrames += Int(duration)
+    }
+    
     var alignmentArray = [Float](repeating: 0.0, count: totalFrames * batchSize)
     
-    for frame in 0 ..< totalFrames {
-      let phonemeIndex: Int = indices[frame].item()
-      alignmentArray[phonemeIndex * totalFrames + frame] = 1.0
+    var currentFrame = 0
+    for (phonemeIndex, duration) in durationsArray.enumerated() {
+        let frameCount = Int(duration)
+        for _ in 0 ..< frameCount {
+            alignmentArray[phonemeIndex * totalFrames + currentFrame] = 1.0
+            currentFrame += 1
+        }
     }
     
     let alignmentTarget = MLXArray(alignmentArray).reshaped([batchSize, totalFrames])

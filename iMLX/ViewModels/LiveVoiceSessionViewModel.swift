@@ -3,10 +3,16 @@ import Foundation
 @Observable
 @MainActor
 final class LiveVoiceSessionViewModel {
+    private enum VoiceMemoryStage {
+        case startListening
+        case speechSynthesis
+    }
+
     var partialTranscript = ""
     var lastUserTranscript = ""
     var statusText = "Voice mode is ready."
     var errorMessage: String?
+    var memoryWarningMessage: String?
     var isListening = false
     var isSpeaking = false
     var isGeneratingReply = false
@@ -16,6 +22,7 @@ final class LiveVoiceSessionViewModel {
 
     private let appState: AppState
     private let chatViewModel: ChatViewModel
+    private let deviceCapabilityService = DeviceCapabilityService()
     private let recognitionService = SpeechRecognitionService()
     private let playbackService = SpeechPlaybackService()
     private var isSessionActive = true
@@ -70,8 +77,11 @@ final class LiveVoiceSessionViewModel {
     func refresh() async {
         let status = await appState.speechAssetService.status()
         needsAssetDownload = !status.isReady(for: voiceLocale)
+        refreshMemoryWarning(for: .startListening)
         if let unavailableReason {
             statusText = unavailableReason
+        } else if let memoryWarningMessage {
+            statusText = memoryWarningMessage
         } else if needsAssetDownload {
             statusText = "Local voice needs a one-time Kokoro download for \(voiceLocale.displayName)."
         } else if isGeneratingReply {
@@ -133,6 +143,12 @@ final class LiveVoiceSessionViewModel {
             statusText = unavailableReason ?? statusText
             return
         }
+        refreshMemoryWarning(for: .startListening)
+        guard memoryWarningMessage == nil else {
+            errorMessage = memoryWarningMessage
+            statusText = "Not enough free memory for live voice."
+            return
+        }
         guard !needsAssetDownload else {
             statusText = "Download the local voice assets to continue."
             return
@@ -183,7 +199,10 @@ final class LiveVoiceSessionViewModel {
         isGeneratingReply = true
         statusText = "Generating..."
 
-        guard let assistantMessage = await chatViewModel.sendMessageAndWait(trimmed) else {
+        guard let assistantMessage = await chatViewModel.sendMessageAndWait(
+            trimmed,
+            allowPostReplyTasks: false
+        ) else {
             isGeneratingReply = false
             statusText = "No reply was generated."
             return
@@ -198,6 +217,14 @@ final class LiveVoiceSessionViewModel {
         guard let assetLocations = await appState.speechAssetService.fileLocations(for: voiceLocale) else {
             needsAssetDownload = true
             statusText = "Download the local voice assets to continue."
+            return
+        }
+
+        refreshMemoryWarning(for: .speechSynthesis)
+        if let memoryWarningMessage {
+            await resumeConversationModelIfNeeded()
+            errorMessage = memoryWarningMessage
+            statusText = "Not enough free memory to speak the reply."
             return
         }
 
@@ -231,6 +258,10 @@ final class LiveVoiceSessionViewModel {
     }
 
     private func suspendConversationModelForPlaybackIfNeeded() async {
+        guard shouldSuspendConversationModelForVoicePlayback else {
+            suspendedModelForPlayback = nil
+            return
+        }
         suspendedModelForPlayback = await chatViewModel.suspendLoadedModelForVoicePlayback()
     }
 
@@ -240,6 +271,62 @@ final class LiveVoiceSessionViewModel {
         isRestoringConversationModel = true
         await chatViewModel.resumeModelAfterVoicePlayback(model)
         isRestoringConversationModel = false
+    }
+
+    private var resolvedConversationModel: ModelInfo? {
+        guard let loadedModelId = appState.loadedModelId ?? suspendedModelForPlayback?.id else {
+            return appState.selectedModel
+        }
+        return Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelId }) ?? appState.selectedModel
+    }
+
+    private var shouldSuspendConversationModelForVoicePlayback: Bool {
+        guard let model = resolvedConversationModel else { return false }
+
+        if model.estimatedSizeGB <= 0.5 {
+            return false
+        }
+
+        let availableMemoryMB = deviceCapabilityService.availableMemoryMB
+        if model.estimatedSizeGB <= 1.2 && availableMemoryMB >= 1_500 {
+            return false
+        }
+
+        return true
+    }
+
+    private func refreshMemoryWarning(for stage: VoiceMemoryStage) {
+        let availableMemoryMB = deviceCapabilityService.availableMemoryMB
+        guard availableMemoryMB > 0 else {
+            memoryWarningMessage = nil
+            return
+        }
+
+        let requiredMemoryMB = recommendedAvailableMemoryMB(for: stage)
+        guard availableMemoryMB < requiredMemoryMB else {
+            memoryWarningMessage = nil
+            return
+        }
+
+        switch stage {
+        case .startListening:
+            memoryWarningMessage = "Live voice needs more free memory before it starts. Close background apps and try again. Available now: \(availableMemoryMB) MB."
+        case .speechSynthesis:
+            memoryWarningMessage = "Live voice is too close to the memory limit to synthesize speech safely. Close background apps and try again. Available now: \(availableMemoryMB) MB."
+        }
+    }
+
+    private func recommendedAvailableMemoryMB(for stage: VoiceMemoryStage) -> UInt64 {
+        let modelSizeMB = UInt64((resolvedConversationModel?.estimatedSizeGB ?? 0) * 1024)
+
+        switch stage {
+        case .startListening:
+            let threshold = 400 + (modelSizeMB / 4)
+            return min(max(threshold, 500), 1_400)
+        case .speechSynthesis:
+            let threshold = 300 + (modelSizeMB / 8)
+            return min(max(threshold, 350), 900)
+        }
     }
 
     private var isRunningOnSimulator: Bool {

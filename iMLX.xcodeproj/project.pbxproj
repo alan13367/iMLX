@@ -16,6 +16,7 @@
 		E74248D42F7D2670003ECA6B /* MLXFFT in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P007 /* MLXFFT */; };
 		E74248D52F7D2670003ECA6B /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P008 /* ZIPFoundation */; };
 		E74248D62F7D2670003ECA6B /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P009 /* GRDB */; };
+		E74248D72F7D2670003ECA6B /* MLXLMTokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P010 /* MLXLMTokenizers */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +39,7 @@
 				E74248D62F7D2670003ECA6B /* GRDB in Frameworks */,
 				E74248D52F7D2670003ECA6B /* ZIPFoundation in Frameworks */,
 				E74248D42F7D2670003ECA6B /* MLXFFT in Frameworks */,
+				E74248D72F7D2670003ECA6B /* MLXLMTokenizers in Frameworks */,
 				E74248D32F7D2670003ECA6B /* MLXVLM in Frameworks */,
 				E74248D22F7D2670003ECA6B /* MLXLLM in Frameworks */,
 				E74248D12F7D2670003ECA6B /* MLXLMCommon in Frameworks */,
@@ -95,6 +97,7 @@
 				E7B001012F7D30000001P007 /* MLXFFT */,
 				E7B001012F7D30000001P008 /* ZIPFoundation */,
 				E7B001012F7D30000001P009 /* GRDB */,
+				E7B001012F7D30000001P010 /* MLXLMTokenizers */,
 			);
 			productName = iMLX;
 			productReference = E7306A002F7D21010061F6D5 /* iMLX.app */;
@@ -131,6 +134,7 @@
 				E7B002002F7D30000002P002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				E7B002002F7D30000002P004 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				E7B002002F7D30000002P005 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E7306A012F7D21010061F6D5 /* Products */;
@@ -390,8 +394,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = exactVersion;
+				version = 3.31.3;
 			};
 		};
 		E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
@@ -408,6 +412,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 7.0.0;
+			};
+		};
+		E7B002002F7D30000002P005 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/DePasqualeOrg/swift-tokenizers-mlx";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.2.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -457,6 +469,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E7B002002F7D30000002P004 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
+		};
+		E7B001012F7D30000001P010 /* MLXLMTokenizers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E7B002002F7D30000002P005 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */;
+			productName = MLXLMTokenizers;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -4,6 +4,7 @@ import ImageIO
 import MLX
 import MLXFFT
 import MLXLMCommon
+import MLXLMTokenizers
 import MLXVLM
 
 actor InferenceService {
@@ -30,13 +31,14 @@ actor InferenceService {
         let container = try await withPreferredDevice {
             if shouldPreferVisionLoader {
                 return try await VLMModelFactory.shared.loadContainer(
-                    hub: defaultHubApi,
-                    configuration: .init(directory: localDirectory)
+                    from: localDirectory,
+                    using: TokenizersLoader()
                 )
             }
 
             return try await MLXLMCommon.loadModelContainer(
-                directory: localDirectory
+                from: localDirectory,
+                using: TokenizersLoader()
             )
         }
 

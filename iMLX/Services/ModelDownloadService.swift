@@ -1,5 +1,4 @@
 import Foundation
-import Hub
 
 actor ModelDownloadService {
     static let backgroundSessionIdentifier = "com.alan13367.iMLX.model-downloads"
@@ -18,8 +17,8 @@ actor ModelDownloadService {
     private let stagingDirectoryURL: URL
     private let jobsFileURL: URL
     private let hostURL: URL
-    private let hubApi: HubApi
     private let manifestService: ManifestService
+    private let metadataSession: URLSession
     private let session: URLSession
 
     private var jobsByModelId: [String: ModelDownloadJob]
@@ -49,9 +48,12 @@ actor ModelDownloadService {
         try? fileManager.createDirectory(at: self.repoDownloadsBaseURL, withIntermediateDirectories: true)
         try? fileManager.createDirectory(at: self.stagingDirectoryURL, withIntermediateDirectories: true)
 
-        let hubApi = HubApi(downloadBase: self.modelsBaseURL)
-        self.hubApi = hubApi
         self.hostURL = URL(string: "https://huggingface.co")!
+        let metadataConfiguration = URLSessionConfiguration.ephemeral
+        metadataConfiguration.waitsForConnectivity = true
+        metadataConfiguration.timeoutIntervalForRequest = 60
+        metadataConfiguration.timeoutIntervalForResource = 60
+        self.metadataSession = URLSession(configuration: metadataConfiguration)
 
         let configuration = URLSessionConfiguration.background(withIdentifier: Self.backgroundSessionIdentifier)
         configuration.isDiscretionary = false
@@ -277,28 +279,16 @@ actor ModelDownloadService {
     }
 
     private func buildJob(for model: ModelInfo) async throws -> ModelDownloadJob {
-        let repo = Hub.Repo(id: model.huggingFaceId)
-        let filenames = try await hubApi.getFilenames(
-            from: repo,
-            revision: Self.defaultRevision,
-            matching: Self.modelFileGlobs
-        ).sorted()
+        let filenames = try await fetchRepositoryFilenames(for: model)
         guard filenames.isEmpty == false else {
             throw DownloadError.corruptedDownload(model.displayName)
         }
 
-        let metadata = try? await hubApi.getFileMetadata(
-            from: repo,
-            revision: Self.defaultRevision,
-            matching: Self.modelFileGlobs
+        let expectedBytesByFile = await fetchExpectedBytes(
+            for: filenames,
+            huggingFaceId: model.huggingFaceId,
+            revision: Self.defaultRevision
         )
-
-        var expectedBytesByFile: [String: Int64?] = [:]
-        if let metadata, metadata.count == filenames.count {
-            for (filename, fileMetadata) in zip(filenames, metadata) {
-                expectedBytesByFile[filename] = fileMetadata.size.map(Int64.init)
-            }
-        }
 
         let repoDirectory = repositoryDirectory(for: model.huggingFaceId)
         var files: [ModelDownloadFileState] = []
@@ -332,6 +322,81 @@ actor ModelDownloadService {
             lastErrorMessage: nil,
             files: files
         )
+    }
+
+    private func fetchRepositoryFilenames(for model: ModelInfo) async throws -> [String] {
+        let requestURL = hostURL
+            .appending(path: "api")
+            .appending(path: "models")
+            .appending(path: model.huggingFaceId)
+
+        var request = URLRequest(url: requestURL)
+        request.timeoutInterval = 60
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        do {
+            let (data, response) = try await metadataSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200 ..< 300).contains(httpResponse.statusCode) else {
+                throw DownloadError.unableToListRepository(model.displayName)
+            }
+
+            let repository = try JSONDecoder().decode(HuggingFaceRepositoryResponse.self, from: data)
+            return repository.siblings
+                .map(\.rfilename)
+                .filter { Self.matchesAnyGlob($0, globs: Self.modelFileGlobs) }
+                .sorted()
+        } catch let error as DownloadError {
+            throw error
+        } catch {
+            throw DownloadError.unableToListRepository(model.displayName)
+        }
+    }
+
+    private func fetchExpectedBytes(
+        for filenames: [String],
+        huggingFaceId: String,
+        revision: String
+    ) async -> [String: Int64?] {
+        var expectedBytesByFile: [String: Int64?] = [:]
+
+        for filename in filenames {
+            expectedBytesByFile[filename] = await fetchExpectedBytes(
+                for: filename,
+                huggingFaceId: huggingFaceId,
+                revision: revision
+            )
+        }
+
+        return expectedBytesByFile
+    }
+
+    private func fetchExpectedBytes(
+        for relativePath: String,
+        huggingFaceId: String,
+        revision: String
+    ) async -> Int64? {
+        var request = URLRequest(url: remoteFileURL(for: huggingFaceId, revision: revision, relativePath: relativePath))
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 60
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        do {
+            let (_, response) = try await metadataSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200 ..< 300).contains(httpResponse.statusCode) else {
+                return nil
+            }
+
+            if let headerValue = httpResponse.value(forHTTPHeaderField: "Content-Length"),
+               let fileSize = Int64(headerValue) {
+                return fileSize
+            }
+
+            return response.expectedContentLength > 0 ? response.expectedContentLength : nil
+        } catch {
+            return nil
+        }
     }
 
     private func merge(
@@ -805,6 +870,16 @@ actor ModelDownloadService {
         Constants.Storage.modelDownloadStagingDirectory,
     ]
 
+    private nonisolated static func matchesAnyGlob(_ value: String, globs: [String]) -> Bool {
+        globs.contains { glob in
+            let escaped = NSRegularExpression.escapedPattern(for: glob)
+            let regex = "^" + escaped
+                .replacingOccurrences(of: "\\*", with: ".*")
+                .replacingOccurrences(of: "\\?", with: ".") + "$"
+            return value.range(of: regex, options: .regularExpression) != nil
+        }
+    }
+
     private nonisolated static func migrateOldDownloads(fileManager: FileManager, modelsBaseURL: URL) {
         let entries = (try? fileManager.contentsOfDirectory(at: modelsBaseURL, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? []
         for entry in entries {
@@ -851,6 +926,14 @@ actor ModelDownloadService {
 private nonisolated struct TaskDescriptor: Codable, Sendable {
     let modelId: String
     let relativePath: String
+}
+
+private nonisolated struct HuggingFaceRepositoryResponse: Decodable, Sendable {
+    let siblings: [Sibling]
+
+    struct Sibling: Decodable, Sendable {
+        let rfilename: String
+    }
 }
 
 private final class BackgroundDownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, URLSessionDelegate, @unchecked Sendable {
@@ -941,6 +1024,7 @@ private enum DownloadError: Error, LocalizedError {
     case anotherDownloadInProgress(String)
     case insufficientStorage(required: Double, available: Double)
     case unableToCheckStorage
+    case unableToListRepository(String)
     case corruptedDownload(String)
 
     var errorDescription: String? {
@@ -951,6 +1035,8 @@ private enum DownloadError: Error, LocalizedError {
             "Insufficient storage. Required: \(String(format: "%.1f", required))GB, Available: \(String(format: "%.1f", available))GB"
         case .unableToCheckStorage:
             "Unable to check available storage space"
+        case .unableToListRepository(let modelName):
+            "Couldn't read the Hugging Face file list for \(modelName). Try again."
         case .corruptedDownload(let modelName):
             "Downloaded files for \(modelName) look incomplete. Delete the model and download it again."
         }

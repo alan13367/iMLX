@@ -22,6 +22,7 @@ struct ModelInfo: Identifiable, Codable {
         case qwen35
         case qwen2vl
         case gemma3
+        case gemma4
         case mistral3
         case lfm2
         case lfm25
@@ -32,6 +33,7 @@ struct ModelInfo: Identifiable, Codable {
             case .qwen35: return "Qwen 3.5"
             case .qwen2vl: return "Qwen 2-VL"
             case .gemma3: return "Gemma 3"
+            case .gemma4: return "Gemma 4"
             case .mistral3: return "Mistral 3"
             case .lfm2: return "LFM 2"
             case .lfm25: return "LFM 2.5"
@@ -48,6 +50,8 @@ struct ModelInfo: Identifiable, Codable {
                 return "Qwen2-VL is optimized for vision-language understanding, combining image perception and grounded text generation for multimodal tasks."
             case .gemma3:
                 return "Gemma 3 brings lightweight multimodal models with strong everyday quality and practical local-device efficiency."
+            case .gemma4:
+                return "Gemma 4 adds newer multimodal instruction models with stronger vision understanding while staying practical for local-device use."
             case .mistral3:
                 return "Mistral 3 emphasizes fast instruction following and scalable reasoning across compact and larger local deployments."
             case .lfm2:
@@ -60,7 +64,7 @@ struct ModelInfo: Identifiable, Codable {
         var logoName: String {
             switch self {
             case .qwen3, .qwen35, .qwen2vl: return "qwen_logo"
-            case .gemma3: return "gemma_logo"
+            case .gemma3, .gemma4: return "gemma_logo"
             case .mistral3: return "mistral_logo"
             case .lfm2, .lfm25: return "lfm_logo"
             }
@@ -72,9 +76,10 @@ struct ModelInfo: Identifiable, Codable {
             case .qwen35: return 1
             case .qwen2vl: return 2
             case .gemma3: return 3
-            case .mistral3: return 4
-            case .lfm2: return 5
-            case .lfm25: return 6
+            case .gemma4: return 4
+            case .mistral3: return 5
+            case .lfm2: return 6
+            case .lfm25: return 7
             }
         }
     }

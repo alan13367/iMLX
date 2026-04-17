@@ -116,6 +116,34 @@ nonisolated enum Constants {
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
+                id: "gemma4-e2b-it-4bit",
+                displayName: "Gemma 4 E2B",
+                huggingFaceId: "mlx-community/gemma-4-e2b-it-4bit",
+                parameterCount: "E2B",
+                quantization: "4-bit",
+                estimatedSizeGB: 3.6,
+                minDeviceRAM: 12,
+                family: .gemma4,
+                logoName: "gemma_logo",
+                supportsThinking: true,
+                supportsVision: true,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
+                id: "gemma4-e4b-it-4bit",
+                displayName: "Gemma 4 E4B",
+                huggingFaceId: "mlx-community/gemma-4-e4b-it-4bit",
+                parameterCount: "E4B",
+                quantization: "4-bit",
+                estimatedSizeGB: 5.2,
+                minDeviceRAM: 16,
+                family: .gemma4,
+                logoName: "gemma_logo",
+                supportsThinking: true,
+                supportsVision: true,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
                 id: "ministral-3-3b-instruct-4bit",
                 displayName: "Ministral 3 3B Instruct",
                 huggingFaceId: "mlx-community/Ministral-3-3B-Instruct-2512-4bit",
@@ -269,10 +297,15 @@ nonisolated enum Constants {
         static let memoryConstrainedVisionMaxTokens = 1024
         static let lowHeadroomVisionMaxTokens = 256
         static let mediumHeadroomVisionMaxTokens = 512
-        static let compactModelThinkingMaxTokens = 8192
-        static let thinkingMaxTokens = 4096
-        static let memoryConstrainedThinkingMaxTokens = 2048
-        static let finalAnswerMaxTokens = 256
+        static let compactThinkingMaxSizeGB = 1.0
+        static let mediumThinkingMaxSizeGB = 3.0
+        static let largeThinkingMaxSizeGB = 5.5
+        static let compactModelHiddenThinkingMaxTokens = 3072
+        static let mediumModelHiddenThinkingMaxTokens = 2048
+        static let largeModelHiddenThinkingMaxTokens = 1536
+        static let extraLargeModelHiddenThinkingMaxTokens = 1024
+        static let minimumFinalAnswerMaxTokens = 256
+        static let minimumHiddenThinkingMaxTokens = 128
         static let memoryConstrainedHistoryMessageLimit = 8
         static let memoryConstrainedDocumentContextCharacters = 2_000
         static let mediumMemoryHeadroomMB: UInt64 = 1_200

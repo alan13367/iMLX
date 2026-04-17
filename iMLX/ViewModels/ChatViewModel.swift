@@ -32,6 +32,12 @@ private enum ChatGenerationAbort: LocalizedError {
 
 @Observable
 final class ChatViewModel {
+    private struct GenerationBudget {
+        let streamMaxTokens: Int
+        let hiddenThinkingMaxTokens: Int?
+        let finalAnswerMaxTokens: Int
+    }
+
     var messages: [ChatMessage] = []
     var currentResponse: String = ""
     var currentParsedResponse: ParsedAssistantContent = .empty
@@ -192,7 +198,7 @@ final class ChatViewModel {
         let repetitionPenalty = safeRepetitionPenalty(Float(persona.repetitionPenalty))
         let systemPrompt = persona.effectiveSystemPrompt
         let thinkingEnabled = loadedModel?.supportsThinking == true ? isThinkingEnabled : false
-        let generationMaxTokens = generationTokenLimit(for: loadedModel, thinkingEnabled: thinkingEnabled)
+        let generationBudget = generationBudget(for: loadedModel, thinkingEnabled: thinkingEnabled)
 
         let startTime = Date()
         var tokenCount = 0
@@ -200,6 +206,7 @@ final class ChatViewModel {
         var latestParsedResponse = ParsedAssistantContent.empty
         var lastResponseFlush = Date.distantPast
         var shouldForceFinalAnswerFollowUp = false
+        var peakMemoryMB = await self.currentMemoryUsage()
         let retrievalResult = await self.appState.documentLibraryService.retrieveContext(
                 for: text,
                 documents: self.attachedDocuments
@@ -249,6 +256,11 @@ final class ChatViewModel {
         }
 
         @MainActor
+        func updatePeakMemoryUsage() async {
+            peakMemoryMB = max(peakMemoryMB, await self.currentMemoryUsage())
+        }
+
+        @MainActor
         func refreshParsedResponse() {
             latestParsedResponse = ParsedAssistantContent(accumulatedResponse, isStreaming: true)
         }
@@ -267,84 +279,87 @@ final class ChatViewModel {
 
         do {
             let stream = await self.inferenceService.generate(
+                prompt: text,
+                images: userMessage.attachedImages,
+                thinkingEnabled: loadedModel?.supportsThinking == true ? thinkingEnabled : nil,
+                history: history,
+                systemPrompt: effectiveSystemPrompt,
+                maxTokens: generationBudget.streamMaxTokens,
+                temperature: temperature,
+                topP: topP,
+                repetitionPenalty: repetitionPenalty
+            )
+
+            for try await token in stream {
+                guard !Task.isCancelled else { break }
+                accumulatedResponse += token
+                tokenCount += 1
+                flushResponseToUI()
+                if tokenCount.isMultiple(of: Constants.Generation.lowMemoryCheckInterval) {
+                    refreshParsedResponse()
+                    await updatePeakMemoryUsage()
+                    try enforceMemorySafety()
+                    if self.shouldInterruptThinking(
+                        in: latestParsedResponse,
+                        thinkingEnabled: thinkingEnabled,
+                        tokenCount: tokenCount,
+                        hiddenThinkingMaxTokens: generationBudget.hiddenThinkingMaxTokens
+                    ) {
+                        shouldForceFinalAnswerFollowUp = true
+                        break
+                    }
+                }
+            }
+
+            flushResponseToUI(force: true)
+
+            if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: latestParsedResponse, thinkingEnabled: thinkingEnabled) {
+                let followUpStream = await self.inferenceService.generate(
                     prompt: text,
                     images: userMessage.attachedImages,
-                    thinkingEnabled: loadedModel?.supportsThinking == true ? thinkingEnabled : nil,
+                    thinkingEnabled: false,
                     history: history,
-                    systemPrompt: effectiveSystemPrompt,
-                    maxTokens: generationMaxTokens,
+                    systemPrompt: self.finalAnswerSystemPrompt(
+                        base: systemPrompt,
+                        memoryContext: memoryContext,
+                        documentContext: documentContext,
+                        webContext: webContext
+                    ),
+                    maxTokens: generationBudget.finalAnswerMaxTokens,
                     temperature: temperature,
                     topP: topP,
                     repetitionPenalty: repetitionPenalty
                 )
 
-                for try await token in stream {
+                var startedFollowUpOutput = false
+                for try await token in followUpStream {
                     guard !Task.isCancelled else { break }
+                    if !startedFollowUpOutput {
+                        accumulatedResponse += "\n\nFinal Answer:\n"
+                        startedFollowUpOutput = true
+                    }
                     accumulatedResponse += token
                     tokenCount += 1
                     flushResponseToUI()
                     if tokenCount.isMultiple(of: Constants.Generation.lowMemoryCheckInterval) {
-                        refreshParsedResponse()
+                        await updatePeakMemoryUsage()
                         try enforceMemorySafety()
-                        if self.shouldInterruptRepetitiveThinking(
-                            in: latestParsedResponse,
-                            thinkingEnabled: thinkingEnabled,
-                            tokenCount: tokenCount
-                        ) {
-                            shouldForceFinalAnswerFollowUp = true
-                            break
-                        }
                     }
                 }
+            }
 
-                flushResponseToUI(force: true)
+            flushResponseToUI(force: true)
+            await updatePeakMemoryUsage()
 
-            if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: latestParsedResponse, thinkingEnabled: thinkingEnabled) {
-                let followUpStream = await self.inferenceService.generate(
-                        prompt: text,
-                        images: userMessage.attachedImages,
-                        thinkingEnabled: false,
-                        history: history,
-                        systemPrompt: self.finalAnswerSystemPrompt(
-                            base: systemPrompt,
-                            memoryContext: memoryContext,
-                            documentContext: documentContext,
-                            webContext: webContext
-                        ),
-                        maxTokens: Constants.Generation.finalAnswerMaxTokens,
-                        temperature: temperature,
-                        topP: topP,
-                        repetitionPenalty: repetitionPenalty
-                    )
-
-                    var startedFollowUpOutput = false
-                    for try await token in followUpStream {
-                        guard !Task.isCancelled else { break }
-                        if !startedFollowUpOutput {
-                            accumulatedResponse += "\n\nFinal Answer:\n"
-                            startedFollowUpOutput = true
-                        }
-                        accumulatedResponse += token
-                        tokenCount += 1
-                        flushResponseToUI()
-                        if tokenCount.isMultiple(of: Constants.Generation.lowMemoryCheckInterval) {
-                            try enforceMemorySafety()
-                        }
-                    }
-                }
-
-                flushResponseToUI(force: true)
-
-                let elapsed = Date().timeIntervalSince(startTime)
-                let peakMemory = await self.currentMemoryUsage()
-                let promptMessageCount = self.messages.count - (accumulatedResponse.isEmpty ? 1 : 2)
-                let generationStats = GenerationStats(
-                    tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
-                    totalTokens: tokenCount,
-                    promptTokens: promptMessageCount,
-                    generationTime: elapsed,
-                    peakMemoryMB: peakMemory
-                )
+            let elapsed = Date().timeIntervalSince(startTime)
+            let promptMessageCount = self.messages.count - (accumulatedResponse.isEmpty ? 1 : 2)
+            let generationStats = GenerationStats(
+                tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
+                totalTokens: tokenCount,
+                promptTokens: promptMessageCount,
+                generationTime: elapsed,
+                peakMemoryMB: peakMemoryMB
+            )
 
             if !accumulatedResponse.isEmpty {
                 let assistantMessage = ChatMessage(
@@ -377,8 +392,8 @@ final class ChatViewModel {
         } catch is CancellationError {
             flushResponseToUI(force: true)
             if !accumulatedResponse.isEmpty {
+                await updatePeakMemoryUsage()
                 let elapsed = Date().timeIntervalSince(startTime)
-                let peakMemory = await self.currentMemoryUsage()
                 let partialMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
@@ -391,7 +406,7 @@ final class ChatViewModel {
                             totalTokens: tokenCount,
                             promptTokens: self.messages.count - 1,
                             generationTime: elapsed,
-                            peakMemoryMB: peakMemory
+                            peakMemoryMB: peakMemoryMB
                         )
                     )
                 self.messages.append(partialMessage)
@@ -401,8 +416,8 @@ final class ChatViewModel {
         } catch {
             flushResponseToUI(force: true)
             if !accumulatedResponse.isEmpty {
+                await updatePeakMemoryUsage()
                 let elapsed = Date().timeIntervalSince(startTime)
-                let peakMemory = await self.currentMemoryUsage()
                 let partialMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
@@ -415,7 +430,7 @@ final class ChatViewModel {
                             totalTokens: tokenCount,
                             promptTokens: self.messages.count - 1,
                             generationTime: elapsed,
-                            peakMemoryMB: peakMemory
+                            peakMemoryMB: peakMemoryMB
                         )
                     )
                 self.messages.append(partialMessage)
@@ -945,26 +960,80 @@ final class ChatViewModel {
         }
     }
 
-    private func generationTokenLimit(for model: ModelInfo?, thinkingEnabled: Bool) -> Int {
-        let baseLimit: Int
-        if thinkingEnabled {
-            let estimatedSizeGB = model?.estimatedSizeGB ?? 0
-            if estimatedSizeGB > 0 && estimatedSizeGB <= 1.0 {
-                baseLimit = Constants.Generation.compactModelThinkingMaxTokens
-            } else if isMemoryConstrainedLargeModel(model) {
-                baseLimit = Constants.Generation.memoryConstrainedThinkingMaxTokens
-            } else {
-                baseLimit = Constants.Generation.thinkingMaxTokens
-            }
-        } else {
-            baseLimit = Constants.Generation.standardMaxTokens
+    private func generationBudget(for model: ModelInfo?, thinkingEnabled: Bool) -> GenerationBudget {
+        guard thinkingEnabled else {
+            return GenerationBudget(
+                streamMaxTokens: standardGenerationTokenLimit(for: model),
+                hiddenThinkingMaxTokens: nil,
+                finalAnswerMaxTokens: 0
+            )
         }
 
-        guard isMemoryConstrainedLargeModel(model) else { return baseLimit }
-        if model?.supportsVision == true {
-            return min(baseLimit, memoryConstrainedVisionTokenLimit())
+        var budget = baseThinkingGenerationBudget(for: model)
+        if isMemoryConstrainedLargeModel(model) {
+            budget = cappedThinkingGenerationBudget(
+                budget,
+                answerMaxTokens: standardGenerationTokenLimit(for: model)
+            )
         }
-        return min(baseLimit, Constants.Generation.memoryConstrainedStandardMaxTokens)
+        return budget
+    }
+
+    private func standardGenerationTokenLimit(for model: ModelInfo?) -> Int {
+        guard isMemoryConstrainedLargeModel(model) else { return Constants.Generation.standardMaxTokens }
+        if model?.supportsVision == true {
+            return memoryConstrainedVisionTokenLimit()
+        }
+        return Constants.Generation.memoryConstrainedStandardMaxTokens
+    }
+
+    private func baseThinkingGenerationBudget(for model: ModelInfo?) -> GenerationBudget {
+        let estimatedSizeGB = model?.estimatedSizeGB ?? 0
+        let answerMaxTokens = standardGenerationTokenLimit(for: model)
+        switch estimatedSizeGB {
+        case let size where size > 0 && size <= Constants.Generation.compactThinkingMaxSizeGB:
+            return GenerationBudget(
+                streamMaxTokens: answerMaxTokens + Constants.Generation.compactModelHiddenThinkingMaxTokens,
+                hiddenThinkingMaxTokens: Constants.Generation.compactModelHiddenThinkingMaxTokens,
+                finalAnswerMaxTokens: answerMaxTokens
+            )
+        case let size where size <= Constants.Generation.mediumThinkingMaxSizeGB:
+            return GenerationBudget(
+                streamMaxTokens: answerMaxTokens + Constants.Generation.mediumModelHiddenThinkingMaxTokens,
+                hiddenThinkingMaxTokens: Constants.Generation.mediumModelHiddenThinkingMaxTokens,
+                finalAnswerMaxTokens: answerMaxTokens
+            )
+        case let size where size <= Constants.Generation.largeThinkingMaxSizeGB:
+            return GenerationBudget(
+                streamMaxTokens: answerMaxTokens + Constants.Generation.largeModelHiddenThinkingMaxTokens,
+                hiddenThinkingMaxTokens: Constants.Generation.largeModelHiddenThinkingMaxTokens,
+                finalAnswerMaxTokens: answerMaxTokens
+            )
+        default:
+            return GenerationBudget(
+                streamMaxTokens: answerMaxTokens + Constants.Generation.extraLargeModelHiddenThinkingMaxTokens,
+                hiddenThinkingMaxTokens: Constants.Generation.extraLargeModelHiddenThinkingMaxTokens,
+                finalAnswerMaxTokens: answerMaxTokens
+            )
+        }
+    }
+
+    private func cappedThinkingGenerationBudget(_ budget: GenerationBudget, answerMaxTokens: Int) -> GenerationBudget {
+        let cappedFinalAnswerTokens = max(
+            Constants.Generation.minimumFinalAnswerMaxTokens,
+            answerMaxTokens
+        )
+        let cappedHiddenThinkingTokens = min(
+            budget.hiddenThinkingMaxTokens ?? cappedFinalAnswerTokens,
+            max(Constants.Generation.minimumHiddenThinkingMaxTokens, cappedFinalAnswerTokens / 2)
+        )
+        let cappedStreamTokens = cappedFinalAnswerTokens + cappedHiddenThinkingTokens
+
+        return GenerationBudget(
+            streamMaxTokens: cappedStreamTokens,
+            hiddenThinkingMaxTokens: cappedHiddenThinkingTokens,
+            finalAnswerMaxTokens: cappedFinalAnswerTokens
+        )
     }
 
     private func memoryConstrainedVisionTokenLimit() -> Int {
@@ -1356,10 +1425,18 @@ final class ChatViewModel {
         return parsedContent.response.isEmpty
     }
 
-    private func shouldInterruptRepetitiveThinking(in parsedContent: ParsedAssistantContent, thinkingEnabled: Bool, tokenCount: Int) -> Bool {
+    private func shouldInterruptThinking(
+        in parsedContent: ParsedAssistantContent,
+        thinkingEnabled: Bool,
+        tokenCount: Int,
+        hiddenThinkingMaxTokens: Int?
+    ) -> Bool {
         guard thinkingEnabled else { return false }
         guard tokenCount >= Constants.Generation.repetitiveThinkingCheckStartTokens else { return false }
         guard parsedContent.response.isEmpty, let thinking = parsedContent.thinking, !thinking.isEmpty else { return false }
+        if let hiddenThinkingMaxTokens, tokenCount >= hiddenThinkingMaxTokens {
+            return true
+        }
 
         let duplicateThreshold = Constants.Generation.repetitiveThinkingDuplicateLineThreshold
         var counts: [String: Int] = [:]

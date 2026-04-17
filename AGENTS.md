@@ -63,7 +63,7 @@ xcodebuild -downloadComponent MetalToolchain
 4. iOS Simulator cannot run MLX inference. Simulator builds are for UI/build verification only.
 5. Inference is foreground-only. Do not design around background GPU execution.
 6. Deployment target is iOS 18+.
-7. The project currently uses `main` for both `mlx-swift` and `mlx-swift-lm`.
+7. The project currently uses `main` for `mlx-swift`, pins `mlx-swift-lm` to `3.31.3`, and links `swift-tokenizers-mlx` for local tokenizer loading with MLX Swift LM 3.x.
 8. The Xcode target defaults actor isolation to `MainActor`, so pure helpers that run off the main actor may need explicit `nonisolated` annotations.
 9. Memory extraction must only persist facts grounded in the user message. Do not turn assistant answers, recommendations, prices, or unquoted generated details into memories.
 

@@ -30,6 +30,13 @@ final class LiveVoiceSessionViewModel {
         appState.resolvedVoiceLocale
     }
 
+    var orbState: VoiceOrbState {
+        if isSpeaking { return .speaking }
+        if isGeneratingReply { return .generating }
+        if isListening { return .listening }
+        return .idle
+    }
+
     var localeSupportMessage: String? {
         guard !voiceLocale.supportsLiveKokoroSynthesis else { return nil }
         return "Kokoro live voice is currently available only in English in this build."

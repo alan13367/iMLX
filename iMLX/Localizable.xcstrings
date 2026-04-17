@@ -454,9 +454,6 @@
     "Clear speech assets" : {
 
     },
-    "Close" : {
-
-    },
     "common.cancel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -858,9 +855,6 @@
     "Download unavailable — another model is downloading" : {
 
     },
-    "Download Voice Assets" : {
-
-    },
     "Enable thinking" : {
 
     },
@@ -1153,9 +1147,6 @@
 
     },
     "Keep Archived" : {
-
-    },
-    "Live Voice" : {
 
     },
     "Load %@" : {
@@ -4053,6 +4044,9 @@
     "Speech Assets" : {
 
     },
+    "Start listening" : {
+
+    },
     "Start Using iMLX" : {
 
     },
@@ -4151,6 +4145,9 @@
     "Stop generating" : {
 
     },
+    "Stop listening" : {
+
+    },
     "tab.chat" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4219,9 +4216,6 @@
           }
         }
       }
-    },
-    "This downloads Kokoro voice assets for %@ before live voice starts." : {
-
     },
     "tone.balanced" : {
       "extractionState" : "manual",
@@ -4347,11 +4341,123 @@
     "Value" : {
 
     },
-    "Voice" : {
-
-    },
     "Voice locales" : {
 
+    },
+    "voice.close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerrar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
+    "voice.download_body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloads Kokoro voice assets for %@."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descarga los recursos de voz Kokoro para %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为 %@ 下载 Kokoro 语音资源。"
+          }
+        }
+      }
+    },
+    "voice.download_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Voice"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descargar voz"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载语音"
+          }
+        }
+      }
+    },
+    "voice.listening" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listening"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escuchando"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在聆听"
+          }
+        }
+      }
+    },
+    "voice.you_said" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tú"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你"
+          }
+        }
+      }
     },
     "Web Search" : {
       "extractionState" : "manual",

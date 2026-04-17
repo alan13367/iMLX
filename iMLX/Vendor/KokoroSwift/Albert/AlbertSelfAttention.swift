@@ -21,14 +21,35 @@ nonisolated class AlbertSelfAttention {
     attentionHeadSize = config.hiddenSize / config.numAttentionHeads
     allHeadSize = numAttentionHeads * attentionHeadSize
 
-    query = Linear(weight: weights["bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention.query.weight"]!,
-                   bias: weights["bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention.query.bias"]!)
-    key = Linear(weight: weights["bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention.key.weight"]!,
-                 bias: weights["bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention.key.bias"]!)
-    value = Linear(weight: weights["bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention.value.weight"]!,
-                   bias: weights["bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention.value.bias"])
-    dense = Linear(weight: weights["bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention.dense.weight"]!,
-                   bias: weights["bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention.dense.bias"]!)
+    let attentionPrefix = "bert.encoder.albert_layer_groups.\(layerNum).albert_layers.\(innerGroupNum).attention"
+    query = makeKokoroLinear(
+      inputDimensions: config.hiddenSize,
+      weight: weights["\(attentionPrefix).query.weight"]!,
+      bias: weights["\(attentionPrefix).query.bias"]!,
+      scales: weights["\(attentionPrefix).query.scales"],
+      quantizedBiases: weights["\(attentionPrefix).query.biases"]
+    )
+    key = makeKokoroLinear(
+      inputDimensions: config.hiddenSize,
+      weight: weights["\(attentionPrefix).key.weight"]!,
+      bias: weights["\(attentionPrefix).key.bias"]!,
+      scales: weights["\(attentionPrefix).key.scales"],
+      quantizedBiases: weights["\(attentionPrefix).key.biases"]
+    )
+    value = makeKokoroLinear(
+      inputDimensions: config.hiddenSize,
+      weight: weights["\(attentionPrefix).value.weight"]!,
+      bias: weights["\(attentionPrefix).value.bias"],
+      scales: weights["\(attentionPrefix).value.scales"],
+      quantizedBiases: weights["\(attentionPrefix).value.biases"]
+    )
+    dense = makeKokoroLinear(
+      inputDimensions: config.hiddenSize,
+      weight: weights["\(attentionPrefix).dense.weight"]!,
+      bias: weights["\(attentionPrefix).dense.bias"]!,
+      scales: weights["\(attentionPrefix).dense.scales"],
+      quantizedBiases: weights["\(attentionPrefix).dense.biases"]
+    )
 
     layerNorm = LayerNorm(dimensions: config.hiddenSize, eps: config.layerNormEps)
 

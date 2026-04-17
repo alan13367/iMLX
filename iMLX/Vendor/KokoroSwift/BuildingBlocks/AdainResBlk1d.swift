@@ -71,14 +71,18 @@ nonisolated class AdainResBlk1d {
       styleDim: styleDim,
       numFeatures: dimIn,
       fcWeight: weights[weightKeyPrefix + ".norm1.fc.weight"]!,
-      fcBias: weights[weightKeyPrefix + ".norm1.fc.bias"]!
+      fcBias: weights[weightKeyPrefix + ".norm1.fc.bias"]!,
+      fcScales: weights[weightKeyPrefix + ".norm1.fc.scales"],
+      fcQuantizedBiases: weights[weightKeyPrefix + ".norm1.fc.biases"]
     )
 
     norm2 = AdaIN1d(
       styleDim: styleDim,
       numFeatures: dimIn,
       fcWeight: weights[weightKeyPrefix + ".norm2.fc.weight"]!,
-      fcBias: weights[weightKeyPrefix + ".norm2.fc.bias"]!
+      fcBias: weights[weightKeyPrefix + ".norm2.fc.bias"]!,
+      fcScales: weights[weightKeyPrefix + ".norm2.fc.scales"],
+      fcQuantizedBiases: weights[weightKeyPrefix + ".norm2.fc.biases"]
     )
 
     if learned_sc {

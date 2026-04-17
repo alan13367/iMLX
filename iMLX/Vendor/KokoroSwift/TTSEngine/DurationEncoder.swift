@@ -56,8 +56,11 @@ nonisolated final class DurationEncoder {
       } else {
         lstms.append(
           AdaLayerNorm(
+            inputDimensions: styDim,
             weight: weights["predictor.text_encoder.lstms.\(i).fc.weight"]!,
-            bias: weights["predictor.text_encoder.lstms.\(i).fc.bias"]!
+            bias: weights["predictor.text_encoder.lstms.\(i).fc.bias"]!,
+            scales: weights["predictor.text_encoder.lstms.\(i).fc.scales"],
+            quantizedBiases: weights["predictor.text_encoder.lstms.\(i).fc.biases"]
           )
         )
       }

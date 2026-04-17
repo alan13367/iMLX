@@ -12,9 +12,24 @@ nonisolated class AlbertEmbeddings {
   let layerNorm: LayerNorm
 
   init(weights: [String: MLXArray], config: AlbertModelArgs) {
-    wordEmbeddings = Embedding(weight: weights["bert.embeddings.word_embeddings.weight"]!)
-    positionEmbeddings = Embedding(weight: weights["bert.embeddings.position_embeddings.weight"]!)
-    tokenTypeEmbeddings = Embedding(weight: weights["bert.embeddings.token_type_embeddings.weight"]!)
+    wordEmbeddings = makeKokoroEmbedding(
+      dimensions: config.embeddingSize,
+      weight: weights["bert.embeddings.word_embeddings.weight"]!,
+      scales: weights["bert.embeddings.word_embeddings.scales"],
+      quantizedBiases: weights["bert.embeddings.word_embeddings.biases"]
+    )
+    positionEmbeddings = makeKokoroEmbedding(
+      dimensions: config.embeddingSize,
+      weight: weights["bert.embeddings.position_embeddings.weight"]!,
+      scales: weights["bert.embeddings.position_embeddings.scales"],
+      quantizedBiases: weights["bert.embeddings.position_embeddings.biases"]
+    )
+    tokenTypeEmbeddings = makeKokoroEmbedding(
+      dimensions: config.embeddingSize,
+      weight: weights["bert.embeddings.token_type_embeddings.weight"]!,
+      scales: weights["bert.embeddings.token_type_embeddings.scales"],
+      quantizedBiases: weights["bert.embeddings.token_type_embeddings.biases"]
+    )
     layerNorm = LayerNorm(dimensions: config.embeddingSize, eps: config.layerNormEps)
     let layerNormWeights = weights["bert.embeddings.LayerNorm.weight"]!
     let layerNormBiases = weights["bert.embeddings.LayerNorm.bias"]!

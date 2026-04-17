@@ -34,7 +34,12 @@ nonisolated final class TextEncoder {
   ///   - actv: Activation function (default: LeakyReLU with slope 0.2)
   init(weights: [String: MLXArray], channels: Int, kernelSize: Int, depth: Int, nSymbols _: Int, actv: Module = LeakyReLU(negativeSlope: 0.2)) {
     // Initialize embedding layer
-    embedding = Embedding(weight: weights["text_encoder.embedding.weight"]!)
+    embedding = makeKokoroEmbedding(
+      dimensions: channels,
+      weight: weights["text_encoder.embedding.weight"]!,
+      scales: weights["text_encoder.embedding.scales"],
+      quantizedBiases: weights["text_encoder.embedding.biases"]
+    )
     
     // Calculate padding to maintain sequence length
     let padding = (kernelSize - 1) / 2

@@ -55,14 +55,18 @@ nonisolated class AdaINResBlock1 {
         styleDim: styleDim,
         numFeatures: channels,
         fcWeight: weights[weightPrefixKey + ".adain1.\(i).fc.weight"]!,
-        fcBias: weights[weightPrefixKey + ".adain1.\(i).fc.bias"]!
+        fcBias: weights[weightPrefixKey + ".adain1.\(i).fc.bias"]!,
+        fcScales: weights[weightPrefixKey + ".adain1.\(i).fc.scales"],
+        fcQuantizedBiases: weights[weightPrefixKey + ".adain1.\(i).fc.biases"]
       ))
 
       adain2.append(AdaIN1d(
         styleDim: styleDim,
         numFeatures: channels,
         fcWeight: weights[weightPrefixKey + ".adain2.\(i).fc.weight"]!,
-        fcBias: weights[weightPrefixKey + ".adain2.\(i).fc.bias"]!
+        fcBias: weights[weightPrefixKey + ".adain2.\(i).fc.bias"]!,
+        fcScales: weights[weightPrefixKey + ".adain2.\(i).fc.scales"],
+        fcQuantizedBiases: weights[weightPrefixKey + ".adain2.\(i).fc.biases"]
       ))
     }
 

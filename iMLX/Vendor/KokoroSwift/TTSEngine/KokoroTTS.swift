@@ -80,9 +80,12 @@ nonisolated public final class KokoroTTS {
     )
     
     // Initialize BERT output encoder
-    bertEncoder = Linear(
+    bertEncoder = makeKokoroLinear(
+      inputDimensions: config.plbert.hiddenSize,
       weight: sanitizedWeights["bert_encoder.weight"]!,
-      bias: sanitizedWeights["bert_encoder.bias"]!
+      bias: sanitizedWeights["bert_encoder.bias"]!,
+      scales: sanitizedWeights["bert_encoder.scales"],
+      quantizedBiases: sanitizedWeights["bert_encoder.biases"]
     )
     
     // Initialize duration prediction components
@@ -108,9 +111,12 @@ nonisolated public final class KokoroTTS {
     )
 
     // Initialize duration projection layer
-    durationProj = Linear(
+    durationProj = makeKokoroLinear(
+      inputDimensions: config.hiddenDim,
       weight: sanitizedWeights["predictor.duration_proj.linear_layer.weight"]!,
-      bias: sanitizedWeights["predictor.duration_proj.linear_layer.bias"]!
+      bias: sanitizedWeights["predictor.duration_proj.linear_layer.bias"]!,
+      scales: sanitizedWeights["predictor.duration_proj.linear_layer.scales"],
+      quantizedBiases: sanitizedWeights["predictor.duration_proj.linear_layer.biases"]
     )
 
     // Initialize prosody predictor (F0, pitch, etc.)

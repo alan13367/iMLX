@@ -9,9 +9,22 @@ nonisolated class AdaLayerNorm: Module {
   let eps: Float
   let fc: Linear
 
-  init(eps: Float = 1e-5, weight: MLXArray, bias: MLXArray?) {
+  init(
+    eps: Float = 1e-5,
+    inputDimensions: Int,
+    weight: MLXArray,
+    bias: MLXArray?,
+    scales: MLXArray? = nil,
+    quantizedBiases: MLXArray? = nil
+  ) {
     self.eps = eps
-    fc = Linear(weight: weight, bias: bias)
+    fc = makeKokoroLinear(
+      inputDimensions: inputDimensions,
+      weight: weight,
+      bias: bias,
+      scales: scales,
+      quantizedBiases: quantizedBiases
+    )
     super.init()
   }
 

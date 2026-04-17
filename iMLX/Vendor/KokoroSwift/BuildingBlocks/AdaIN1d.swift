@@ -9,9 +9,22 @@ nonisolated class AdaIN1d {
   private let norm: InstanceNorm1d
   private let fc: Linear
 
-  public init(styleDim _: Int, numFeatures: Int, fcWeight: MLXArray, fcBias: MLXArray) {
+  public init(
+    styleDim: Int,
+    numFeatures: Int,
+    fcWeight: MLXArray,
+    fcBias: MLXArray,
+    fcScales: MLXArray? = nil,
+    fcQuantizedBiases: MLXArray? = nil
+  ) {
     norm = InstanceNorm1d(numFeatures: numFeatures, affine: false)
-    fc = Linear(weight: fcWeight, bias: fcBias)
+    fc = makeKokoroLinear(
+      inputDimensions: styleDim,
+      weight: fcWeight,
+      bias: fcBias,
+      scales: fcScales,
+      quantizedBiases: fcQuantizedBiases
+    )
   }
 
   public func callAsFunction(_ x: MLXArray, s: MLXArray) -> MLXArray {

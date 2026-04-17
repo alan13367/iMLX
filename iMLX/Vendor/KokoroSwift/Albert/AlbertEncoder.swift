@@ -12,8 +12,13 @@ nonisolated class AlbertEncoder {
 
   init(weights: [String: MLXArray], config: AlbertModelArgs) {
     self.config = config
-    embeddingHiddenMappingIn = Linear(weight: weights["bert.encoder.embedding_hidden_mapping_in.weight"]!,
-                                      bias: weights["bert.encoder.embedding_hidden_mapping_in.bias"]!)
+    embeddingHiddenMappingIn = makeKokoroLinear(
+      inputDimensions: config.embeddingSize,
+      weight: weights["bert.encoder.embedding_hidden_mapping_in.weight"]!,
+      bias: weights["bert.encoder.embedding_hidden_mapping_in.bias"]!,
+      scales: weights["bert.encoder.embedding_hidden_mapping_in.scales"],
+      quantizedBiases: weights["bert.encoder.embedding_hidden_mapping_in.biases"]
+    )
 
     var groups: [AlbertLayerGroup] = []
     for layerNum in 0 ..< config.numHiddenGroups {

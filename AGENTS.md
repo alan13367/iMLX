@@ -54,6 +54,7 @@ xcodebuild -downloadComponent MetalToolchain
 - Documents: local PDF/CSV/text files are imported, extracted, chunked, indexed, and retrieved locally through `DocumentLibraryService`
 - Memory: compact user memories are stored locally through `MemorySystem`; ingestion is source-grounded and multilingual, evidence and lifecycle events are persisted in SQLite/GRDB, and bounded retrieval explanations are injected into prompt context when relevant
 - Vision: vision-capable models must load through the VLM path, not the text-only loader
+- TTS vendor boundary: `iMLX/Vendor/KokoroSwift` is a compatibility layer over downloaded Kokoro checkpoints; checkpoint-specific tensor normalization belongs in `WeightLoader.swift` and `QuantizedModuleFactory.swift`, not scattered through model code
 
 ## Important Constraints
 
@@ -66,6 +67,7 @@ xcodebuild -downloadComponent MetalToolchain
 7. The project currently uses `main` for `mlx-swift`, pins `mlx-swift-lm` to `3.31.3`, and links `swift-tokenizers-mlx` for local tokenizer loading with MLX Swift LM 3.x.
 8. The Xcode target defaults actor isolation to `MainActor`, so pure helpers that run off the main actor may need explicit `nonisolated` annotations.
 9. Memory extraction must only persist facts grounded in the user message. Do not turn assistant answers, recommendations, prices, or unquoted generated details into memories.
+10. Current Kokoro checkpoints are not shape-compatible with the original vendor assumptions: many linear and embedding tensors are quantized (`U32` packed weights plus `scales`/`biases`), LSTM weights use newer key names, and conv/`weight_v` tensors already arrive in MLX-friendly layout. Do not blindly transpose or load them as dense tensors.
 
 ## Codebase Map
 
@@ -114,6 +116,13 @@ High-value files:
 - Exact curated model entries live in `iMLX/Utilities/Constants.swift`
 - Built-in personas are seeded by `PersonaService`
 - If a task depends on exact model capabilities or IDs, read `Constants.swift` instead of duplicating assumptions from this file
+
+## TTS Checkpoints
+
+- The Kokoro compatibility boundary lives in `iMLX/Vendor/KokoroSwift/TTSEngine/WeightLoader.swift` and `iMLX/Vendor/KokoroSwift/BuildingBlocks/QuantizedModuleFactory.swift`.
+- Newer Kokoro checkpoints may rename LSTM tensors (for example `Wx_forward`/`Wh_forward`) and store text/style/BERT layers as packed quantized weights with companion `scales` and `biases`.
+- `predictor`, `text_encoder`, and `decoder` conv kernels in the current checkpoints already use the expected MLX layout. Extra transposes can silently corrupt kernel/channel axes and only fail later at runtime.
+- If TTS crashes with MLX shape errors, inspect the loaded checkpoint tensor names and shapes first before changing model math. Most failures in this area come from loader assumptions, not the inference graph itself.
 
 ## Conventions
 

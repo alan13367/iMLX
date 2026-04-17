@@ -9,6 +9,7 @@ final class LiveVoiceSessionViewModel {
     var errorMessage: String?
     var isListening = false
     var isSpeaking = false
+    var isGeneratingReply = false
     var isPreparingAssets = false
     var isRestoringConversationModel = false
     var needsAssetDownload = false
@@ -39,6 +40,7 @@ final class LiveVoiceSessionViewModel {
             && !isRestoringConversationModel
             && !isListening
             && !isSpeaking
+            && !isGeneratingReply
             && !needsAssetDownload
             && localeSupportMessage == nil
             && (appState.loadedModelId != nil || suspendedModelForPlayback != nil)
@@ -65,6 +67,8 @@ final class LiveVoiceSessionViewModel {
             statusText = unavailableReason
         } else if needsAssetDownload {
             statusText = "Local voice needs a one-time Kokoro download for \(voiceLocale.displayName)."
+        } else if isGeneratingReply {
+            statusText = "Generating..."
         } else if isRestoringConversationModel {
             statusText = "Reloading the chat model for the next turn."
         } else if !isListening && !isSpeaking {
@@ -113,6 +117,7 @@ final class LiveVoiceSessionViewModel {
         await resumeConversationModelIfNeeded()
         isListening = false
         isSpeaking = false
+        isGeneratingReply = false
     }
 
     private func startListeningCycle() async {
@@ -168,14 +173,17 @@ final class LiveVoiceSessionViewModel {
 
         partialTranscript = ""
         lastUserTranscript = trimmed
+        isGeneratingReply = true
         statusText = "Generating..."
 
         guard let assistantMessage = await chatViewModel.sendMessageAndWait(trimmed) else {
+            isGeneratingReply = false
             statusText = "No reply was generated."
             return
         }
 
         await suspendConversationModelForPlaybackIfNeeded()
+        isGeneratingReply = false
         await speak(assistantMessage.content)
     }
 

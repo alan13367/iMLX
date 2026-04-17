@@ -16,7 +16,13 @@ nonisolated class CustomAlbert {
     self.config = config
     embeddings = AlbertEmbeddings(weights: weights, config: config)
     encoder = AlbertEncoder(weights: weights, config: config)
-    pooler = Linear(weight: weights["bert.pooler.weight"]!, bias: weights["bert.pooler.bias"]!)
+    pooler = makeKokoroLinear(
+      inputDimensions: config.hiddenSize,
+      weight: weights["bert.pooler.weight"]!,
+      bias: weights["bert.pooler.bias"]!,
+      scales: weights["bert.pooler.scales"],
+      quantizedBiases: weights["bert.pooler.biases"]
+    )
   }
 
   func callAsFunction(

@@ -202,14 +202,14 @@ struct ChatView: View {
                 if appState.loadedModelId != nil {
                     ChatToolbarIconButton(
                         systemImage: "eject",
-                        accessibilityLabel: "Unload model",
+                        accessibilityLabel: String.appLocalized("models.picker.unload"),
                         action: unloadModel
                     )
                 }
 
                 ChatToolbarIconButton(
                     systemImage: "square.and.pencil",
-                    accessibilityLabel: "New conversation",
+                    accessibilityLabel: String.appLocalized("New conversation"),
                     action: startNewConversation
                 )
             }
@@ -229,7 +229,7 @@ struct ChatView: View {
         }
         .task(id: appState.activeConversationId ?? conversationId) {
             let currentConversationId = appState.activeConversationId ?? conversationId
-            if let conversation = appState.conversations.first(where: { $0.id == currentConversationId }) {
+            if let conversation = appState.conversation(id: currentConversationId) {
                 chatViewModel.loadConversation(conversation)
             }
         }
@@ -326,7 +326,7 @@ struct ChatView: View {
 
     private var conversationTitle: String {
         let currentConversationId = appState.activeConversationId ?? conversationId
-        if let conversation = appState.conversations.first(where: { $0.id == currentConversationId }) {
+        if let conversation = appState.conversation(id: currentConversationId) {
             return conversation.displayTitle
         }
         return "iMLX"
@@ -381,7 +381,7 @@ struct ChatView: View {
         ChatModelStatusButton(
             isModelLoading: chatViewModel.isModelLoading,
             selectedModelDisplayName: appState.selectedModel?.displayName,
-            loadedModelID: appState.loadedModelId,
+            loadedModelDisplayName: appState.modelInfo(id: appState.loadedModelId)?.displayName,
             onTap: { showModelPicker = true }
         )
         .sheet(isPresented: $showModelPicker) {
@@ -569,13 +569,8 @@ private struct ChatToolbarIconButton: View {
 private struct ChatModelStatusButton: View {
     let isModelLoading: Bool
     let selectedModelDisplayName: String?
-    let loadedModelID: String?
+    let loadedModelDisplayName: String?
     let onTap: () -> Void
-
-    private var loadedModelDisplayName: String? {
-        guard let loadedModelID else { return nil }
-        return Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelID })?.displayName
-    }
 
     var body: some View {
         Button(action: onTap) {
@@ -618,7 +613,7 @@ private struct ChatModelStatusButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
-            loadedModelID == nil
+            loadedModelDisplayName == nil
                 ? String.appLocalized("chat.select_model")
                 : String.appLocalized("chat.change_model_a11y")
         )
@@ -940,7 +935,7 @@ private struct ChatComposerSection: View {
     let onStop: () -> Void
     let onToggleWebSearch: () -> Void
 
-    @State private var showAttachmentPanel = false
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -962,7 +957,30 @@ private struct ChatComposerSection: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                Button(action: toggleAttachmentPanel) {
+                Menu {
+                    Button(action: onOpenAttachmentImporter) {
+                        Label(String.appLocalized("chat.import_document"), systemImage: "doc.text")
+                    }
+
+                    if canUseVision {
+                        Button(action: onOpenCamera) {
+                            Label(String.appLocalized("chat.take_photo"), systemImage: "camera")
+                        }
+
+                        Button(action: onOpenPhotoLibrary) {
+                            Label(String.appLocalized("chat.photo_library"), systemImage: "photo.on.rectangle")
+                        }
+                    }
+
+                    Divider()
+
+                    Toggle(isOn: Binding(
+                        get: { isWebSearchEnabled },
+                        set: { _ in onToggleWebSearch() }
+                    )) {
+                        Label(String.appLocalized("Web Search"), systemImage: "globe")
+                    }
+                } label: {
                     Image(systemName: "plus")
                         .font(.title3.weight(.semibold))
                         .frame(width: 32, height: 32)
@@ -976,17 +994,6 @@ private struct ChatComposerSection: View {
                 }
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Add attachment")
-                .popover(isPresented: $showAttachmentPanel, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-                    ChatAttachmentPanel(
-                        canUseVision: canUseVision,
-                        isWebSearchEnabled: isWebSearchEnabled,
-                        onImportDocument: openDocumentImporter,
-                        onTakePhoto: openCamera,
-                        onOpenPhotoLibrary: openPhotoLibrary,
-                        onToggleWebSearch: toggleWebSearch
-                    )
-                    .presentationCompactAdaptation(.popover)
-                }
 
                 if canUseThinking {
                     Button(action: onToggleThinking) {
@@ -1040,38 +1047,9 @@ private struct ChatComposerSection: View {
         }
     }
 
-    private func toggleAttachmentPanel() {
-        isInputFocused = false
-        showAttachmentPanel.toggle()
-    }
-
     private func openPersonaPicker() {
         isInputFocused = false
         onOpenPersonaPicker()
-    }
-
-    private func openDocumentImporter() {
-        closeAttachmentPanelThen(onOpenAttachmentImporter)
-    }
-
-    private func openCamera() {
-        closeAttachmentPanelThen(onOpenCamera)
-    }
-
-    private func openPhotoLibrary() {
-        closeAttachmentPanelThen(onOpenPhotoLibrary)
-    }
-
-    private func toggleWebSearch() {
-        closeAttachmentPanelThen(onToggleWebSearch)
-    }
-
-    private func closeAttachmentPanelThen(_ action: @escaping () -> Void) {
-        showAttachmentPanel = false
-        Task { @MainActor in
-            await Task.yield()
-            action()
-        }
     }
 }
 
@@ -1184,111 +1162,6 @@ private struct ChatPendingImageStrip: View {
     }
 }
 
-private struct ChatAttachmentPanel: View {
-    let canUseVision: Bool
-    let isWebSearchEnabled: Bool
-    let onImportDocument: () -> Void
-    let onTakePhoto: () -> Void
-    let onOpenPhotoLibrary: () -> Void
-    let onToggleWebSearch: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ChatAttachmentPanelButton(
-                title: String.appLocalized("chat.import_document"),
-                systemImage: "doc.text",
-                action: onImportDocument
-            )
-
-            if canUseVision {
-                ChatAttachmentPanelButton(
-                    title: String.appLocalized("chat.take_photo"),
-                    systemImage: "camera",
-                    action: onTakePhoto
-                )
-
-                ChatAttachmentPanelButton(
-                    title: String.appLocalized("chat.photo_library"),
-                    systemImage: "photo.on.rectangle",
-                    action: onOpenPhotoLibrary
-                )
-            }
-
-            Divider()
-                .padding(.vertical, 4)
-
-            Button(action: onToggleWebSearch) {
-                HStack(spacing: 12) {
-                    Image(systemName: "globe")
-                        .font(.body)
-                        .foregroundStyle(BrandPalette.cyan)
-                        .frame(width: 24, height: 24)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(String.appLocalized("Web Search"))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text(String.appLocalized("web_search.menu.subtitle"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    WebSearchPillSwitch(isOn: isWebSearchEnabled)
-                }
-                .frame(minHeight: 52)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(String.appLocalized("Web Search"))
-            .accessibilityValue(
-                isWebSearchEnabled
-                    ? String.appLocalized("web_search.state.on")
-                    : String.appLocalized("web_search.state.off")
-            )
-            .accessibilityHint(String.appLocalized("web_search.menu.accessibility_hint"))
-            .accessibilityAddTraits(.isButton)
-        }
-        .padding(10)
-        .frame(width: 286)
-        .liquidGlassSurface(
-            tint: BrandPalette.navy.opacity(0.08),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous),
-            fallback: AnyShapeStyle(.thinMaterial)
-        )
-    }
-}
-
-private struct ChatAttachmentPanelButton: View {
-    let title: String
-    let systemImage: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.body)
-                    .foregroundStyle(BrandPalette.accent)
-                    .frame(width: 24, height: 24)
-                Text(title)
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                Spacer(minLength: 8)
-            }
-            .frame(minHeight: 44)
-            .padding(.horizontal, 8)
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-    }
-}
 
 private struct ChatStatusCard: View {
     let title: String

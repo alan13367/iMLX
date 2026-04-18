@@ -138,34 +138,31 @@ private struct MessageImageAttachmentStrip: View {
     let userBubbleWidth: CGFloat
 
     var body: some View {
-        if role == .user, attachedImages.count == 1 {
-            attachmentStripContent
-                .frame(width: max(userBubbleWidth, 80), alignment: .center)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        } else {
-            HStack {
-                if role == .assistant {
-                    attachmentStripContent
-                    Spacer(minLength: 0)
-                } else {
-                    Spacer(minLength: 0)
-                    attachmentStripContent
-                }
+        HStack {
+            if role == .assistant {
+                attachmentStripContent
+                Spacer(minLength: 0)
+            } else {
+                Spacer(minLength: 0)
+                attachmentStripContent
             }
-            .frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity)
     }
 
     private var attachmentStripContent: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        let isSingle = attachedImages.count == 1
+        let imageSize: CGFloat = isSingle ? 160 : 80
+
+        return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(attachedImages) { image in
-                    AttachmentImageThumbnailView(imageData: image.data, size: 80, cornerRadius: 12)
+                    AttachmentImageThumbnailView(imageData: image.data, size: imageSize, cornerRadius: 12)
                 }
             }
             .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
         }
-        .frame(maxWidth: 220)
+        .frame(maxWidth: isSingle ? imageSize : 220)
     }
 }
 

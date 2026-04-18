@@ -525,7 +525,7 @@ final class ChatViewModel {
     @MainActor
     func startNewConversation() -> UUID? {
         let id = appState.createNewConversation()
-        if let conversation = appState.conversations.first(where: { $0.id == id }) {
+        if let conversation = appState.conversation(id: id) {
             loadConversation(conversation)
         } else {
             activeConversationId = id
@@ -615,7 +615,7 @@ final class ChatViewModel {
         guard let conversationId = activeConversationId else { return }
 
         var conversation: Conversation
-        if let existing = appState.conversations.first(where: { $0.id == conversationId }) {
+        if let existing = appState.conversation(id: conversationId) {
             conversation = existing
             conversation.messages = messages
             conversation.modelId = appState.loadedModelId
@@ -643,7 +643,7 @@ final class ChatViewModel {
         assistantMessage: ChatMessage
     ) {
         guard let conversationId = activeConversationId else { return }
-        guard let conversation = appState.conversations.first(where: { $0.id == conversationId }) else { return }
+        guard let conversation = appState.conversation(id: conversationId) else { return }
         guard conversation.title == "New Conversation" else { return }
 
         titleGenerationTasks[conversationId]?.cancel()
@@ -941,7 +941,7 @@ final class ChatViewModel {
 
     private func resolvedCurrentModel() -> ModelInfo? {
         if let loadedModelId = appState.loadedModelId,
-           let loadedModel = Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelId }) {
+           let loadedModel = appState.modelInfo(id: loadedModelId) {
             return loadedModel
         }
 

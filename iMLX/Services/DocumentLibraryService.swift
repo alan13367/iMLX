@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 import NaturalLanguage
 import PDFKit
 
@@ -6,6 +7,15 @@ actor DocumentLibraryService {
     private struct ExtractedBlock {
         let text: String
         let location: String?
+    }
+
+    private struct RetrievalCandidate {
+        let source: MessageSource
+        let text: String
+    }
+
+    private enum RetrievalSampling {
+        static let languageDetectionCharacterLimit = 8_000
     }
 
     private let fileManager: FileManager
@@ -55,7 +65,9 @@ actor DocumentLibraryService {
             throw DocumentImportError.emptyDocument
         }
 
-        let languageCode = detectLanguageCode(in: extractedBlocks.map(\.text).joined(separator: "\n\n"))
+        let languageCode = detectLanguageCode(
+            in: sampledText(from: extractedBlocks, maxCharacters: RetrievalSampling.languageDetectionCharacterLimit)
+        )
         let chunks = buildChunks(
             documentID: documentID,
             blocks: extractedBlocks,
@@ -119,14 +131,18 @@ actor DocumentLibraryService {
         }
 
         let queryVector = embedding(for: trimmedQuery, languageCode: detectLanguageCode(in: trimmedQuery))
-        var candidates: [(source: MessageSource, text: String)] = []
+        var topCandidates: [RetrievalCandidate] = []
         let shouldUseOverview = wantsDocumentOverview(for: trimmedQuery)
 
         for reference in documents {
             guard let index = loadIndex(id: reference.id) else { continue }
 
             if shouldUseOverview {
-                candidates.append(contentsOf: overviewCandidates(for: reference, index: index))
+                appendOverviewCandidates(
+                    for: reference,
+                    index: index,
+                    into: &topCandidates
+                )
                 continue
             }
 
@@ -146,31 +162,29 @@ actor DocumentLibraryService {
                     url: nil,
                     score: score
                 )
-                candidates.append((source, chunk.text))
+                insertCandidate(
+                    RetrievalCandidate(source: source, text: chunk.text),
+                    into: &topCandidates
+                )
             }
         }
 
-        if candidates.isEmpty {
+        if topCandidates.isEmpty {
             for reference in documents {
                 guard let index = loadIndex(id: reference.id) else { continue }
-                candidates.append(contentsOf: overviewCandidates(for: reference, index: index))
+                appendOverviewCandidates(
+                    for: reference,
+                    index: index,
+                    into: &topCandidates
+                )
             }
         }
-
-        let ranked = candidates
-            .sorted { lhs, rhs in
-                if lhs.source.score == rhs.source.score {
-                    return lhs.source.title.localizedCaseInsensitiveCompare(rhs.source.title) == .orderedAscending
-                }
-                return (lhs.source.score ?? 0) > (rhs.source.score ?? 0)
-            }
-            .prefix(Constants.RAG.maxRetrievedChunks)
 
         var contextSections: [String] = []
         var sources: [MessageSource] = []
         var usedCharacters = 0
 
-        for candidate in ranked {
+        for candidate in topCandidates {
             let headerParts = [
                 "Source: \(candidate.source.title)",
                 candidate.source.location
@@ -389,6 +403,34 @@ actor DocumentLibraryService {
         return chunks
     }
 
+    private func sampledText(from blocks: [ExtractedBlock], maxCharacters: Int) -> String {
+        guard maxCharacters > 0 else { return "" }
+
+        var sample = ""
+        sample.reserveCapacity(min(maxCharacters, 1_024))
+
+        for block in blocks {
+            guard !block.text.isEmpty else { continue }
+            if !sample.isEmpty {
+                let separator = "\n\n"
+                guard sample.count + separator.count < maxCharacters else { break }
+                sample += separator
+            }
+
+            let remainingCharacters = maxCharacters - sample.count
+            guard remainingCharacters > 0 else { break }
+            if block.text.count <= remainingCharacters {
+                sample += block.text
+            } else {
+                let endIndex = block.text.index(block.text.startIndex, offsetBy: remainingCharacters)
+                sample += String(block.text[..<endIndex])
+                break
+            }
+        }
+
+        return sample
+    }
+
     private func detectLanguageCode(in text: String) -> String? {
         guard let language = NLLanguageRecognizer.dominantLanguage(for: text) else {
             return nil
@@ -423,15 +465,9 @@ actor DocumentLibraryService {
             return 0
         }
 
-        var dotProduct = 0.0
-        var queryMagnitude = 0.0
-        var chunkMagnitude = 0.0
-
-        for index in queryVector.indices {
-            dotProduct += queryVector[index] * chunkVector[index]
-            queryMagnitude += queryVector[index] * queryVector[index]
-            chunkMagnitude += chunkVector[index] * chunkVector[index]
-        }
+        let dotProduct = vDSP.dot(queryVector, chunkVector)
+        let queryMagnitude = vDSP.sumOfSquares(queryVector)
+        let chunkMagnitude = vDSP.sumOfSquares(chunkVector)
 
         let denominator = sqrt(queryMagnitude) * sqrt(chunkMagnitude)
         guard denominator > 0 else { return 0 }
@@ -502,7 +538,7 @@ actor DocumentLibraryService {
     private func overviewCandidates(
         for reference: ConversationDocumentReference,
         index: DocumentIndex
-    ) -> [(source: MessageSource, text: String)] {
+    ) -> [RetrievalCandidate] {
         guard !index.chunks.isEmpty else { return [] }
 
         let selectedChunks = sampledOverviewChunks(from: index.chunks)
@@ -516,7 +552,35 @@ actor DocumentLibraryService {
                 url: nil,
                 score: 1.0
             )
-            return (source, chunk.text)
+            return RetrievalCandidate(source: source, text: chunk.text)
+        }
+    }
+
+    private func appendOverviewCandidates(
+        for reference: ConversationDocumentReference,
+        index: DocumentIndex,
+        into candidates: inout [RetrievalCandidate]
+    ) {
+        for candidate in overviewCandidates(for: reference, index: index) {
+            insertCandidate(candidate, into: &candidates)
+        }
+    }
+
+    private func insertCandidate(_ candidate: RetrievalCandidate, into candidates: inout [RetrievalCandidate]) {
+        let insertionIndex = candidates.firstIndex { existing in
+            if candidate.source.score == existing.source.score {
+                return candidate.source.title.localizedCaseInsensitiveCompare(existing.source.title) == .orderedAscending
+            }
+            return (candidate.source.score ?? 0) > (existing.source.score ?? 0)
+        } ?? candidates.endIndex
+
+        guard insertionIndex < Constants.RAG.maxRetrievedChunks || candidates.count < Constants.RAG.maxRetrievedChunks else {
+            return
+        }
+
+        candidates.insert(candidate, at: insertionIndex)
+        if candidates.count > Constants.RAG.maxRetrievedChunks {
+            candidates.removeLast()
         }
     }
 

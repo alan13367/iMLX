@@ -35,7 +35,12 @@ final class AppState {
     var activeConversationId: UUID?
     var preferredAppLanguageCode: String?
 
+    private static let curatedModelsByID = Dictionary(
+        uniqueKeysWithValues: Constants.ModelRegistry.curatedModels.map { ($0.id, $0) }
+    )
     private let userDefaults = UserDefaults.standard
+    private var conversationsByID: [UUID: Conversation] = [:]
+    private var personasByID: [String: Persona] = [:]
 
     init() {
         self.manifestService = ManifestService()
@@ -139,7 +144,7 @@ final class AppState {
         }
 
         return modelIDs.compactMap { id in
-            Constants.ModelRegistry.curatedModels.first(where: { $0.id == id })
+            modelInfo(id: id)
         }
     }
 
@@ -174,7 +179,7 @@ final class AppState {
         userDefaults.removeObject(forKey: "loadedModelId")
 
         if let selectedId,
-           let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == selectedId }),
+           let model = modelInfo(id: selectedId),
            manifestService.isDownloaded(modelId: selectedId) {
             var updated = model
             updated.isDownloaded = true
@@ -279,7 +284,7 @@ final class AppState {
            snapshots[pendingStarterModelId] == nil,
            manifestService.isDownloaded(modelId: pendingStarterModelId) {
             if selectedModel == nil || selectedModel?.id == pendingStarterModelId {
-                if let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == pendingStarterModelId }) {
+                if let model = modelInfo(id: pendingStarterModelId) {
                     var updatedModel = model
                     updatedModel.isDownloaded = true
                     updatedModel.localURL = await downloadService.localURL(for: model)
@@ -296,12 +301,14 @@ final class AppState {
         let loaded = await Self.fetchConversationsInBackground(using: conversationService)
         conversations = loaded
         migrateConversationsWithoutPersona()
+        rebuildConversationLookup()
         reconcileActiveConversationForChat()
     }
 
     private func loadConversationsFromDisk() {
         conversations = conversationService.listAll()
         migrateConversationsWithoutPersona()
+        rebuildConversationLookup()
         reconcileActiveConversationForChat()
     }
 
@@ -313,6 +320,7 @@ final class AppState {
 
     func loadPersonas() {
         personas = personaService.listAll()
+        rebuildPersonaLookup()
     }
 
     func loadMemories() {
@@ -354,7 +362,7 @@ final class AppState {
             activeConversationId = conversations.first?.id
             return
         }
-        if !conversations.contains(where: { $0.id == activeConversationId }) {
+        if conversation(id: activeConversationId) == nil {
             activeConversationId = conversations.first?.id
         }
     }
@@ -367,6 +375,7 @@ final class AppState {
         )
         conversationService.save(conversation)
         conversations.insert(conversation, at: 0)
+        conversationsByID[conversation.id] = conversation
         activeConversationId = conversation.id
         Haptics.impactLight()
         return conversation.id
@@ -375,6 +384,7 @@ final class AppState {
     func deleteConversation(_ id: UUID) {
         conversationService.delete(id: id)
         conversations.removeAll { $0.id == id }
+        conversationsByID[id] = nil
         Task {
             await documentLibraryService.deleteDocuments(for: id)
         }
@@ -392,16 +402,26 @@ final class AppState {
     }
 
     func activeConversation() -> Conversation? {
-        conversations.first { $0.id == activeConversationId }
+        conversation(id: activeConversationId)
+    }
+
+    func conversation(id: UUID?) -> Conversation? {
+        guard let id else { return nil }
+        return conversationsByID[id]
     }
 
     func persona(id: String?) -> Persona? {
         guard let id else { return nil }
-        return personas.first { $0.id == id }
+        return personasByID[id]
+    }
+
+    func modelInfo(id: String?) -> ModelInfo? {
+        guard let id else { return nil }
+        return Self.curatedModelsByID[id]
     }
 
     func defaultPersona() -> Persona {
-        if let explicitDefault = personas.first(where: { $0.id == Persona.defaultID }) {
+        if let explicitDefault = personasByID[Persona.defaultID] {
             return explicitDefault
         }
         if let firstPersona = personas.first {
@@ -438,6 +458,7 @@ final class AppState {
             conversations[index].personaId = fallbackPersonaID
             conversationService.save(conversations[index])
         }
+        rebuildConversationLookup()
 
         loadPersonas()
     }
@@ -527,6 +548,7 @@ final class AppState {
             conversations.remove(at: index)
         }
         conversations.insert(conversation, at: 0)
+        conversationsByID[conversation.id] = conversation
         conversationService.save(conversation)
     }
 
@@ -536,5 +558,13 @@ final class AppState {
             conversations[index].personaId = fallbackPersonaID
             conversationService.save(conversations[index])
         }
+    }
+
+    private func rebuildConversationLookup() {
+        conversationsByID = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
+    }
+
+    private func rebuildPersonaLookup() {
+        personasByID = Dictionary(uniqueKeysWithValues: personas.map { ($0.id, $0) })
     }
 }

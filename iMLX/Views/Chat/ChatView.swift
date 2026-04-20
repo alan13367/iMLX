@@ -816,7 +816,7 @@ private struct ChatAccessoryStackView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             if let errorMessage {
                 ChatNoticeBanner(
                     style: .error(isOOM: isOOMError(errorMessage)),
@@ -887,7 +887,6 @@ private struct ChatAccessoryStackView: View {
                 onToggleWebSearch: onToggleWebSearch
             )
         }
-        .liquidGlassContainer(spacing: 16)
         .padding(.top, 8)
     }
 

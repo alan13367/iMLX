@@ -17,6 +17,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
     var attachedImages: [ChatAttachmentImage]?
     var attachedDocuments: [ConversationDocumentReference]?
     var retrievedSources: [MessageSource]?
+    var toolTrace: ToolCallTrace?
     var generationStats: GenerationStats?
     let timestamp: Date
 
@@ -33,6 +34,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         case attachedImages
         case attachedDocuments
         case retrievedSources
+        case toolTrace
         case generationStats
         case timestamp
     }
@@ -43,6 +45,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         attachedImages: [ChatAttachmentImage]? = nil,
         attachedDocuments: [ConversationDocumentReference]? = nil,
         retrievedSources: [MessageSource]? = nil,
+        toolTrace: ToolCallTrace? = nil,
         generationStats: GenerationStats? = nil
     ) {
         self.id = UUID()
@@ -51,6 +54,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         self.attachedImages = attachedImages
         self.attachedDocuments = attachedDocuments
         self.retrievedSources = retrievedSources
+        self.toolTrace = toolTrace
         self.generationStats = generationStats
         self.timestamp = Date()
     }
@@ -77,6 +81,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         } else {
             retrievedSources = nil
         }
+        toolTrace = try container.decodeIfPresent(ToolCallTrace.self, forKey: .toolTrace)
         generationStats = try container.decodeIfPresent(GenerationStats.self, forKey: .generationStats)
         timestamp = try container.decode(Date.self, forKey: .timestamp)
     }
@@ -89,6 +94,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(attachedImages, forKey: .attachedImages)
         try container.encodeIfPresent(attachedDocuments, forKey: .attachedDocuments)
         try container.encodeIfPresent(retrievedSources, forKey: .retrievedSources)
+        try container.encodeIfPresent(toolTrace, forKey: .toolTrace)
         try container.encodeIfPresent(generationStats, forKey: .generationStats)
         try container.encode(timestamp, forKey: .timestamp)
     }

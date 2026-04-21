@@ -26,6 +26,7 @@ final class AppState {
     let manifestService: ManifestService
     let speechAssetService: SpeechAssetService
     let webSearchService = WebSearchService()
+    let toolCallingService: ToolCallingService
     let personaService = PersonaService()
     let memoryService = MemorySystem()
     let documentLibraryService = DocumentLibraryService()
@@ -46,6 +47,7 @@ final class AppState {
         self.manifestService = ManifestService()
         self.downloadService = ModelDownloadService(manifestService: manifestService)
         self.speechAssetService = SpeechAssetService()
+        self.toolCallingService = ToolCallingService(webSearchService: webSearchService)
         preferredAppLanguageCode = userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
         if let persistedOnboardingState = userDefaults.object(forKey: Keys.hasCompletedOnboarding) as? Bool {
             hasCompletedOnboarding = persistedOnboardingState

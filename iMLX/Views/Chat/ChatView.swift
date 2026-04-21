@@ -155,6 +155,7 @@ struct ChatView: View {
                 horizontalSizeClass: horizontalSizeClass,
                 errorMessage: chatViewModel.errorMessage,
                 webSearchNotice: chatViewModel.webSearchNotice,
+                toolActivityStatus: chatViewModel.toolActivityStatus,
                 isModelLoading: chatViewModel.isModelLoading,
                 selectedModelDisplayName: appState.selectedModel?.displayName,
                 isGenerating: chatViewModel.isGenerating,
@@ -317,6 +318,8 @@ struct ChatView: View {
                 currentResponse: chatViewModel.currentResponse,
                 isGenerating: chatViewModel.isGenerating,
                 parsedResponse: chatViewModel.currentParsedResponse,
+                toolActivityStatus: chatViewModel.toolActivityStatus,
+                currentToolTrace: chatViewModel.currentToolTrace,
                 conversationResetKey: appState.activeConversationId ?? conversationId
             )
             .opacity(isShowingEmptyState ? 0 : 1)
@@ -649,6 +652,8 @@ private struct ChatMessageListSection: View {
     let currentResponse: String
     let isGenerating: Bool
     let parsedResponse: ParsedAssistantContent
+    let toolActivityStatus: ToolActivityStatus?
+    let currentToolTrace: ToolCallTrace?
     let conversationResetKey: UUID
 
     @State private var streamingScrollTask: Task<Void, Never>?
@@ -666,6 +671,16 @@ private struct ChatMessageListSection: View {
                                 .equatable()
                                 .id(message.id)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+
+                        if let toolActivityStatus {
+                            ToolActivityChainView(status: toolActivityStatus)
+                                .id("toolActivity")
+                                .transition(.opacity)
+                        } else if let currentToolTrace, isGenerating {
+                            CompletedToolChainView(trace: currentToolTrace)
+                                .id("toolTraceInline")
+                                .transition(.opacity)
                         }
 
                         if !currentResponse.isEmpty {
@@ -780,6 +795,7 @@ private struct ChatAccessoryStackView: View {
     let horizontalSizeClass: UserInterfaceSizeClass?
     let errorMessage: String?
     let webSearchNotice: String?
+    let toolActivityStatus: ToolActivityStatus?
     let isModelLoading: Bool
     let selectedModelDisplayName: String?
     let isGenerating: Bool
@@ -1184,6 +1200,238 @@ private struct ChatStatusCard: View {
         .padding(.vertical, 12)
         .liquidGlassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.horizontal)
+    }
+}
+
+private struct ToolActivityChainView: View {
+    let status: ToolActivityStatus
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 0) {
+                ToolActivityStepRow(
+                    icon: "wand.and.stars",
+                    text: String.appLocalized("tool.activity.planning"),
+                    state: planningState
+                )
+
+                if let query = searchQuery {
+                    ToolActivityConnector()
+                    ToolActivityStepRow(
+                        icon: "globe",
+                        text: String(format: String.appLocalized("tool.activity.searching"), query),
+                        state: searchingState
+                    )
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.fill.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            Spacer(minLength: 36)
+        }
+    }
+
+    private var planningState: ToolActivityStepState {
+        switch status {
+        case .planning:
+            return .active
+        case .searching:
+            return .completed
+        }
+    }
+
+    private var searchingState: ToolActivityStepState {
+        switch status {
+        case .planning:
+            return .pending
+        case .searching:
+            return .active
+        }
+    }
+
+    private var searchQuery: String? {
+        switch status {
+        case .planning:
+            return nil
+        case .searching(let query):
+            return query
+        }
+    }
+}
+
+private struct CompletedToolChainView: View {
+    let trace: ToolCallTrace
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 0) {
+                ToolActivityStepRow(
+                    icon: "wand.and.stars",
+                    text: String.appLocalized("tool.activity.planning"),
+                    state: .completed
+                )
+
+                if let query = trace.rewrittenQuery {
+                    ToolActivityConnector()
+                    ToolActivityStepRow(
+                        icon: "globe",
+                        text: String(format: String.appLocalized("tool.activity.searching"), query),
+                        state: trace.success ? .completed : .failed
+                    )
+                }
+
+                if trace.success, trace.sourceCount > 0 {
+                    ToolActivityConnector()
+                    ToolActivityStepRow(
+                        icon: "doc.text.magnifyingglass",
+                        text: String(format: String.appLocalized("tool.trace.sources_found"), trace.sourceCount),
+                        state: .completed
+                    )
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.fill.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            Spacer(minLength: 36)
+        }
+    }
+}
+
+struct ToolTraceChainView: View {
+    let trace: ToolCallTrace
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 0) {
+                ToolActivityStepRow(
+                    icon: "wand.and.stars",
+                    text: String.appLocalized("tool.activity.planning"),
+                    state: .completed
+                )
+
+                if let query = trace.rewrittenQuery {
+                    ToolActivityConnector()
+                    ToolActivityStepRow(
+                        icon: "globe",
+                        text: String(format: String.appLocalized("tool.activity.searching"), query),
+                        state: trace.success ? .completed : .failed
+                    )
+                }
+
+                if trace.success, trace.sourceCount > 0 {
+                    ToolActivityConnector()
+                    ToolActivityStepRow(
+                        icon: "doc.text.magnifyingglass",
+                        text: String(format: String.appLocalized("tool.trace.sources_found"), trace.sourceCount),
+                        state: .completed
+                    )
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            HStack(spacing: 8) {
+                Label(toolLabel, systemImage: trace.success ? "globe" : "globe.badge.chevron.backward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(trace.success ? BrandPalette.cyan : .secondary)
+                if let duration = trace.durationSeconds {
+                    Text(String(format: "%.1fs", duration))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.fill.quaternary)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var toolLabel: String {
+        if trace.success {
+            return String.appLocalized("tool.trace.web_search")
+        } else {
+            return String.appLocalized("tool.trace.web_search_failed")
+        }
+    }
+}
+
+enum ToolActivityStepState {
+    case pending
+    case active
+    case completed
+    case failed
+}
+
+struct ToolActivityStepRow: View {
+    let icon: String
+    let text: String
+    let state: ToolActivityStepState
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                switch state {
+                case .active:
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(BrandPalette.cyan)
+                case .completed:
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                case .failed:
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                case .pending:
+                    Image(systemName: "circle")
+                        .font(.caption2)
+                        .foregroundStyle(.quaternary)
+                }
+            }
+            .frame(width: 16, height: 16)
+
+            Image(systemName: icon)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(iconColor)
+
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(textColor)
+                .lineLimit(2)
+        }
+    }
+
+    private var iconColor: Color {
+        switch state {
+        case .active: BrandPalette.cyan
+        case .completed: .secondary
+        case .failed: .secondary
+        case .pending: Color(.quaternaryLabel)
+        }
+    }
+
+    private var textColor: Color {
+        switch state {
+        case .active: .primary
+        case .completed: .secondary
+        case .failed: .secondary
+        case .pending: Color(.quaternaryLabel)
+        }
+    }
+}
+
+struct ToolActivityConnector: View {
+    var body: some View {
+        Rectangle()
+            .fill(.quaternary)
+            .frame(width: 1, height: 10)
+            .padding(.leading, 7.5)
     }
 }
 

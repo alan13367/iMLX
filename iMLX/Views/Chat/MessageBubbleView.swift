@@ -13,6 +13,7 @@ struct MessageBubbleView: View, Equatable {
 
     @State private var showCopyFeedback = false
     @State private var isThinkingExpanded = false
+    @State private var isToolTraceExpanded = false
     @State private var userBubbleWidth: CGFloat = 0
 
     private var resolvedParsedContent: ParsedAssistantContent {
@@ -60,9 +61,11 @@ struct MessageBubbleView: View, Equatable {
                     AssistantMessageContent(
                         parsedContent: resolvedParsedContent,
                         isStreaming: isStreaming,
+                        toolTrace: message.toolTrace,
                         retrievedSources: message.retrievedSources ?? [],
                         generationStats: message.generationStats,
                         isThinkingExpanded: $isThinkingExpanded,
+                        isToolTraceExpanded: $isToolTraceExpanded,
                         showCopyFeedback: $showCopyFeedback,
                         openSourceURL: openSourceURL
                     )
@@ -221,14 +224,22 @@ private struct MessageDocumentAttachmentStrip: View {
 private struct AssistantMessageContent: View {
     let parsedContent: ParsedAssistantContent
     let isStreaming: Bool
+    let toolTrace: ToolCallTrace?
     let retrievedSources: [MessageSource]
     let generationStats: GenerationStats?
     @Binding var isThinkingExpanded: Bool
+    @Binding var isToolTraceExpanded: Bool
     @Binding var showCopyFeedback: Bool
     let openSourceURL: (URL?) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if !isStreaming, let toolTrace {
+                ToolTraceChainView(
+                    trace: toolTrace,
+                    isExpanded: $isToolTraceExpanded
+                )
+            }
             if let thinking = parsedContent.thinking, !thinking.isEmpty {
                 DisclosureGroup(isExpanded: $isThinkingExpanded) {
                     MessageTextBody(text: thinking, isStreaming: isStreaming)

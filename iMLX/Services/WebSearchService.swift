@@ -19,7 +19,10 @@ actor WebSearchService {
 
     init() {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = true
+        // Web search should fail fast when the device is offline so chat can
+        // continue locally instead of appearing stalled while URLSession waits
+        // for connectivity to come back.
+        configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 45
         session = URLSession(configuration: configuration)
@@ -41,7 +44,9 @@ actor WebSearchService {
 
         for result in searchResults.prefix(Constants.WebSearch.maxResults) {
             guard let pageText = try await fetchReadableText(for: result.url), !pageText.isEmpty else { continue }
-            for chunk in chunkedText(pageText) {
+            let boundedPageText = String(pageText.prefix(Constants.WebSearch.maxFetchedBodyCharacters))
+            let chunks = chunkedText(boundedPageText)
+            for chunk in chunks.prefix(Constants.WebSearch.maxChunksScoredPerPage) {
                 let lexicalScore = lexicalSimilarity(query: trimmedQuery, text: chunk)
                 let semanticScore = score(
                     queryVector: queryVector,
@@ -50,18 +55,23 @@ actor WebSearchService {
                 let totalScore = semanticScore > 0 ? (semanticScore * 0.8) + (lexicalScore * 0.2) : lexicalScore
                 guard totalScore > 0 else { continue }
 
+                let excerptLimit = Constants.WebSearch.maxExcerptCharactersPerSection
+                let clippedText = chunk.count > excerptLimit
+                    ? String(chunk.prefix(excerptLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+                    : chunk
+
                 candidates.append(
                     CandidateChunk(
                         source: MessageSource(
                             id: "\(result.url.absoluteString)#\(candidates.count)",
                             kind: .web,
                             title: result.title,
-                            excerpt: compactExcerpt(from: chunk),
+                            excerpt: compactExcerpt(from: clippedText),
                             location: result.url.host,
                             url: result.url,
                             score: totalScore
                         ),
-                        text: chunk
+                        text: clippedText
                     )
                 )
             }
@@ -77,8 +87,20 @@ actor WebSearchService {
         var usedCharacters = 0
         var seenURLs = Set<URL>()
 
+        let headerBudget = Constants.WebSearch.maxContextCharacters
         for candidate in ranked {
-            let section = "Source: \(candidate.source.title)\nURL: \(candidate.source.url?.absoluteString ?? "")\n\(candidate.text)"
+            var section = "Source: \(candidate.source.title)\nURL: \(candidate.source.url?.absoluteString ?? "")\n\(candidate.text)"
+            if section.count > headerBudget {
+                let header = "Source: \(candidate.source.title)\nURL: \(candidate.source.url?.absoluteString ?? "")\n"
+                let textBudget = max(0, headerBudget - header.count)
+                let clippedBody = candidate.text.count > textBudget
+                    ? String(candidate.text.prefix(textBudget)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+                    : candidate.text
+                section = header + clippedBody
+            }
+            if section.count > headerBudget {
+                section = String(section.prefix(headerBudget)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+            }
             if usedCharacters + section.count > Constants.WebSearch.maxContextCharacters, !contextSections.isEmpty {
                 break
             }
@@ -219,15 +241,15 @@ actor WebSearchService {
 
     private func embedding(for text: String, languageCode: String?) -> [Double]? {
         let detectedLanguage = languageCode.flatMap(NLLanguage.init(rawValue:)) ?? .english
-        if let embedding = NLEmbedding.sentenceEmbedding(for: detectedLanguage),
-           let vector = embedding.vector(for: text) {
-            return vector
-        }
-        guard detectedLanguage != .english,
-              let fallback = NLEmbedding.sentenceEmbedding(for: .english) else {
+
+        // Web ranking should stay quiet in the console when NaturalLanguage lacks a local
+        // embedding asset for a detected page language. We only use sentence embeddings for
+        // English here and rely on lexical similarity for other languages.
+        guard detectedLanguage == .english,
+              let embedding = NLEmbedding.sentenceEmbedding(for: .english) else {
             return nil
         }
-        return fallback.vector(for: text)
+        return embedding.vector(for: text)
     }
 
     private func score(queryVector: [Double]?, chunkVector: [Double]?) -> Double {

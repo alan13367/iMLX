@@ -357,5 +357,33 @@ nonisolated enum Constants {
         static let maxPreviewCharacters = 240
         static let chunkWordTarget = 140
         static let chunkWordOverlap = 24
+        /// Bounds HTML body text before chunking so we do not allocate thousands of chunks or run unbounded embedding passes.
+        static let maxFetchedBodyCharacters = 36_000
+        /// Max chunks per search result URL to score (each chunk calls sentence embedding).
+        static let maxChunksScoredPerPage = 40
+        /// Hard cap per excerpt included in the model prompt (sections are merged up to maxContextCharacters).
+        static let maxExcerptCharactersPerSection = 2_200
+    }
+
+    enum ToolCalling {
+        static let plannerMaxTokens = 64
+        static let plannerTemperature: Float = 0.0
+        static let plannerTopP: Float = 1.0
+        static let maxToolCallsPerTurn = 1
+        static let maxQueryLength = 120
+        static let maxToolResultContextCharacters = 6_000
+        static let toolExecutionTimeoutSeconds: TimeInterval = 30
+        static let plannerSystemPrompt = """
+        You are a tool-use planner for an on-device AI assistant. Given the user's message and available tools, decide whether a tool call is needed.
+
+        RULES:
+        - Return ONLY valid JSON, nothing else.
+        - If a tool call is needed, return: {"tool":"TOOL_NAME","args":{"ARG_NAME":"VALUE"}}
+        - If no tool call is needed, return: {"tool":"none"}
+        - For web_search, rewrite the user's question into an optimized search engine query.
+        - Do NOT call tools for greetings, thanks, follow-ups that don't need live data, or questions the model can answer from training data.
+        - Keep search queries short, specific, and entity-focused.
+        - At most one tool call is allowed.
+        """
     }
 }

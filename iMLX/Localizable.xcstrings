@@ -4488,6 +4488,167 @@
         }
       }
     },
+    "tool.activity.planning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deciding whether to search…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decidiendo si buscar…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在决定是否搜索…"
+          }
+        }
+      }
+    },
+    "tool.activity.searching" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Searching: %1$@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buscando: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在搜索：%1$@"
+          }
+        }
+      }
+    },
+    "tool.notice.search_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Web search was unavailable. Answered locally instead."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La búsqueda web no estuvo disponible. Se respondió localmente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络搜索不可用，已使用本地回答。"
+          }
+        }
+      }
+    },
+    "tool.notice.search_skipped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No web search needed for this message."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se necesitó búsqueda web para este mensaje."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此消息不需要网络搜索。"
+          }
+        }
+      }
+    },
+    "tool.trace.web_search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Web Search"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Búsqueda web"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络搜索"
+          }
+        }
+      }
+    },
+    "tool.trace.web_search_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Web Search Failed"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Búsqueda web fallida"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络搜索失败"
+          }
+        }
+      }
+    },
+    "tool.trace.sources_found" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sources found"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld fuentes encontradas"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找到 %lld 个来源"
+          }
+        }
+      }
+    },
     "web_search.menu.accessibility_hint" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4632,19 +4793,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Each message sent with web search enabled is used online. iMLX sends the current raw user message to DuckDuckGo."
+            "value" : "Each message sent with web search enabled is used online. iMLX may rewrite the current message into a short search query before sending it to DuckDuckGo."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Cada mensaje enviado con búsqueda web activada se usa online. iMLX envía el mensaje actual sin procesar a DuckDuckGo."
+            "value" : "Cada mensaje enviado con búsqueda web activada se usa online. iMLX puede reescribir el mensaje actual como una consulta de búsqueda breve antes de enviarlo a DuckDuckGo."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "启用网页搜索后发送的每条消息都会在线使用。iMLX 会把当前原始用户消息发送给 DuckDuckGo。"
+            "value" : "启用网页搜索后发送的每条消息都会在线使用。iMLX 可能会先将当前消息改写成简短的搜索查询，再发送给 DuckDuckGo。"
           }
         }
       }

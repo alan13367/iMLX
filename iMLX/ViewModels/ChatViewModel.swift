@@ -19,6 +19,11 @@ struct ChatMemoryNotice: Equatable, Identifiable {
     }
 }
 
+enum ToolActivityStatus: Equatable {
+    case planning
+    case searching(query: String)
+}
+
 private enum ChatGenerationAbort: LocalizedError {
     case lowMemory(UInt64)
 
@@ -49,6 +54,8 @@ final class ChatViewModel {
     var isThinkingEnabled: Bool = false
     var isWebSearchEnabled: Bool = false
     var webSearchNotice: String?
+    var toolActivityStatus: ToolActivityStatus?
+    var currentToolTrace: ToolCallTrace?
 
     var canUseThinking: Bool {
         resolvedCurrentModel()?.supportsThinking == true
@@ -111,6 +118,8 @@ final class ChatViewModel {
         suppressedMemoryNoticeKey = nil
         isWebSearchEnabled = conversation.webSearchEnabled
         webSearchNotice = nil
+        toolActivityStatus = nil
+        currentToolTrace = nil
         updateThinkingAvailability(for: resolvedCurrentModel())
     }
 
@@ -173,6 +182,10 @@ final class ChatViewModel {
     private func performSendMessage(_ text: String, allowPostReplyTasks: Bool) async -> ChatMessage? {
         let loadedModel = resolvedCurrentModel()
         let history = promptHistory(from: messages, for: loadedModel)
+        Self.debugToolLog(
+            "send start: model=\(loadedModel?.displayName ?? "none") webSearchEnabled=\(isWebSearchEnabled) " +
+            "historyCount=\(history.count) userMessage=\(Self.sanitizedToolLogSnippet(text))"
+        )
         let userMessage = ChatMessage(
             role: .user,
             content: text,
@@ -187,6 +200,7 @@ final class ChatViewModel {
         currentParsedResponse = .empty
         errorMessage = nil
         webSearchNotice = nil
+        toolActivityStatus = nil
         pendingImages.removeAll()
         pendingDocuments.removeAll()
 
@@ -208,44 +222,11 @@ final class ChatViewModel {
         var shouldForceFinalAnswerFollowUp = false
         var peakMemoryMB = await self.currentMemoryUsage()
         let retrievalResult = await self.appState.documentLibraryService.retrieveContext(
-                for: text,
-                documents: self.attachedDocuments
-            )
-        let webRetrievalResult: MessageGroundingResult
-        if isWebSearchEnabled {
-            do {
-                webRetrievalResult = try await appState.webSearchService.retrieveContext(for: text)
-            } catch {
-                webRetrievalResult = MessageGroundingResult(contextBlock: "", sources: [])
-                webSearchNotice = "Web search was unavailable for this turn. iMLX answered locally instead."
-            }
-        } else {
-            webRetrievalResult = MessageGroundingResult(contextBlock: "", sources: [])
-        }
-        let memoryRetrievalResult = await self.appState.retrieveMemoryContext(
             for: text,
-            personaId: persona.id,
-            maxCharacters: self.memoryContextCharacterLimit(for: loadedModel)
+            documents: self.attachedDocuments
         )
-        let memoryContext = self.promptMemoryContext(
-                memoryRetrievalResult.contextBlock,
-                for: loadedModel
-            )
-        let documentContext = self.promptDocumentContext(
-                retrievalResult.contextBlock,
-                for: loadedModel
-            )
-        let webContext = self.promptWebContext(
-            webRetrievalResult.contextBlock,
-            for: loadedModel
-        )
-        let effectiveSystemPrompt = self.mergedSystemPrompt(
-                base: systemPrompt,
-                memoryContext: memoryContext,
-                documentContext: documentContext,
-                webContext: webContext,
-                thinkingEnabled: thinkingEnabled
-            )
+        var toolResult: ToolExecutionResult?
+        var toolTrace: ToolCallTrace?
 
         @MainActor
         func enforceMemorySafety() throws {
@@ -278,6 +259,128 @@ final class ChatViewModel {
         var completedAssistantMessage: ChatMessage?
 
         do {
+            try Task.checkCancellation()
+
+            if isWebSearchEnabled {
+                let tools = await appState.toolCallingService.enabledTools(webSearchEnabled: true)
+                Self.debugToolLog("tool stage enabled: registeredTools=\(tools.map(\.name).joined(separator: ","))")
+                if !tools.isEmpty {
+                    toolActivityStatus = .planning
+                    let decision = try await appState.toolCallingService.plan(
+                        userMessage: text,
+                        history: history,
+                        tools: tools,
+                        using: inferenceService
+                    )
+
+                    switch decision {
+                    case .none:
+                        if loadedModel?.supportsThinking == true,
+                           let fallbackDecision = appState.toolCallingService.heuristicFallbackDecision(
+                            userMessage: text,
+                            tools: tools
+                           ),
+                           case .call(let request) = fallbackDecision {
+                            let query = request.arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let activityQuery = (query?.isEmpty == false) ? query! : text
+                            Self.debugToolLog(
+                                "heuristic fallback: call tool=\(request.toolName) query=\(Self.sanitizedToolLogSnippet(activityQuery))"
+                            )
+                            toolActivityStatus = .searching(query: activityQuery)
+                            let executors = await appState.toolCallingService.executors()
+                            let executionResult = try await appState.toolCallingService.execute(
+                                call: request,
+                                tools: executors
+                            )
+                            toolResult = executionResult
+                            toolTrace = ToolCallTrace(
+                                toolName: request.toolName,
+                                rewrittenQuery: query,
+                                durationSeconds: executionResult.durationSeconds,
+                                success: executionResult.success,
+                                sourceCount: executionResult.sources.count
+                            )
+                            Self.debugToolLog(
+                                "tool result: tool=\(request.toolName) success=\(executionResult.success) " +
+                                "sources=\(executionResult.sources.count) contextChars=\(executionResult.contextBlock.count)"
+                            )
+                            if executionResult.success == false {
+                                webSearchNotice = String.appLocalized("tool.notice.search_failed")
+                            }
+                            currentToolTrace = toolTrace
+                            toolActivityStatus = nil
+                        } else {
+                            Self.debugToolLog("planner decision: none")
+                            toolActivityStatus = nil
+                        }
+                    case .call(let request):
+                        let query = request.arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let activityQuery = (query?.isEmpty == false) ? query! : text
+                        Self.debugToolLog(
+                            "planner decision: call tool=\(request.toolName) query=\(Self.sanitizedToolLogSnippet(activityQuery))"
+                        )
+                        toolActivityStatus = .searching(query: activityQuery)
+                        let executors = await appState.toolCallingService.executors()
+                        let executionResult = try await appState.toolCallingService.execute(
+                            call: request,
+                            tools: executors
+                        )
+                        toolResult = executionResult
+                        toolTrace = ToolCallTrace(
+                            toolName: request.toolName,
+                            rewrittenQuery: query,
+                            durationSeconds: executionResult.durationSeconds,
+                            success: executionResult.success,
+                            sourceCount: executionResult.sources.count
+                        )
+                        Self.debugToolLog(
+                            "tool result: tool=\(request.toolName) success=\(executionResult.success) " +
+                            "sources=\(executionResult.sources.count) contextChars=\(executionResult.contextBlock.count)"
+                        )
+                        if executionResult.success == false {
+                            webSearchNotice = String.appLocalized("tool.notice.search_failed")
+                        }
+                        currentToolTrace = toolTrace
+                        toolActivityStatus = nil
+                    }
+                }
+            } else {
+                Self.debugToolLog("tool stage skipped: web search toggle is off")
+            }
+
+            try Task.checkCancellation()
+
+            let memoryRetrievalResult = await self.appState.retrieveMemoryContext(
+                for: text,
+                personaId: persona.id,
+                maxCharacters: self.memoryContextCharacterLimit(for: loadedModel)
+            )
+            try Task.checkCancellation()
+
+            let memoryContext = self.promptMemoryContext(
+                memoryRetrievalResult.contextBlock,
+                for: loadedModel
+            )
+            let documentContext = self.promptDocumentContext(
+                retrievalResult.contextBlock,
+                for: loadedModel
+            )
+            let webContext = self.promptWebContext(
+                toolResult?.contextBlock ?? "",
+                for: loadedModel
+            )
+            Self.debugToolLog(
+                "generation context: documents=\(retrievalResult.sources.count) webSources=\(toolResult?.sources.count ?? 0) " +
+                "webContextChars=\(webContext.count)"
+            )
+            let effectiveSystemPrompt = self.mergedSystemPrompt(
+                base: systemPrompt,
+                memoryContext: memoryContext,
+                documentContext: documentContext,
+                webContext: webContext,
+                thinkingEnabled: thinkingEnabled
+            )
+
             let stream = await self.inferenceService.generate(
                 prompt: text,
                 images: userMessage.attachedImages,
@@ -367,10 +470,15 @@ final class ChatViewModel {
                         content: accumulatedResponse,
                         retrievedSources: combinedSources(
                             retrievalResult.sources,
-                            webRetrievalResult.sources
+                            toolResult?.sources ?? []
                         ),
+                        toolTrace: toolTrace,
                         generationStats: generationStats
                     )
+                Self.debugToolLog(
+                    "send complete: responseChars=\(accumulatedResponse.count) " +
+                    "toolTrace=\(toolTrace.map(Self.describeToolTrace(_:)) ?? "nil")"
+                )
                 self.messages.append(assistantMessage)
                 if allowPostReplyTasks {
                     self.scheduleMemoryExtraction(
@@ -390,10 +498,13 @@ final class ChatViewModel {
                     )
                 }
             } else {
+                Self.debugToolLog("send complete: empty assistant response")
                 self.saveCurrentConversation()
             }
             Haptics.impactMedium()
         } catch is CancellationError {
+            Self.debugToolLog("send cancelled")
+            toolActivityStatus = nil
             flushResponseToUI(force: true)
             if !accumulatedResponse.isEmpty {
                 await updatePeakMemoryUsage()
@@ -403,8 +514,9 @@ final class ChatViewModel {
                         content: accumulatedResponse,
                         retrievedSources: combinedSources(
                             retrievalResult.sources,
-                            webRetrievalResult.sources
+                            toolResult?.sources ?? []
                         ),
+                        toolTrace: toolTrace,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                             totalTokens: tokenCount,
@@ -418,6 +530,8 @@ final class ChatViewModel {
             }
             self.saveCurrentConversation()
         } catch {
+            Self.debugToolLog("send failed: \(String(describing: error))")
+            toolActivityStatus = nil
             flushResponseToUI(force: true)
             if !accumulatedResponse.isEmpty {
                 await updatePeakMemoryUsage()
@@ -427,8 +541,9 @@ final class ChatViewModel {
                         content: accumulatedResponse,
                         retrievedSources: combinedSources(
                             retrievalResult.sources,
-                            webRetrievalResult.sources
+                            toolResult?.sources ?? []
                         ),
+                        toolTrace: toolTrace,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                             totalTokens: tokenCount,
@@ -447,6 +562,8 @@ final class ChatViewModel {
 
         self.currentResponse = ""
         self.currentParsedResponse = .empty
+        self.toolActivityStatus = nil
+        self.currentToolTrace = nil
         self.isGenerating = false
         self.generationTask = nil
         return completedAssistantMessage
@@ -456,6 +573,7 @@ final class ChatViewModel {
     func stopGeneration() {
         generationTask?.cancel()
         generationTask = nil
+        toolActivityStatus = nil
     }
 
     @MainActor
@@ -540,6 +658,7 @@ final class ChatViewModel {
             activePersonaId = appState.defaultPersona().id
             isWebSearchEnabled = false
             webSearchNotice = nil
+            toolActivityStatus = nil
         }
         return id
     }
@@ -722,6 +841,27 @@ final class ChatViewModel {
     private func combinedSources(_ documentSources: [MessageSource], _ webSources: [MessageSource]) -> [MessageSource]? {
         let sources = documentSources + webSources
         return sources.isEmpty ? nil : sources
+    }
+
+    private static func debugToolLog(_ message: String) {
+#if DEBUG
+        print("[ChatTooling] \(message)")
+#endif
+    }
+
+    private static func sanitizedToolLogSnippet(_ text: String, limit: Int = 180) -> String {
+        let compact = text
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if compact.count <= limit {
+            return compact
+        }
+        return String(compact.prefix(limit)) + "..."
+    }
+
+    private static func describeToolTrace(_ trace: ToolCallTrace) -> String {
+        "tool=\(trace.toolName), query=\(trace.rewrittenQuery ?? "nil"), success=\(trace.success), " +
+        "sources=\(trace.sourceCount), duration=\(trace.durationSeconds.map { String(format: "%.2f", $0) } ?? "nil")s"
     }
 
     @MainActor

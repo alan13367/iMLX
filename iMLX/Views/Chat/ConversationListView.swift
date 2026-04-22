@@ -11,6 +11,7 @@ struct ConversationListView: View {
     var onSelect: (UUID) -> Void
 
     @State private var conversationPendingDeletion: Conversation?
+    @State private var isShowingClearAllAlert = false
 
     private var isShowingDeleteAlert: Binding<Bool> {
         Binding(
@@ -25,6 +26,10 @@ struct ConversationListView: View {
 
     private var showsInlineDeleteButton: Bool {
         UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    private var canClearAllConversations: Bool {
+        !appState.conversations.isEmpty
     }
 
     private var navigationTitle: String {
@@ -65,6 +70,16 @@ struct ConversationListView: View {
         }
         .navigationTitle(navigationTitle)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if canClearAllConversations {
+                    Button(role: .destructive) {
+                        isShowingClearAllAlert = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel(String.appLocalized("conversation.clear_all"))
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: createConversation) {
                     Image(systemName: "plus")
@@ -86,12 +101,31 @@ struct ConversationListView: View {
         } message: { conversation in
             Text(String(format: String.appLocalized("conversation.delete_message"), conversation.displayTitle))
         }
+        .alert(String.appLocalized("conversation.clear_alert_title"), isPresented: $isShowingClearAllAlert) {
+            Button(String.appLocalized("conversation.clear_confirm"), role: .destructive) {
+                clearAllConversations()
+            }
+            Button(String.appLocalized("common.cancel"), role: .cancel) {
+                isShowingClearAllAlert = false
+            }
+        } message: {
+            Text(String.appLocalized("conversation.clear_alert_message"))
+        }
     }
 
     private func deleteConversation(_ conversation: Conversation) {
         appState.deleteConversation(conversation.id)
         if conversationPendingDeletion?.id == conversation.id {
             conversationPendingDeletion = nil
+        }
+    }
+
+    private func clearAllConversations() {
+        appState.clearAllConversations()
+        isShowingClearAllAlert = false
+        conversationPendingDeletion = nil
+        if let id = appState.activeConversationId {
+            onSelect(id)
         }
     }
 

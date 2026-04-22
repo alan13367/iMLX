@@ -131,11 +131,16 @@ final class ToolPlannerParsingTests: XCTestCase {
 
     func testParsesOCRDecisionWithEmptyArgs() {
         let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Read this screenshot",
+            attachedImages: [ChatAttachmentImage(data: Data([0x01]))],
+            detectedPublicURLs: []
+        )
 
         let decision = service.parsePlannerDecision(
             from: #"{"tool":"ocr_image_text","args":{}}"#,
             tools: [ocrTool],
-            context: emptyContext
+            context: context
         )
 
         XCTAssertEqual(
@@ -198,6 +203,79 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertNil(decision)
     }
 
+    func testResolvedDecisionPrefersReadURLOverPlannerWebSearchWhenSingleURLIsPresent() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Summarize https://example.com/article",
+            attachedImages: [],
+            detectedPublicURLs: [URL(string: "https://example.com/article")!]
+        )
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .call(
+                ToolCallRequest(
+                    toolName: "web_search",
+                    arguments: ["query": "example article summary"]
+                )
+            ),
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [readURLTool, webSearchTool],
+            preferThinkingFallback: false
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(
+                ToolCallRequest(
+                    toolName: "read_url",
+                    arguments: ["url": "https://example.com/article"]
+                )
+            )
+        )
+    }
+
+    func testResolvedDecisionForcesOCRForTextFocusedImageRequestWhenPlannerReturnsNone() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "What does this screenshot say?",
+            attachedImages: [ChatAttachmentImage(data: Data([0x01]))],
+            detectedPublicURLs: []
+        )
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .none,
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [ocrTool],
+            preferThinkingFallback: false
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(
+                ToolCallRequest(
+                    toolName: "ocr_image_text",
+                    arguments: [:]
+                )
+            )
+        )
+    }
+
+    func testThinkingFallbackDoesNotTriggerWithoutEligibleWebSearchTool() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .none,
+            userMessage: "What are the latest news in Spain?",
+            context: emptyContext,
+            tools: [ocrTool],
+            preferThinkingFallback: true
+        )
+
+        XCTAssertEqual(decision, .none)
+    }
+
     func testInvalidToolNameFailsClosed() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
@@ -250,7 +328,11 @@ final class ToolPlannerParsingTests: XCTestCase {
                     required: true,
                     description: "A short, specific search engine query."
                 )
-            ]
+            ],
+            metadata: ToolMetadata(
+                requiresWebAccessToggle: true,
+                executionClass: .network
+            )
         )
     }
 
@@ -265,7 +347,12 @@ final class ToolPlannerParsingTests: XCTestCase {
                     required: false,
                     description: "The exact public http or https URL to read."
                 )
-            ]
+            ],
+            metadata: ToolMetadata(
+                requiresWebAccessToggle: true,
+                requiresSinglePublicURL: true,
+                executionClass: .network
+            )
         )
     }
 
@@ -273,7 +360,11 @@ final class ToolPlannerParsingTests: XCTestCase {
         ToolDefinition(
             name: "ocr_image_text",
             description: "Extracts visible text from images attached on the latest user message.",
-            argumentSchema: []
+            argumentSchema: [],
+            metadata: ToolMetadata(
+                requiresAttachedImages: true,
+                executionClass: .local
+            )
         )
     }
 

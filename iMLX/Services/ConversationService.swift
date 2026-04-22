@@ -45,6 +45,19 @@ nonisolated final class ConversationService: @unchecked Sendable {
         try? fileManager.removeItem(at: url)
     }
 
+    func deleteAll() {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: conversationsDirectory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return
+        }
+
+        for file in files where file.pathExtension == "json" {
+            try? fileManager.removeItem(at: file)
+        }
+    }
+
     private func fileURL(for id: UUID) -> URL {
         conversationsDirectory.appendingPathComponent("\(id.uuidString).json")
     }

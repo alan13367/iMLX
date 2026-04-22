@@ -64,6 +64,25 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertTrue(tools.isEmpty)
     }
 
+    func testReadURLToolIsUnavailableWhenMultipleURLsArePresent() async {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Compare https://example.com and https://openai.com",
+            attachedImages: [],
+            detectedPublicURLs: [
+                URL(string: "https://example.com")!,
+                URL(string: "https://openai.com")!
+            ]
+        )
+
+        let tools = await service.enabledTools(
+            webSearchEnabled: true,
+            context: context
+        )
+
+        XCTAssertEqual(tools.map(\.name), ["web_search"])
+    }
+
     func testOCRToolIsAvailableWhenImagesAreAttached() async {
         let service = ToolCallingService(webSearchService: WebSearchService())
         let context = ToolInputContext(

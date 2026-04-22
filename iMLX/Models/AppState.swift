@@ -398,6 +398,23 @@ final class AppState {
         Haptics.impactMedium()
     }
 
+    func clearAllConversations() {
+        let conversationIDs = conversations.map(\.id)
+        conversationService.deleteAll()
+        conversations.removeAll()
+        conversationsByID.removeAll()
+        activeConversationId = nil
+
+        Task {
+            for id in conversationIDs {
+                await documentLibraryService.deleteDocuments(for: id)
+            }
+        }
+
+        _ = createNewConversation()
+        Haptics.notificationSuccess()
+    }
+
     func selectConversation(_ id: UUID) {
         activeConversationId = id
         Haptics.selectionChanged()

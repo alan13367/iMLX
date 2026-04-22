@@ -1,5 +1,43 @@
 import Foundation
 
+enum ToolExecutionFailure: Error, Equatable, Sendable {
+    case invalidArguments(String)
+    case noContent(String)
+    case networkUnavailable(String)
+    case permissionDenied(String)
+    case unavailable(String)
+    case executionFailed(String)
+
+    var status: ToolExecutionStatus {
+        switch self {
+        case .invalidArguments:
+            return .invalidArguments
+        case .noContent:
+            return .noContent
+        case .networkUnavailable:
+            return .networkUnavailable
+        case .permissionDenied:
+            return .permissionDenied
+        case .unavailable:
+            return .unavailable
+        case .executionFailed:
+            return .executionFailed
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .invalidArguments(let message),
+             .noContent(let message),
+             .networkUnavailable(let message),
+             .permissionDenied(let message),
+             .unavailable(let message),
+             .executionFailed(let message):
+            return message
+        }
+    }
+}
+
 protocol ToolExecutor: Sendable {
     var toolName: String { get }
     func execute(arguments: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult
@@ -29,12 +67,21 @@ actor ToolCallingService {
                     required: false,
                     description: "The exact public http or https URL to read."
                 )
-            ]
+            ],
+            metadata: ToolMetadata(
+                requiresWebAccessToggle: true,
+                requiresSinglePublicURL: true,
+                executionClass: .network
+            )
         )
         let ocrTool = ToolDefinition(
             name: "ocr_image_text",
             description: "Extracts visible text from images attached on the latest user message.",
-            argumentSchema: []
+            argumentSchema: [],
+            metadata: ToolMetadata(
+                requiresAttachedImages: true,
+                executionClass: .local
+            )
         )
         let webSearchTool = ToolDefinition(
             name: "web_search",
@@ -46,7 +93,11 @@ actor ToolCallingService {
                     required: true,
                     description: "A short, specific search engine query."
                 )
-            ]
+            ],
+            metadata: ToolMetadata(
+                requiresWebAccessToggle: true,
+                executionClass: .network
+            )
         )
 
         let readURLExecutor = ReadURLToolExecutor(webSearchService: webSearchService)
@@ -71,25 +122,9 @@ actor ToolCallingService {
     }
 
     func enabledTools(webSearchEnabled: Bool, context: ToolInputContext) -> [ToolDefinition] {
-        var enabled: [ToolDefinition] = []
-
-        if webSearchEnabled,
-           context.singleDetectedPublicURL != nil,
-           let readURLTool = registeredTools.first(where: { $0.name == "read_url" }) {
-            enabled.append(readURLTool)
+        registeredTools.filter { tool in
+            isToolEnabled(tool, webSearchEnabled: webSearchEnabled, context: context)
         }
-
-        if !context.attachedImages.isEmpty,
-           let ocrTool = registeredTools.first(where: { $0.name == "ocr_image_text" }) {
-            enabled.append(ocrTool)
-        }
-
-        if webSearchEnabled,
-           let webSearchTool = registeredTools.first(where: { $0.name == "web_search" }) {
-            enabled.append(webSearchTool)
-        }
-
-        return enabled
     }
 
     func executors() -> [String: any ToolExecutor] {
@@ -107,7 +142,11 @@ actor ToolCallingService {
         }
 
         guard let query = heuristicWebSearchQuery(for: userMessage),
-              let arguments = validatedArguments(["query": query], for: webSearchTool, context: nil) else {
+              case .success(let arguments) = validatedArguments(
+                ["query": query],
+                for: webSearchTool,
+                context: nil
+              ) else {
             return nil
         }
 
@@ -126,7 +165,7 @@ actor ToolCallingService {
 
         if let directURL = context.singleDetectedPublicURL,
            let readURLTool = toolsByName["read_url"],
-           let arguments = validatedArguments(
+           case .success(let arguments) = validatedArguments(
                 ["url": directURL.absoluteString],
                 for: readURLTool,
                 context: context
@@ -152,7 +191,11 @@ actor ToolCallingService {
 
         if let ocrTool = toolsByName["ocr_image_text"],
            shouldForceOCR(for: userMessage, context: context),
-           let arguments = validatedArguments([:], for: ocrTool, context: context) {
+           case .success(let arguments) = validatedArguments(
+                [:],
+                for: ocrTool,
+                context: context
+           ) {
             Self.debugLog("heuristic fallback selected ocr_image_text for text-focused image request")
             return .call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments))
         }
@@ -227,14 +270,42 @@ actor ToolCallingService {
         context: ToolInputContext
     ) async throws -> ToolExecutionResult {
         let startTime = Date()
+        guard let toolDefinition = registeredTools.first(where: { $0.name == call.toolName }) else {
+            Self.debugLog("execution skipped: no tool definition registered for \(call.toolName)")
+            return failureResult(
+                toolName: call.toolName,
+                status: .unavailable,
+                message: "Tool is not registered.",
+                durationSeconds: 0
+            )
+        }
+
+        switch validatedArguments(
+            Dictionary(uniqueKeysWithValues: call.arguments.map { ($0.key, $0.value as Any) }),
+            for: toolDefinition,
+            context: context
+        ) {
+        case .failure(let failure):
+            Self.debugLog(
+                "execution rejected: tool=\(call.toolName) status=\(failure.status.rawValue) " +
+                "message=\(Self.sanitizedSnippet(failure.message))"
+            )
+            return failureResult(
+                toolName: call.toolName,
+                status: failure.status,
+                message: failure.message,
+                durationSeconds: Date().timeIntervalSince(startTime)
+            )
+        case .success:
+            break
+        }
 
         guard let executor = tools[call.toolName] else {
             Self.debugLog("execution skipped: no executor registered for \(call.toolName)")
-            return ToolExecutionResult(
+            return failureResult(
                 toolName: call.toolName,
-                contextBlock: "",
-                sources: [],
-                success: false,
+                status: .unavailable,
+                message: "No executor is registered for this tool.",
                 durationSeconds: 0
             )
         }
@@ -249,27 +320,49 @@ actor ToolCallingService {
             let clippedContext = clippedToolContext(result.contextBlock)
             let finalResult = ToolExecutionResult(
                 toolName: result.toolName,
+                status: result.status == .success && !clippedContext.isEmpty ? .success : .noContent,
+                message: result.status == .success && !clippedContext.isEmpty
+                    ? result.message
+                    : (result.message ?? "Tool returned no usable context."),
                 contextBlock: clippedContext,
-                sources: result.sources,
-                success: result.success && !clippedContext.isEmpty,
+                sources: result.status == .success && !clippedContext.isEmpty ? result.sources : [],
                 durationSeconds: result.durationSeconds
             )
             Self.debugLog(
-                "execution finished: tool=\(call.toolName) success=\(finalResult.success) " +
+                "execution finished: tool=\(call.toolName) status=\(finalResult.status.rawValue) " +
                 "sources=\(finalResult.sources.count) contextChars=\(finalResult.contextBlock.count) " +
+                "message=\(Self.sanitizedSnippet(finalResult.message ?? "nil")) " +
                 "duration=\(String(format: "%.2f", finalResult.durationSeconds))s"
             )
             return finalResult
         } catch is CancellationError {
             Self.debugLog("execution cancelled: tool=\(call.toolName)")
             throw CancellationError()
+        } catch ToolExecutionError.timedOut {
+            Self.debugLog("execution timed out: tool=\(call.toolName)")
+            return failureResult(
+                toolName: call.toolName,
+                status: .timedOut,
+                message: "Tool execution timed out.",
+                durationSeconds: Date().timeIntervalSince(startTime)
+            )
+        } catch let failure as ToolExecutionFailure {
+            Self.debugLog(
+                "execution failed: tool=\(call.toolName) status=\(failure.status.rawValue) " +
+                "message=\(Self.sanitizedSnippet(failure.message))"
+            )
+            return failureResult(
+                toolName: call.toolName,
+                status: failure.status,
+                message: failure.message,
+                durationSeconds: Date().timeIntervalSince(startTime)
+            )
         } catch {
             Self.debugLog("execution failed: tool=\(call.toolName) error=\(String(describing: error))")
-            return ToolExecutionResult(
+            return failureResult(
                 toolName: call.toolName,
-                contextBlock: "",
-                sources: [],
-                success: false,
+                status: .executionFailed,
+                message: error.localizedDescription,
                 durationSeconds: Date().timeIntervalSince(startTime)
             )
         }
@@ -301,7 +394,11 @@ actor ToolCallingService {
             }
 
             let rawArguments = dictionary["args"] as? [String: Any] ?? [:]
-            guard let arguments = validatedArguments(rawArguments, for: toolDefinition, context: context) else {
+            guard case .success(let arguments) = validatedArguments(
+                rawArguments,
+                for: toolDefinition,
+                context: context
+            ) else {
                 continue
             }
 
@@ -329,54 +426,43 @@ actor ToolCallingService {
         _ rawArguments: [String: Any],
         for toolDefinition: ToolDefinition,
         context: ToolInputContext?
-    ) -> [String: String]? {
+    ) -> Result<[String: String], ToolExecutionFailure> {
+        if toolDefinition.metadata.requiresAttachedImages,
+           context?.attachedImages.isEmpty != false {
+            return .failure(.invalidArguments("This tool requires at least one attached image on the latest user message."))
+        }
+
+        if toolDefinition.metadata.requiresSinglePublicURL,
+           context?.singleDetectedPublicURL == nil,
+           rawArguments["url"] == nil {
+            return .failure(.invalidArguments("This tool requires exactly one public http or https URL in the latest user message."))
+        }
+
         var validated: [String: String] = [:]
 
         for argument in toolDefinition.argumentSchema {
             let rawValue = rawArguments[argument.name]
-            let stringValue = stringValue(from: rawValue)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            switch argument.name {
-            case "query":
-                let candidateValue = stringValue ?? ""
-                if argument.required && candidateValue.isEmpty {
-                    return nil
+            switch normalizedArgumentValue(argument, rawValue: rawValue, context: context) {
+            case .success(let normalized):
+                if let normalized, !normalized.isEmpty {
+                    validated[argument.name] = normalized
                 }
-                guard !candidateValue.isEmpty else { continue }
-                let clamped = String(candidateValue.prefix(Constants.ToolCalling.maxQueryLength))
-                guard !clamped.isEmpty else { return nil }
-                validated[argument.name] = clamped
-
-            case "url":
-                let resolvedURL = stringValue
-                    ?? context?.singleDetectedPublicURL?.absoluteString
-                if argument.required && (resolvedURL?.isEmpty != false) {
-                    return nil
-                }
-                guard let resolvedURL, !resolvedURL.isEmpty,
-                      let url = URL(string: resolvedURL),
-                      let scheme = url.scheme?.lowercased(),
-                      ["http", "https"].contains(scheme),
-                      url.host != nil else {
-                    continue
-                }
-                validated[argument.name] = url.absoluteString
-
-            default:
-                if argument.required && (stringValue?.isEmpty != false) {
-                    return nil
-                }
-                guard let stringValue, !stringValue.isEmpty else { continue }
-                validated[argument.name] = stringValue
+            case .failure(let failure):
+                return .failure(failure)
             }
         }
 
-        if toolDefinition.name == "read_url", validated["url"]?.isEmpty != false {
-            return nil
+        if toolDefinition.metadata.requiresSinglePublicURL,
+           validated["url"]?.isEmpty != false,
+           let fallbackURL = context?.singleDetectedPublicURL?.absoluteString {
+            validated["url"] = fallbackURL
         }
 
-        return validated
+        if toolDefinition.name == "read_url", validated["url"]?.isEmpty != false {
+            return .failure(.invalidArguments("A readable public http or https URL is required for this tool."))
+        }
+
+        return .success(validated)
     }
 
     private nonisolated func normalizedRequest(
@@ -384,12 +470,15 @@ actor ToolCallingService {
         context: ToolInputContext,
         toolsByName: [String: ToolDefinition]
     ) -> ToolCallRequest? {
-        guard let toolDefinition = toolsByName[request.toolName],
-              let arguments = validatedArguments(
-                Dictionary(uniqueKeysWithValues: request.arguments.map { ($0.key, $0.value as Any) }),
-                for: toolDefinition,
-                context: context
-              ) else {
+        guard let toolDefinition = toolsByName[request.toolName] else {
+            return nil
+        }
+
+        guard case .success(let arguments) = validatedArguments(
+            Dictionary(uniqueKeysWithValues: request.arguments.map { ($0.key, $0.value as Any) }),
+            for: toolDefinition,
+            context: context
+        ) else {
             return nil
         }
 
@@ -445,19 +534,6 @@ actor ToolCallingService {
         """
     }
 
-    private nonisolated func stringValue(from rawValue: Any?) -> String? {
-        switch rawValue {
-        case let value as Bool:
-            return value ? "true" : "false"
-        case let value as String:
-            return value
-        case let value as NSNumber:
-            return value.stringValue
-        default:
-            return nil
-        }
-    }
-
     private func withTimeout<T: Sendable>(
         seconds: TimeInterval,
         operation: @escaping @Sendable () async throws -> T
@@ -483,6 +559,153 @@ actor ToolCallingService {
             return context
         }
         return String(context.prefix(Constants.ToolCalling.maxToolResultContextCharacters))
+    }
+
+    private nonisolated func isToolEnabled(
+        _ tool: ToolDefinition,
+        webSearchEnabled: Bool,
+        context: ToolInputContext
+    ) -> Bool {
+        if tool.metadata.requiresWebAccessToggle && !webSearchEnabled {
+            return false
+        }
+        if tool.metadata.requiresAttachedImages && context.attachedImages.isEmpty {
+            return false
+        }
+        if tool.metadata.requiresSinglePublicURL && context.singleDetectedPublicURL == nil {
+            return false
+        }
+        return true
+    }
+
+    private nonisolated func normalizedArgumentValue(
+        _ argument: ToolArgument,
+        rawValue: Any?,
+        context: ToolInputContext?
+    ) -> Result<String?, ToolExecutionFailure> {
+        switch argument.name {
+        case "query":
+            guard let rawValue else {
+                return argument.required
+                    ? .failure(.invalidArguments("Argument `query` is required."))
+                    : .success(nil)
+            }
+            guard let query = normalizedStringValue(from: rawValue) else {
+                return .failure(.invalidArguments("Argument `query` must be a string."))
+            }
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return .failure(.invalidArguments("Argument `query` must not be empty."))
+            }
+            let clamped = String(trimmed.prefix(Constants.ToolCalling.maxQueryLength))
+            guard !clamped.isEmpty else {
+                return .failure(.invalidArguments("Argument `query` must not be empty."))
+            }
+            return .success(clamped)
+
+        case "url":
+            let candidate = normalizedStringValue(from: rawValue)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? context?.singleDetectedPublicURL?.absoluteString
+            guard let candidate, !candidate.isEmpty else {
+                return argument.required
+                    ? .failure(.invalidArguments("Argument `url` is required."))
+                    : .success(nil)
+            }
+            guard let normalizedURL = normalizedPublicURL(from: candidate) else {
+                return .failure(.invalidArguments("Argument `url` must be a public http or https URL."))
+            }
+            return .success(normalizedURL.absoluteString)
+
+        default:
+            return normalizedPrimitiveValue(for: argument, rawValue: rawValue)
+        }
+    }
+
+    private nonisolated func normalizedPrimitiveValue(
+        for argument: ToolArgument,
+        rawValue: Any?
+    ) -> Result<String?, ToolExecutionFailure> {
+        guard let rawValue else {
+            return argument.required
+                ? .failure(.invalidArguments("Argument `\(argument.name)` is required."))
+                : .success(nil)
+        }
+
+        switch argument.type {
+        case "string":
+            guard let value = normalizedStringValue(from: rawValue) else {
+                return .failure(.invalidArguments("Argument `\(argument.name)` must be a string."))
+            }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if argument.required && trimmed.isEmpty {
+                return .failure(.invalidArguments("Argument `\(argument.name)` must not be empty."))
+            }
+            return .success(trimmed.isEmpty ? nil : trimmed)
+
+        case "number":
+            if let number = rawValue as? NSNumber {
+                return .success(number.stringValue)
+            }
+            if let string = normalizedStringValue(from: rawValue)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               Double(string) != nil {
+                return .success(string)
+            }
+            return .failure(.invalidArguments("Argument `\(argument.name)` must be a number."))
+
+        case "boolean":
+            if let value = rawValue as? Bool {
+                return .success(value ? "true" : "false")
+            }
+            if let string = normalizedStringValue(from: rawValue)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased(),
+               ["true", "false"].contains(string) {
+                return .success(string)
+            }
+            return .failure(.invalidArguments("Argument `\(argument.name)` must be a boolean."))
+
+        default:
+            guard let value = normalizedStringValue(from: rawValue) else {
+                return .failure(.invalidArguments("Argument `\(argument.name)` is invalid."))
+            }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if argument.required && trimmed.isEmpty {
+                return .failure(.invalidArguments("Argument `\(argument.name)` must not be empty."))
+            }
+            return .success(trimmed.isEmpty ? nil : trimmed)
+        }
+    }
+
+    private nonisolated func normalizedStringValue(from rawValue: Any?) -> String? {
+        rawValue as? String
+    }
+
+    private nonisolated func normalizedPublicURL(from candidate: String) -> URL? {
+        guard let url = URL(string: candidate),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil else {
+            return nil
+        }
+        return url
+    }
+
+    private nonisolated func failureResult(
+        toolName: String,
+        status: ToolExecutionStatus,
+        message: String?,
+        durationSeconds: TimeInterval
+    ) -> ToolExecutionResult {
+        ToolExecutionResult(
+            toolName: toolName,
+            status: status,
+            message: message,
+            contextBlock: "",
+            sources: [],
+            durationSeconds: durationSeconds
+        )
     }
 
     private nonisolated func jsonPayloads(in text: String) -> [String] {
@@ -579,7 +802,11 @@ actor ToolCallingService {
             switch toolName {
             case "web_search":
                 guard let query = inferredWebSearchQuery(from: text, userMessage: userMessage),
-                      let arguments = validatedArguments(["query": query], for: toolDefinition, context: context) else {
+                      case .success(let arguments) = validatedArguments(
+                        ["query": query],
+                        for: toolDefinition,
+                        context: context
+                      ) else {
                     continue
                 }
                 Self.debugLog("planner recovered prose decision for \(toolName)")
@@ -587,14 +814,22 @@ actor ToolCallingService {
 
             case "read_url":
                 guard let url = inferredReadURL(from: text, context: context),
-                      let arguments = validatedArguments(["url": url.absoluteString], for: toolDefinition, context: context) else {
+                      case .success(let arguments) = validatedArguments(
+                        ["url": url.absoluteString],
+                        for: toolDefinition,
+                        context: context
+                      ) else {
                     continue
                 }
                 Self.debugLog("planner recovered prose decision for \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "ocr_image_text":
-                guard let arguments = validatedArguments([:], for: toolDefinition, context: context) else {
+                guard case .success(let arguments) = validatedArguments(
+                    [:],
+                    for: toolDefinition,
+                    context: context
+                ) else {
                     continue
                 }
                 Self.debugLog("planner recovered prose decision for \(toolName)")
@@ -725,6 +960,8 @@ actor ToolCallingService {
             "read this screenshot",
             "read the screenshot",
             "what does this say",
+            "what does this image say",
+            "what does this screenshot say",
             "what does the image say",
             "what does the screenshot say",
             "copy the text",
@@ -845,15 +1082,33 @@ private struct WebSearchToolExecutor: ToolExecutor {
     let webSearchService: WebSearchService
 
     func execute(arguments: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
-        let query = arguments["query"] ?? ""
+        let query = (arguments["query"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            throw ToolExecutionFailure.invalidArguments("A search query is required.")
+        }
+
         let startTime = Date()
-        let result = try await webSearchService.retrieveContext(for: query)
+        let result: MessageGroundingResult
+        do {
+            result = try await webSearchService.retrieveContext(for: query)
+        } catch {
+            if error.isNetworkAvailabilityFailure {
+                throw ToolExecutionFailure.networkUnavailable("Web search was unavailable.")
+            }
+            throw ToolExecutionFailure.executionFailed("Web search failed.")
+        }
+
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("Web search did not return usable results.")
+        }
+
         let duration = Date().timeIntervalSince(startTime)
         return ToolExecutionResult(
             toolName: toolName,
+            status: .success,
+            message: nil,
             contextBlock: result.contextBlock,
             sources: result.sources,
-            success: !result.contextBlock.isEmpty,
             durationSeconds: duration
         )
     }
@@ -865,25 +1120,45 @@ private struct ReadURLToolExecutor: ToolExecutor {
 
     func execute(arguments: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult {
         let startTime = Date()
-        let urlString = arguments["url"] ?? context.singleDetectedPublicURL?.absoluteString ?? ""
-        guard let url = URL(string: urlString) else {
-            return ToolExecutionResult(
-                toolName: toolName,
-                contextBlock: "",
-                sources: [],
-                success: false,
-                durationSeconds: 0
-            )
+        let urlString = (arguments["url"] ?? context.singleDetectedPublicURL?.absoluteString ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = normalizedPublicURL(urlString) else {
+            throw ToolExecutionFailure.invalidArguments("A readable public http or https URL is required.")
         }
-        let result = try await webSearchService.retrieveContext(forDirectURL: url, userQuery: context.latestUserMessage)
+
+        let result: MessageGroundingResult
+        do {
+            result = try await webSearchService.retrieveContext(forDirectURL: url, userQuery: context.latestUserMessage)
+        } catch {
+            if error.isNetworkAvailabilityFailure {
+                throw ToolExecutionFailure.networkUnavailable("That link could not be read because network access was unavailable.")
+            }
+            throw ToolExecutionFailure.executionFailed("That link could not be read.")
+        }
+
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("That link did not contain readable content.")
+        }
+
         let duration = Date().timeIntervalSince(startTime)
         return ToolExecutionResult(
             toolName: toolName,
+            status: .success,
+            message: nil,
             contextBlock: result.contextBlock,
             sources: result.sources,
-            success: !result.contextBlock.isEmpty,
             durationSeconds: duration
         )
+    }
+
+    private func normalizedPublicURL(_ candidate: String) -> URL? {
+        guard let url = URL(string: candidate),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil else {
+            return nil
+        }
+        return url
     }
 }
 
@@ -892,16 +1167,64 @@ private struct OCRImageTextToolExecutor: ToolExecutor {
     let imageOCRService: ImageOCRService
 
     func execute(arguments _: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult {
+        guard !context.attachedImages.isEmpty else {
+            throw ToolExecutionFailure.invalidArguments("At least one attached image is required for OCR.")
+        }
+
         let startTime = Date()
-        let result = try await imageOCRService.retrieveContext(from: context.attachedImages)
+        let result: MessageGroundingResult
+        do {
+            result = try await imageOCRService.retrieveContext(from: context.attachedImages)
+        } catch {
+            throw ToolExecutionFailure.executionFailed("Image text extraction failed.")
+        }
+
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("No readable text was found in the attached images.")
+        }
+
         let duration = Date().timeIntervalSince(startTime)
         return ToolExecutionResult(
             toolName: toolName,
+            status: .success,
+            message: nil,
             contextBlock: result.contextBlock,
             sources: result.sources,
-            success: !result.contextBlock.isEmpty,
             durationSeconds: duration
         )
+    }
+}
+
+private extension Error {
+    var isNetworkAvailabilityFailure: Bool {
+        let urlError: URLError?
+        if let error = self as? URLError {
+            urlError = error
+        } else {
+            let nsError = self as NSError
+            if nsError.domain == NSURLErrorDomain {
+                urlError = URLError(.init(rawValue: nsError.code))
+            } else {
+                urlError = nil
+            }
+        }
+
+        guard let urlError else { return false }
+        switch urlError.code {
+        case .notConnectedToInternet,
+             .networkConnectionLost,
+             .timedOut,
+             .cannotFindHost,
+             .cannotConnectToHost,
+             .dnsLookupFailed,
+             .internationalRoamingOff,
+             .callIsActive,
+             .dataNotAllowed,
+             .resourceUnavailable:
+            return true
+        default:
+            return false
+        }
     }
 }
 

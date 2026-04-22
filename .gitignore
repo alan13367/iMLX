@@ -8,3 +8,4 @@ iMLX/Conversations/.DS_Store
 .DerivedData/
 iMLX.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserstate
+.venv*

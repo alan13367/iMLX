@@ -216,11 +216,6 @@ struct ChatView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                isInputFocused = false
-            }
-        )
         .simultaneousGesture(openConversationHistoryGesture)
         .task(id: appState.selectedModel?.id) {
             if let model = appState.selectedModel,
@@ -311,7 +306,10 @@ struct ChatView: View {
         ZStack {
             ChatEmptyStateView()
                 .opacity(isShowingEmptyState ? 1 : 0)
-                .allowsHitTesting(false)
+                .allowsHitTesting(isShowingEmptyState)
+                .onTapGesture {
+                    isInputFocused = false
+                }
 
             ChatMessageListSection(
                 messages: chatViewModel.messages,
@@ -320,7 +318,8 @@ struct ChatView: View {
                 parsedResponse: chatViewModel.currentParsedResponse,
                 toolActivityStatus: chatViewModel.toolActivityStatus,
                 currentToolTrace: chatViewModel.currentToolTrace,
-                conversationResetKey: appState.activeConversationId ?? conversationId
+                conversationResetKey: appState.activeConversationId ?? conversationId,
+                onTranscriptTap: { isInputFocused = false }
             )
             .opacity(isShowingEmptyState ? 0 : 1)
             .allowsHitTesting(!isShowingEmptyState)
@@ -655,6 +654,7 @@ private struct ChatMessageListSection: View {
     let toolActivityStatus: ToolActivityStatus?
     let currentToolTrace: ToolCallTrace?
     let conversationResetKey: UUID
+    let onTranscriptTap: () -> Void
 
     @State private var streamingScrollTask: Task<Void, Never>?
     @State private var streamingAutoscrollEnabled = true
@@ -703,6 +703,9 @@ private struct ChatMessageListSection: View {
                     .padding(.horizontal)
                     .padding(.vertical, 12)
                 }
+                .simultaneousGesture(
+                    TapGesture().onEnded(onTranscriptTap)
+                )
                 .onScrollGeometryChange(for: ChatScrollState.self, of: { geometry in
                     let contentHeight = geometry.contentSize.height
                     let visibleHeight = geometry.visibleRect.height

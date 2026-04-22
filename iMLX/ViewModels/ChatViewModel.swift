@@ -305,19 +305,18 @@ final class ChatViewModel {
                     toolTrace = ToolCallTrace(
                         toolName: request.toolName,
                         displayInput: displayInput,
+                        status: executionResult.status,
                         durationSeconds: executionResult.durationSeconds,
                         success: executionResult.success,
                         sourceCount: executionResult.sources.count
                     )
                     Self.debugToolLog(
-                        "tool result: tool=\(request.toolName) success=\(executionResult.success) " +
-                        "sources=\(executionResult.sources.count) contextChars=\(executionResult.contextBlock.count)"
+                        "tool result: tool=\(request.toolName) status=\(executionResult.status.rawValue) " +
+                        "sources=\(executionResult.sources.count) contextChars=\(executionResult.contextBlock.count) " +
+                        "message=\(Self.sanitizedToolLogSnippet(executionResult.message ?? "nil"))"
                     )
-                    if executionResult.success == false {
-                        toolNotice = self.toolFailureNotice(
-                            toolName: request.toolName,
-                            context: toolContext
-                        )
+                    if executionResult.status != .success {
+                        toolNotice = self.toolFailureNotice(result: executionResult, context: toolContext)
                     }
                     currentToolTrace = toolTrace
                     toolActivityStatus = nil
@@ -835,17 +834,47 @@ final class ChatViewModel {
         }
     }
 
-    private func toolFailureNotice(toolName: String, context: ToolInputContext) -> String {
-        switch toolName {
-        case "read_url":
-            return String.appLocalized("tool.notice.read_url_failed")
-        case "ocr_image_text":
-            return context.attachedImages.isEmpty
-                ? String.appLocalized("tool.notice.ocr_failed")
-                : String.appLocalized("tool.notice.ocr_no_text")
-        case "web_search":
-            return String.appLocalized("tool.notice.search_failed")
-        default:
+    private func toolFailureNotice(result: ToolExecutionResult, context: ToolInputContext) -> String {
+        switch result.status {
+        case .networkUnavailable, .timedOut, .permissionDenied, .unavailable:
+            switch result.toolName {
+            case "read_url":
+                return String.appLocalized("tool.notice.read_url_failed")
+            case "ocr_image_text":
+                return String.appLocalized("tool.notice.ocr_failed")
+            case "web_search":
+                return String.appLocalized("tool.notice.search_failed")
+            default:
+                return String.appLocalized("tool.notice.search_failed")
+            }
+
+        case .noContent:
+            switch result.toolName {
+            case "read_url":
+                return String.appLocalized("tool.notice.read_url_no_content")
+            case "ocr_image_text":
+                return context.attachedImages.isEmpty
+                    ? String.appLocalized("tool.notice.ocr_failed")
+                    : String.appLocalized("tool.notice.ocr_no_text")
+            case "web_search":
+                return String.appLocalized("tool.notice.search_no_content")
+            default:
+                return String.appLocalized("tool.notice.search_failed")
+            }
+
+        case .invalidArguments, .executionFailed:
+            switch result.toolName {
+            case "read_url":
+                return String.appLocalized("tool.notice.read_url_failed")
+            case "ocr_image_text":
+                return String.appLocalized("tool.notice.ocr_failed")
+            case "web_search":
+                return String.appLocalized("tool.notice.search_failed")
+            default:
+                return String.appLocalized("tool.notice.search_failed")
+            }
+
+        case .success:
             return String.appLocalized("tool.notice.search_failed")
         }
     }
@@ -867,7 +896,7 @@ final class ChatViewModel {
     }
 
     private static func describeToolTrace(_ trace: ToolCallTrace) -> String {
-        "tool=\(trace.toolName), input=\(trace.displayInput ?? "nil"), success=\(trace.success), " +
+        "tool=\(trace.toolName), input=\(trace.displayInput ?? "nil"), status=\(trace.status?.rawValue ?? "nil"), success=\(trace.success), " +
         "sources=\(trace.sourceCount), duration=\(trace.durationSeconds.map { String(format: "%.2f", $0) } ?? "nil")s"
     }
 

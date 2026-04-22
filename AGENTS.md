@@ -37,6 +37,24 @@ xcodebuild -resolvePackageDependencies \
   -scheme "iMLX"
 ```
 
+### Build tests for simulator
+```bash
+xcodebuild build-for-testing \
+  -project "iMLX.xcodeproj" \
+  -scheme "iMLX" \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO
+```
+
+### Run tool-calling tests
+```bash
+xcodebuild test-without-building \
+  -project "iMLX.xcodeproj" \
+  -scheme "iMLX" \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:iMLXTests
+```
+
 ### Install Metal toolchain for CLI builds
 ```bash
 xcodebuild -downloadComponent MetalToolchain
@@ -50,10 +68,17 @@ xcodebuild -downloadComponent MetalToolchain
 - Shared app state: `AppState` owns shared services and persisted selection state
 - Chat orchestration: `ChatViewModel` owns transcript state, send/generation flow, streaming UI state, attachments, persona selection, and save/update behavior
 - Conversations: each generation rebuilds prompt/session state from visible conversation history rather than relying on hidden long-lived chat session state
+- Tool calling: `ToolCallingService` is the generic planner/executor layer for model-driven tools; it plans with the currently loaded model, executes at most one tool per turn, and fails closed to local generation on invalid planner output
+- Tool inputs: tool availability is current-turn-aware via `ToolInputContext` (latest message text, attached images, detected public URLs)
+- Current tools: `read_url`, `ocr_image_text`, and `web_search`
+- Tool gating: the Web Search toggle gates internet-dependent tools (`web_search` and `read_url`); local OCR remains available when the latest user message includes attached images
+- Tool precedence: one tool call per turn, with deterministic preference for `read_url` over OCR/text extraction fallbacks over `web_search`
+- Retrieval grounding: assistant source attribution can now come from document, web, or image/OCR results
 - Persona system: each conversation binds to a `Persona`; persona selection changes prompting behavior but does not auto-load a different model
 - Documents: local PDF/CSV/text files are imported, extracted, chunked, indexed, and retrieved locally through `DocumentLibraryService`
 - Memory: compact user memories are stored locally through `MemorySystem`; ingestion is source-grounded and multilingual, evidence and lifecycle events are persisted in SQLite/GRDB, and bounded retrieval explanations are injected into prompt context when relevant
 - Vision: vision-capable models must load through the VLM path, not the text-only loader
+- OCR: attached-image text extraction is local and on-device via Vision (`ImageOCRService`); v1 only reads images attached on the current user message
 - TTS vendor boundary: `iMLX/Vendor/KokoroSwift` is a compatibility layer over downloaded Kokoro checkpoints; checkpoint-specific tensor normalization belongs in `WeightLoader.swift` and `QuantizedModuleFactory.swift`, not scattered through model code
 
 ## Important Constraints
@@ -68,6 +93,10 @@ xcodebuild -downloadComponent MetalToolchain
 8. The Xcode target defaults actor isolation to `MainActor`, so pure helpers that run off the main actor may need explicit `nonisolated` annotations.
 9. Memory extraction must only persist facts grounded in the user message. Do not turn assistant answers, recommendations, prices, or unquoted generated details into memories.
 10. Current Kokoro checkpoints are not shape-compatible with the original vendor assumptions: many linear and embedding tensors are quantized (`U32` packed weights plus `scales`/`biases`), LSTM weights use newer key names, and conv/`weight_v` tensors already arrive in MLX-friendly layout. Do not blindly transpose or load them as dense tensors.
+11. Tool-calling planner output is intentionally treated as untrusted and brittle. Invalid or ambiguous planner output must degrade to `.none`, not to a guessed tool call, except for narrowly defined deterministic fallbacks already encoded in `ToolCallingService`.
+12. Do not treat enabling Web Search as permission to always search. Search is now a tool decision, not a side effect of the toggle.
+13. `read_url` and OCR are grounded only in the latest user turn in v1. Do not silently scrape older messages or attachments when planning/executing these tools.
+14. `read_url` v1 is for a single public `http/https` URL in the latest message. Multiple URLs should force clarification instead of arbitrary selection.
 
 ## Codebase Map
 
@@ -85,9 +114,14 @@ iMLX/
 High-value files:
 - `iMLX/Models/AppState.swift`
 - `iMLX/Models/UserMemory.swift`
+- `iMLX/Models/ToolCallingModels.swift`
+- `iMLX/Models/MessageSource.swift`
 - `iMLX/ViewModels/ChatViewModel.swift`
 - `iMLX/Services/InferenceService.swift`
 - `iMLX/Services/DocumentLibraryService.swift`
+- `iMLX/Services/ToolCallingService.swift`
+- `iMLX/Services/WebSearchService.swift`
+- `iMLX/Services/ImageOCRService.swift`
 - `iMLX/Services/MemoryService.swift`
 - `iMLX/Services/MemoryStore.swift`
 - `iMLX/Services/MemoryDatabase.swift`
@@ -95,7 +129,12 @@ High-value files:
 - `iMLX/Services/MemoryService+Retrieval.swift`
 - `iMLX/Services/MemoryService+Shared.swift`
 - `iMLX/Services/MemorySupport.swift`
+- `iMLX/Views/Chat/ChatView.swift`
 - `iMLX/Utilities/Constants.swift`
+- `iMLX/Localizable.xcstrings`
+- `iMLXTests/ToolPlannerParsingTests.swift`
+- `iMLXTests/ToolRegistryTests.swift`
+- `iMLXTests/ToolExecutionTests.swift`
 
 ## Memory Architecture
 
@@ -116,6 +155,21 @@ High-value files:
 - Exact curated model entries live in `iMLX/Utilities/Constants.swift`
 - Built-in personas are seeded by `PersonaService`
 - If a task depends on exact model capabilities or IDs, read `Constants.swift` instead of duplicating assumptions from this file
+- Tool-planner behavior also depends on model characteristics. Thinking-tuned checkpoints may need deterministic fallbacks handled in app code rather than assuming strict JSON planner output compliance.
+
+## Tool Calling Notes
+
+- `ToolCallingService` owns tool registry, planner prompt construction, planner-output parsing, deterministic arbitration, timeout handling, and executor dispatch.
+- The planner uses the currently loaded MLX model with a short deterministic generation budget. It is not a second model or a cloud fallback.
+- Current registered tools:
+- `read_url`: reads one pasted public URL directly and is gated by the Web Search toggle because it requires network access
+  - `ocr_image_text`: extracts text from images attached on the latest user message
+  - `web_search`: live web retrieval, still gated by the conversation’s Web Search toggle
+- Deterministic arbitration currently prefers:
+  1. `read_url` when the latest message contains exactly one supported public URL
+  2. `ocr_image_text` for text-focused image requests when the planner returns `.none`
+  3. `web_search` heuristics for obvious live-data requests when planner output fails on some thinking-oriented models
+- Persisted tool traces are stored on assistant `ChatMessage`s. Backward compatibility matters because older conversation JSON may still decode `rewrittenQuery` instead of `displayInput`.
 
 ## TTS Checkpoints
 
@@ -131,6 +185,9 @@ High-value files:
 - Keep all UI state mutations on `@MainActor`
 - Use `actor` for services that touch MLX or require serialized access
 - Use `AsyncThrowingStream` for token streaming
+- Keep tool contracts generic and data-driven. New tools should add a `ToolDefinition`, executor, and context-aware enablement path rather than branching ad hoc in `ChatViewModel`
+- Preserve backward-compatible decoding for persisted conversation models when adding fields to `ChatMessage`, `Conversation`, tool traces, or source types
+- Keep tool results grounded and clipped before prompt injection; use source attribution rather than opaque assistant claims
 - Avoid code comments unless they add real clarity
 - Prefer updating existing architecture over introducing parallel patterns
 

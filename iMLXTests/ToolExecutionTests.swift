@@ -13,7 +13,8 @@ final class ToolExecutionTests: XCTestCase {
                 toolName: "web_search",
                 arguments: ["query": "Barcelona next match"]
             ),
-            tools: ["web_search": ThrowingExecutor()]
+            tools: ["web_search": ThrowingExecutor()],
+            context: emptyContext
         )
 
         XCTAssertFalse(result.success)
@@ -33,7 +34,8 @@ final class ToolExecutionTests: XCTestCase {
                 toolName: "web_search",
                 arguments: ["query": "Barcelona next match"]
             ),
-            tools: ["web_search": SlowExecutor()]
+            tools: ["web_search": SlowExecutor()],
+            context: emptyContext
         )
 
         XCTAssertFalse(result.success)
@@ -54,7 +56,8 @@ final class ToolExecutionTests: XCTestCase {
                     toolName: "web_search",
                     arguments: ["query": "Barcelona next match"]
                 ),
-                tools: ["web_search": SlowExecutor()]
+                tools: ["web_search": SlowExecutor()],
+                context: emptyContext
             )
         }
 
@@ -68,12 +71,20 @@ final class ToolExecutionTests: XCTestCase {
             XCTFail("Expected CancellationError, got \(error)")
         }
     }
+
+    private var emptyContext: ToolInputContext {
+        ToolInputContext(
+            latestUserMessage: "",
+            attachedImages: [],
+            detectedPublicURLs: []
+        )
+    }
 }
 
 private struct ThrowingExecutor: ToolExecutor {
     let toolName = "web_search"
 
-    func execute(arguments _: [String : String]) async throws -> ToolExecutionResult {
+    func execute(arguments _: [String : String], context _: ToolInputContext) async throws -> ToolExecutionResult {
         struct StubError: Error {}
         throw StubError()
     }
@@ -82,7 +93,7 @@ private struct ThrowingExecutor: ToolExecutor {
 private struct SlowExecutor: ToolExecutor {
     let toolName = "web_search"
 
-    func execute(arguments _: [String : String]) async throws -> ToolExecutionResult {
+    func execute(arguments _: [String : String], context _: ToolInputContext) async throws -> ToolExecutionResult {
         try await Task.sleep(nanoseconds: 250_000_000)
         return ToolExecutionResult(
             toolName: toolName,

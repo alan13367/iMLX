@@ -242,7 +242,11 @@ private struct AssistantMessageContent: View {
             }
             if let thinking = parsedContent.thinking, !thinking.isEmpty {
                 DisclosureGroup(isExpanded: $isThinkingExpanded) {
-                    MessageTextBody(text: thinking, isStreaming: isStreaming)
+                    MessageTextBody(
+                        text: thinking,
+                        isStreaming: isStreaming,
+                        linkTint: BrandPalette.accent
+                    )
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
@@ -377,7 +381,11 @@ private struct MessageTextBubble: View {
     }
 
     var body: some View {
-        MessageTextBody(text: text, isStreaming: isStreaming)
+        MessageTextBody(
+            text: text,
+            isStreaming: isStreaming,
+            linkTint: role == .user ? foregroundStyle : BrandPalette.accent
+        )
             .foregroundStyle(foregroundStyle)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -406,6 +414,7 @@ private struct MessageTextBubble: View {
 private struct MessageTextBody: View {
     let text: String
     let isStreaming: Bool
+    let linkTint: Color
 
     var body: some View {
         if isStreaming {
@@ -417,7 +426,7 @@ private struct MessageTextBody: View {
         ) {
             Text(attributed)
                 .font(.body)
-                .tint(BrandPalette.accent)
+                .tint(linkTint)
         } else {
             Text(text)
                 .font(.body)

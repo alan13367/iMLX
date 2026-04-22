@@ -21,7 +21,7 @@ struct ChatMemoryNotice: Equatable, Identifiable {
 
 enum ToolActivityStatus: Equatable {
     case planning
-    case searching(query: String)
+    case running(toolName: String, displayInput: String?)
 }
 
 private enum ChatGenerationAbort: LocalizedError {
@@ -53,7 +53,7 @@ final class ChatViewModel {
     var activeConversationId: UUID?
     var isThinkingEnabled: Bool = false
     var isWebSearchEnabled: Bool = false
-    var webSearchNotice: String?
+    var toolNotice: String?
     var toolActivityStatus: ToolActivityStatus?
     var currentToolTrace: ToolCallTrace?
 
@@ -117,7 +117,7 @@ final class ChatViewModel {
         memoryNotice = nil
         suppressedMemoryNoticeKey = nil
         isWebSearchEnabled = conversation.webSearchEnabled
-        webSearchNotice = nil
+        toolNotice = nil
         toolActivityStatus = nil
         currentToolTrace = nil
         updateThinkingAvailability(for: resolvedCurrentModel())
@@ -192,6 +192,7 @@ final class ChatViewModel {
             attachedImages: pendingImages.isEmpty ? nil : pendingImages,
             attachedDocuments: pendingDocuments.isEmpty ? nil : pendingDocuments
         )
+        let toolContext = await appState.toolCallingService.context(for: userMessage)
         messages.append(userMessage)
         let handledExplicitMemoryCommand = handleExplicitMemoryCommands(in: text, userMessage: userMessage)
 
@@ -199,7 +200,7 @@ final class ChatViewModel {
         currentResponse = ""
         currentParsedResponse = .empty
         errorMessage = nil
-        webSearchNotice = nil
+        toolNotice = nil
         toolActivityStatus = nil
         pendingImages.removeAll()
         pendingDocuments.removeAll()
@@ -261,91 +262,68 @@ final class ChatViewModel {
         do {
             try Task.checkCancellation()
 
-            if isWebSearchEnabled {
-                let tools = await appState.toolCallingService.enabledTools(webSearchEnabled: true)
+            let tools = await appState.toolCallingService.enabledTools(
+                webSearchEnabled: isWebSearchEnabled,
+                context: toolContext
+            )
+            if !tools.isEmpty {
                 Self.debugToolLog("tool stage enabled: registeredTools=\(tools.map(\.name).joined(separator: ","))")
-                if !tools.isEmpty {
-                    toolActivityStatus = .planning
-                    let decision = try await appState.toolCallingService.plan(
-                        userMessage: text,
-                        history: history,
-                        tools: tools,
-                        using: inferenceService
-                    )
+                toolActivityStatus = .planning
+                let plannedDecision = try await appState.toolCallingService.plan(
+                    userMessage: text,
+                    history: history,
+                    tools: tools,
+                    context: toolContext,
+                    using: inferenceService
+                )
+                let decision = appState.toolCallingService.resolvedDecision(
+                    plannedDecision: plannedDecision,
+                    userMessage: text,
+                    context: toolContext,
+                    tools: tools,
+                    preferThinkingFallback: loadedModel?.supportsThinking == true
+                )
 
-                    switch decision {
-                    case .none:
-                        if loadedModel?.supportsThinking == true,
-                           let fallbackDecision = appState.toolCallingService.heuristicFallbackDecision(
-                            userMessage: text,
-                            tools: tools
-                           ),
-                           case .call(let request) = fallbackDecision {
-                            let query = request.arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-                            let activityQuery = (query?.isEmpty == false) ? query! : text
-                            Self.debugToolLog(
-                                "heuristic fallback: call tool=\(request.toolName) query=\(Self.sanitizedToolLogSnippet(activityQuery))"
-                            )
-                            toolActivityStatus = .searching(query: activityQuery)
-                            let executors = await appState.toolCallingService.executors()
-                            let executionResult = try await appState.toolCallingService.execute(
-                                call: request,
-                                tools: executors
-                            )
-                            toolResult = executionResult
-                            toolTrace = ToolCallTrace(
-                                toolName: request.toolName,
-                                rewrittenQuery: query,
-                                durationSeconds: executionResult.durationSeconds,
-                                success: executionResult.success,
-                                sourceCount: executionResult.sources.count
-                            )
-                            Self.debugToolLog(
-                                "tool result: tool=\(request.toolName) success=\(executionResult.success) " +
-                                "sources=\(executionResult.sources.count) contextChars=\(executionResult.contextBlock.count)"
-                            )
-                            if executionResult.success == false {
-                                webSearchNotice = String.appLocalized("tool.notice.search_failed")
-                            }
-                            currentToolTrace = toolTrace
-                            toolActivityStatus = nil
-                        } else {
-                            Self.debugToolLog("planner decision: none")
-                            toolActivityStatus = nil
-                        }
-                    case .call(let request):
-                        let query = request.arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let activityQuery = (query?.isEmpty == false) ? query! : text
-                        Self.debugToolLog(
-                            "planner decision: call tool=\(request.toolName) query=\(Self.sanitizedToolLogSnippet(activityQuery))"
-                        )
-                        toolActivityStatus = .searching(query: activityQuery)
-                        let executors = await appState.toolCallingService.executors()
-                        let executionResult = try await appState.toolCallingService.execute(
-                            call: request,
-                            tools: executors
-                        )
-                        toolResult = executionResult
-                        toolTrace = ToolCallTrace(
+                switch decision {
+                case .none:
+                    Self.debugToolLog("planner decision: none")
+                    toolActivityStatus = nil
+
+                case .call(let request):
+                    let displayInput = self.toolDisplayInput(for: request, context: toolContext)
+                    Self.debugToolLog(
+                        "planner decision: call tool=\(request.toolName) input=\(Self.sanitizedToolLogSnippet(displayInput ?? "(none)"))"
+                    )
+                    toolActivityStatus = .running(toolName: request.toolName, displayInput: displayInput)
+                    let executors = await appState.toolCallingService.executors()
+                    let executionResult = try await appState.toolCallingService.execute(
+                        call: request,
+                        tools: executors,
+                        context: toolContext
+                    )
+                    toolResult = executionResult
+                    toolTrace = ToolCallTrace(
+                        toolName: request.toolName,
+                        displayInput: displayInput,
+                        durationSeconds: executionResult.durationSeconds,
+                        success: executionResult.success,
+                        sourceCount: executionResult.sources.count
+                    )
+                    Self.debugToolLog(
+                        "tool result: tool=\(request.toolName) success=\(executionResult.success) " +
+                        "sources=\(executionResult.sources.count) contextChars=\(executionResult.contextBlock.count)"
+                    )
+                    if executionResult.success == false {
+                        toolNotice = self.toolFailureNotice(
                             toolName: request.toolName,
-                            rewrittenQuery: query,
-                            durationSeconds: executionResult.durationSeconds,
-                            success: executionResult.success,
-                            sourceCount: executionResult.sources.count
+                            context: toolContext
                         )
-                        Self.debugToolLog(
-                            "tool result: tool=\(request.toolName) success=\(executionResult.success) " +
-                            "sources=\(executionResult.sources.count) contextChars=\(executionResult.contextBlock.count)"
-                        )
-                        if executionResult.success == false {
-                            webSearchNotice = String.appLocalized("tool.notice.search_failed")
-                        }
-                        currentToolTrace = toolTrace
-                        toolActivityStatus = nil
                     }
+                    currentToolTrace = toolTrace
+                    toolActivityStatus = nil
                 }
             } else {
-                Self.debugToolLog("tool stage skipped: web search toggle is off")
+                Self.debugToolLog("tool stage skipped: no eligible tools")
             }
 
             try Task.checkCancellation()
@@ -370,8 +348,8 @@ final class ChatViewModel {
                 for: loadedModel
             )
             Self.debugToolLog(
-                "generation context: documents=\(retrievalResult.sources.count) webSources=\(toolResult?.sources.count ?? 0) " +
-                "webContextChars=\(webContext.count)"
+                "generation context: documents=\(retrievalResult.sources.count) toolSources=\(toolResult?.sources.count ?? 0) " +
+                "toolContextChars=\(webContext.count)"
             )
             let effectiveSystemPrompt = self.mergedSystemPrompt(
                 base: systemPrompt,
@@ -657,7 +635,7 @@ final class ChatViewModel {
             suppressedMemoryNoticeKey = nil
             activePersonaId = appState.defaultPersona().id
             isWebSearchEnabled = false
-            webSearchNotice = nil
+            toolNotice = nil
             toolActivityStatus = nil
         }
         return id
@@ -838,9 +816,38 @@ final class ChatViewModel {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
-    private func combinedSources(_ documentSources: [MessageSource], _ webSources: [MessageSource]) -> [MessageSource]? {
-        let sources = documentSources + webSources
+    private func combinedSources(_ documentSources: [MessageSource], _ toolSources: [MessageSource]) -> [MessageSource]? {
+        let sources = documentSources + toolSources
         return sources.isEmpty ? nil : sources
+    }
+
+    private func toolDisplayInput(for request: ToolCallRequest, context: ToolInputContext) -> String? {
+        switch request.toolName {
+        case "web_search":
+            return request.arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "read_url":
+            return request.arguments["url"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? context.singleDetectedPublicURL?.absoluteString
+        case "ocr_image_text":
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    private func toolFailureNotice(toolName: String, context: ToolInputContext) -> String {
+        switch toolName {
+        case "read_url":
+            return String.appLocalized("tool.notice.read_url_failed")
+        case "ocr_image_text":
+            return context.attachedImages.isEmpty
+                ? String.appLocalized("tool.notice.ocr_failed")
+                : String.appLocalized("tool.notice.ocr_no_text")
+        case "web_search":
+            return String.appLocalized("tool.notice.search_failed")
+        default:
+            return String.appLocalized("tool.notice.search_failed")
+        }
     }
 
     private static func debugToolLog(_ message: String) {
@@ -860,7 +867,7 @@ final class ChatViewModel {
     }
 
     private static func describeToolTrace(_ trace: ToolCallTrace) -> String {
-        "tool=\(trace.toolName), query=\(trace.rewrittenQuery ?? "nil"), success=\(trace.success), " +
+        "tool=\(trace.toolName), input=\(trace.displayInput ?? "nil"), success=\(trace.success), " +
         "sources=\(trace.sourceCount), duration=\(trace.durationSeconds.map { String(format: "%.2f", $0) } ?? "nil")s"
     }
 

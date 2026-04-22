@@ -2,7 +2,7 @@ import Foundation
 
 protocol ToolExecutor: Sendable {
     var toolName: String { get }
-    func execute(arguments: [String: String]) async throws -> ToolExecutionResult
+    func execute(arguments: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult
 }
 
 actor ToolCallingService {
@@ -16,8 +16,26 @@ actor ToolCallingService {
 
     init(
         webSearchService: WebSearchService,
+        imageOCRService: ImageOCRService = ImageOCRService(),
         toolExecutionTimeoutSeconds: TimeInterval = Constants.ToolCalling.toolExecutionTimeoutSeconds
     ) {
+        let readURLTool = ToolDefinition(
+            name: "read_url",
+            description: "Reads the exact public URL found in the latest user message and returns grounded excerpts from that page.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "url",
+                    type: "string",
+                    required: false,
+                    description: "The exact public http or https URL to read."
+                )
+            ]
+        )
+        let ocrTool = ToolDefinition(
+            name: "ocr_image_text",
+            description: "Extracts visible text from images attached on the latest user message.",
+            argumentSchema: []
+        )
         let webSearchTool = ToolDefinition(
             name: "web_search",
             description: "Searches the live web for current information and returns grounded excerpts.",
@@ -30,15 +48,48 @@ actor ToolCallingService {
                 )
             ]
         )
+
+        let readURLExecutor = ReadURLToolExecutor(webSearchService: webSearchService)
+        let ocrExecutor = OCRImageTextToolExecutor(imageOCRService: imageOCRService)
         let webSearchExecutor = WebSearchToolExecutor(webSearchService: webSearchService)
+
         self.toolExecutionTimeoutSeconds = toolExecutionTimeoutSeconds
-        self.registeredTools = [webSearchTool]
-        self.registeredExecutors = [webSearchExecutor.toolName: webSearchExecutor]
+        self.registeredTools = [readURLTool, ocrTool, webSearchTool]
+        self.registeredExecutors = [
+            readURLExecutor.toolName: readURLExecutor,
+            ocrExecutor.toolName: ocrExecutor,
+            webSearchExecutor.toolName: webSearchExecutor
+        ]
     }
 
-    func enabledTools(webSearchEnabled: Bool) -> [ToolDefinition] {
-        guard webSearchEnabled else { return [] }
-        return registeredTools
+    func context(for userMessage: ChatMessage) -> ToolInputContext {
+        ToolInputContext(
+            latestUserMessage: userMessage.content,
+            attachedImages: userMessage.attachedImages ?? [],
+            detectedPublicURLs: detectedPublicURLs(in: userMessage.content)
+        )
+    }
+
+    func enabledTools(webSearchEnabled: Bool, context: ToolInputContext) -> [ToolDefinition] {
+        var enabled: [ToolDefinition] = []
+
+        if webSearchEnabled,
+           context.singleDetectedPublicURL != nil,
+           let readURLTool = registeredTools.first(where: { $0.name == "read_url" }) {
+            enabled.append(readURLTool)
+        }
+
+        if !context.attachedImages.isEmpty,
+           let ocrTool = registeredTools.first(where: { $0.name == "ocr_image_text" }) {
+            enabled.append(ocrTool)
+        }
+
+        if webSearchEnabled,
+           let webSearchTool = registeredTools.first(where: { $0.name == "web_search" }) {
+            enabled.append(webSearchTool)
+        }
+
+        return enabled
     }
 
     func executors() -> [String: any ToolExecutor] {
@@ -56,7 +107,7 @@ actor ToolCallingService {
         }
 
         guard let query = heuristicWebSearchQuery(for: userMessage),
-              let arguments = validatedArguments(["query": query], for: webSearchTool) else {
+              let arguments = validatedArguments(["query": query], for: webSearchTool, context: nil) else {
             return nil
         }
 
@@ -64,10 +115,61 @@ actor ToolCallingService {
         return .call(ToolCallRequest(toolName: "web_search", arguments: arguments))
     }
 
+    nonisolated func resolvedDecision(
+        plannedDecision: ToolDecision,
+        userMessage: String,
+        context: ToolInputContext,
+        tools: [ToolDefinition],
+        preferThinkingFallback: Bool
+    ) -> ToolDecision {
+        let toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
+
+        if let directURL = context.singleDetectedPublicURL,
+           let readURLTool = toolsByName["read_url"],
+           let arguments = validatedArguments(
+                ["url": directURL.absoluteString],
+                for: readURLTool,
+                context: context
+           ) {
+            Self.debugLog("deterministic arbitration selected read_url for pasted URL")
+            return .call(ToolCallRequest(toolName: readURLTool.name, arguments: arguments))
+        }
+
+        switch plannedDecision {
+        case .call(let request):
+            guard let normalizedRequest = normalizedRequest(
+                from: request,
+                context: context,
+                toolsByName: toolsByName
+            ) else {
+                break
+            }
+            return .call(normalizedRequest)
+
+        case .none:
+            break
+        }
+
+        if let ocrTool = toolsByName["ocr_image_text"],
+           shouldForceOCR(for: userMessage, context: context),
+           let arguments = validatedArguments([:], for: ocrTool, context: context) {
+            Self.debugLog("heuristic fallback selected ocr_image_text for text-focused image request")
+            return .call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments))
+        }
+
+        if preferThinkingFallback,
+           let fallbackDecision = heuristicFallbackDecision(userMessage: userMessage, tools: tools) {
+            return fallbackDecision
+        }
+
+        return .none
+    }
+
     func plan(
         userMessage: String,
         history: [ChatMessage],
         tools: [ToolDefinition],
+        context: ToolInputContext,
         using inferenceService: InferenceService
     ) async throws -> ToolDecision {
         guard !tools.isEmpty else {
@@ -77,11 +179,12 @@ actor ToolCallingService {
 
         Self.debugLog(
             "planner start: tools=\(tools.map(\.name).joined(separator: ",")) " +
-            "historyCount=\(history.count) userMessage=\(Self.sanitizedSnippet(userMessage))"
+            "historyCount=\(history.count) images=\(context.attachedImages.count) " +
+            "urls=\(context.detectedPublicURLs.count) userMessage=\(Self.sanitizedSnippet(userMessage))"
         )
 
         let stream = await inferenceService.generate(
-            prompt: planningPrompt(userMessage: userMessage, history: history, tools: tools),
+            prompt: planningPrompt(userMessage: userMessage, history: history, tools: tools, context: context),
             thinkingEnabled: false,
             history: [],
             systemPrompt: Constants.ToolCalling.plannerSystemPrompt,
@@ -98,7 +201,12 @@ actor ToolCallingService {
                 try Task.checkCancellation()
                 rawOutput += token
             }
-            let decision = parsePlannerDecision(from: rawOutput, userMessage: userMessage, tools: tools)
+            let decision = parsePlannerDecision(
+                from: rawOutput,
+                userMessage: userMessage,
+                tools: tools,
+                context: context
+            )
             Self.debugLog(
                 "planner output: raw=\(Self.sanitizedSnippet(rawOutput, limit: 280)) " +
                 "decision=\(Self.describe(decision))"
@@ -115,7 +223,8 @@ actor ToolCallingService {
 
     func execute(
         call: ToolCallRequest,
-        tools: [String: any ToolExecutor]
+        tools: [String: any ToolExecutor],
+        context: ToolInputContext
     ) async throws -> ToolExecutionResult {
         let startTime = Date()
 
@@ -133,7 +242,7 @@ actor ToolCallingService {
         do {
             Self.debugLog("execution start: tool=\(call.toolName) args=\(Self.formatted(arguments: call.arguments))")
             let result = try await withTimeout(seconds: toolExecutionTimeoutSeconds) {
-                try await executor.execute(arguments: call.arguments)
+                try await executor.execute(arguments: call.arguments, context: context)
             }
             try Task.checkCancellation()
 
@@ -169,7 +278,8 @@ actor ToolCallingService {
     nonisolated func parsePlannerDecision(
         from text: String,
         userMessage: String? = nil,
-        tools: [ToolDefinition]
+        tools: [ToolDefinition],
+        context: ToolInputContext
     ) -> ToolDecision {
         let toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
 
@@ -191,7 +301,7 @@ actor ToolCallingService {
             }
 
             let rawArguments = dictionary["args"] as? [String: Any] ?? [:]
-            guard let arguments = validatedArguments(rawArguments, for: toolDefinition) else {
+            guard let arguments = validatedArguments(rawArguments, for: toolDefinition, context: context) else {
                 continue
             }
 
@@ -206,6 +316,7 @@ actor ToolCallingService {
         if let fallbackDecision = fallbackPlannerDecision(
             from: text,
             userMessage: userMessage,
+            context: context,
             toolsByName: toolsByName
         ) {
             return fallbackDecision
@@ -216,7 +327,8 @@ actor ToolCallingService {
 
     nonisolated func validatedArguments(
         _ rawArguments: [String: Any],
-        for toolDefinition: ToolDefinition
+        for toolDefinition: ToolDefinition,
+        context: ToolInputContext?
     ) -> [String: String]? {
         var validated: [String: String] = [:]
 
@@ -225,31 +337,70 @@ actor ToolCallingService {
             let stringValue = stringValue(from: rawValue)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if argument.required && (stringValue?.isEmpty != false) {
-                return nil
-            }
-
-            guard let stringValue, !stringValue.isEmpty else { continue }
-
             switch argument.name {
             case "query":
-                let clamped = String(stringValue.prefix(Constants.ToolCalling.maxQueryLength))
-                if clamped.isEmpty {
+                let candidateValue = stringValue ?? ""
+                if argument.required && candidateValue.isEmpty {
                     return nil
                 }
+                guard !candidateValue.isEmpty else { continue }
+                let clamped = String(candidateValue.prefix(Constants.ToolCalling.maxQueryLength))
+                guard !clamped.isEmpty else { return nil }
                 validated[argument.name] = clamped
+
+            case "url":
+                let resolvedURL = stringValue
+                    ?? context?.singleDetectedPublicURL?.absoluteString
+                if argument.required && (resolvedURL?.isEmpty != false) {
+                    return nil
+                }
+                guard let resolvedURL, !resolvedURL.isEmpty,
+                      let url = URL(string: resolvedURL),
+                      let scheme = url.scheme?.lowercased(),
+                      ["http", "https"].contains(scheme),
+                      url.host != nil else {
+                    continue
+                }
+                validated[argument.name] = url.absoluteString
+
             default:
+                if argument.required && (stringValue?.isEmpty != false) {
+                    return nil
+                }
+                guard let stringValue, !stringValue.isEmpty else { continue }
                 validated[argument.name] = stringValue
             }
+        }
+
+        if toolDefinition.name == "read_url", validated["url"]?.isEmpty != false {
+            return nil
         }
 
         return validated
     }
 
+    private nonisolated func normalizedRequest(
+        from request: ToolCallRequest,
+        context: ToolInputContext,
+        toolsByName: [String: ToolDefinition]
+    ) -> ToolCallRequest? {
+        guard let toolDefinition = toolsByName[request.toolName],
+              let arguments = validatedArguments(
+                Dictionary(uniqueKeysWithValues: request.arguments.map { ($0.key, $0.value as Any) }),
+                for: toolDefinition,
+                context: context
+              ) else {
+            return nil
+        }
+
+        return ToolCallRequest(toolName: request.toolName, arguments: arguments)
+    }
+
     private nonisolated func planningPrompt(
         userMessage: String,
         history: [ChatMessage],
-        tools: [ToolDefinition]
+        tools: [ToolDefinition],
+        context: ToolInputContext
     ) -> String {
         let toolDescriptions = tools.map { tool in
             let arguments = tool.argumentSchema
@@ -257,7 +408,7 @@ actor ToolCallingService {
                     "\(argument.name): \(argument.type)\(argument.required ? " required" : " optional")"
                 }
                 .joined(separator: ", ")
-            return "- \(tool.name): \(tool.description) Args: \(arguments)"
+            return "- \(tool.name): \(tool.description) Args: \(arguments.isEmpty ? "(none)" : arguments)"
         }
         .joined(separator: "\n")
 
@@ -273,9 +424,18 @@ actor ToolCallingService {
             }
             .joined(separator: "\n")
 
+        let currentTurnContext = [
+            "- Attached image count: \(context.attachedImages.count)",
+            "- Detected public URL: \(context.singleDetectedPublicURL?.absoluteString ?? (context.detectedPublicURLs.isEmpty ? "none" : "multiple URLs detected"))"
+        ]
+        .joined(separator: "\n")
+
         return """
         Available tools:
         \(toolDescriptions)
+
+        Current turn context:
+        \(currentTurnContext)
 
         Recent conversation:
         \(recentHistory.isEmpty ? "(none)" : recentHistory)
@@ -408,6 +568,7 @@ actor ToolCallingService {
     private nonisolated func fallbackPlannerDecision(
         from text: String,
         userMessage: String?,
+        context: ToolInputContext,
         toolsByName: [String: ToolDefinition]
     ) -> ToolDecision? {
         let lowercasedText = text.lowercased()
@@ -417,14 +578,28 @@ actor ToolCallingService {
 
             switch toolName {
             case "web_search":
-                guard let query = inferredWebSearchQuery(from: text, userMessage: userMessage) else {
-                    continue
-                }
-                guard let arguments = validatedArguments(["query": query], for: toolDefinition) else {
+                guard let query = inferredWebSearchQuery(from: text, userMessage: userMessage),
+                      let arguments = validatedArguments(["query": query], for: toolDefinition, context: context) else {
                     continue
                 }
                 Self.debugLog("planner recovered prose decision for \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
+            case "read_url":
+                guard let url = inferredReadURL(from: text, context: context),
+                      let arguments = validatedArguments(["url": url.absoluteString], for: toolDefinition, context: context) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
+            case "ocr_image_text":
+                guard let arguments = validatedArguments([:], for: toolDefinition, context: context) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
             default:
                 continue
             }
@@ -480,6 +655,21 @@ actor ToolCallingService {
         return sanitized.isEmpty ? nil : sanitized
     }
 
+    private nonisolated func inferredReadURL(from text: String, context: ToolInputContext) -> URL? {
+        if let explicitURLString = firstRegexCapture(
+            pattern: #"(?i)\burl\s*[:=]\s*(https?://\S+)"#,
+            in: text
+        ),
+           let explicitURL = URL(string: sanitizeRecoveredQuery(explicitURLString)),
+           let scheme = explicitURL.scheme?.lowercased(),
+           ["http", "https"].contains(scheme),
+           explicitURL.host != nil {
+            return explicitURL
+        }
+
+        return context.singleDetectedPublicURL
+    }
+
     private nonisolated func sanitizeRecoveredQuery(_ query: String) -> String {
         query
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
@@ -519,6 +709,47 @@ actor ToolCallingService {
 
         return !tokens.intersection(currentInfoMarkers).isEmpty
             && !tokens.intersection(topicalMarkers).isEmpty
+    }
+
+    private nonisolated func shouldForceOCR(for userMessage: String, context: ToolInputContext) -> Bool {
+        guard !context.attachedImages.isEmpty else { return false }
+
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+
+        let textFocusedPhrases = [
+            "ocr",
+            "extract text",
+            "read this image",
+            "read the image",
+            "read this screenshot",
+            "read the screenshot",
+            "what does this say",
+            "what does the image say",
+            "what does the screenshot say",
+            "copy the text",
+            "text in this image",
+            "text in this screenshot",
+            "translate this image",
+            "translate this screenshot",
+            "summarize the text",
+            "receipt",
+            "menu",
+            "scan"
+        ]
+
+        if textFocusedPhrases.contains(where: { normalized.contains($0) }) {
+            return true
+        }
+
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let actionTokens = Set(["read", "extract", "copy", "translate", "scan", "summarize"])
+        let textTokens = Set(["text", "words", "receipt", "menu", "screenshot", "image", "photo"])
+        let containsSayPattern = normalized.contains("what does this say")
+            || normalized.contains("what does it say")
+
+        return containsSayPattern
+            || (!tokens.intersection(actionTokens).isEmpty && !tokens.intersection(textTokens).isEmpty)
     }
 
     private nonisolated func heuristicWebSearchQuery(for userMessage: String) -> String? {
@@ -564,7 +795,7 @@ actor ToolCallingService {
     private nonisolated func normalizeForHeuristicMatching(_ text: String) -> String {
         text
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .replacingOccurrences(of: #"[^\p{L}\p{N}\s]"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[^\p{L}\p{N}\s:/._-]"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -582,16 +813,87 @@ actor ToolCallingService {
         }
         return String(text[captureRange])
     }
+
+    private nonisolated func detectedPublicURLs(in text: String) -> [URL] {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return []
+        }
+
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        var urls: [URL] = []
+        var seen = Set<String>()
+
+        for match in detector.matches(in: text, options: [], range: range) {
+            guard let url = match.url,
+                  let scheme = url.scheme?.lowercased(),
+                  ["http", "https"].contains(scheme),
+                  url.host != nil else {
+                continue
+            }
+
+            let absoluteString = url.absoluteString
+            guard seen.insert(absoluteString).inserted else { continue }
+            urls.append(url)
+        }
+
+        return urls
+    }
 }
 
 private struct WebSearchToolExecutor: ToolExecutor {
     let toolName = "web_search"
     let webSearchService: WebSearchService
 
-    func execute(arguments: [String: String]) async throws -> ToolExecutionResult {
+    func execute(arguments: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
         let query = arguments["query"] ?? ""
         let startTime = Date()
         let result = try await webSearchService.retrieveContext(for: query)
+        let duration = Date().timeIntervalSince(startTime)
+        return ToolExecutionResult(
+            toolName: toolName,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            success: !result.contextBlock.isEmpty,
+            durationSeconds: duration
+        )
+    }
+}
+
+private struct ReadURLToolExecutor: ToolExecutor {
+    let toolName = "read_url"
+    let webSearchService: WebSearchService
+
+    func execute(arguments: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult {
+        let startTime = Date()
+        let urlString = arguments["url"] ?? context.singleDetectedPublicURL?.absoluteString ?? ""
+        guard let url = URL(string: urlString) else {
+            return ToolExecutionResult(
+                toolName: toolName,
+                contextBlock: "",
+                sources: [],
+                success: false,
+                durationSeconds: 0
+            )
+        }
+        let result = try await webSearchService.retrieveContext(forDirectURL: url, userQuery: context.latestUserMessage)
+        let duration = Date().timeIntervalSince(startTime)
+        return ToolExecutionResult(
+            toolName: toolName,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            success: !result.contextBlock.isEmpty,
+            durationSeconds: duration
+        )
+    }
+}
+
+private struct OCRImageTextToolExecutor: ToolExecutor {
+    let toolName = "ocr_image_text"
+    let imageOCRService: ImageOCRService
+
+    func execute(arguments _: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult {
+        let startTime = Date()
+        let result = try await imageOCRService.retrieveContext(from: context.attachedImages)
         let duration = Date().timeIntervalSince(startTime)
         return ToolExecutionResult(
             toolName: toolName,

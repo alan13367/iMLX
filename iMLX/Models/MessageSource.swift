@@ -2,6 +2,7 @@ import Foundation
 
 nonisolated enum MessageSourceKind: String, Codable, Hashable {
     case document
+    case image
     case web
 }
 

@@ -381,7 +381,9 @@ nonisolated enum Constants {
         - If a tool call is needed, return: {"tool":"TOOL_NAME","args":{"ARG_NAME":"VALUE"}}
         - If no tool call is needed, return: {"tool":"none"}
         - For web_search, rewrite the user's question into an optimized search engine query.
-        - Do NOT call tools for greetings, thanks, follow-ups that don't need live data, or questions the model can answer from training data.
+        - Use read_url when the latest message includes a specific public URL and the user wants that page read or summarized.
+        - Use ocr_image_text when the user wants visible text extracted, translated, or summarized from attached images.
+        - Do NOT call tools for greetings, thanks, follow-ups that don't need tool input, or questions the model can answer directly.
         - Keep search queries short, specific, and entity-focused.
         - At most one tool call is allowed.
         """

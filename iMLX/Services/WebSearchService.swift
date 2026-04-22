@@ -10,6 +10,12 @@ actor WebSearchService {
         let url: URL
     }
 
+    private struct ReadablePage {
+        let title: String
+        let url: URL
+        let bodyText: String
+    }
+
     private struct CandidateChunk {
         let source: MessageSource
         let text: String
@@ -43,9 +49,9 @@ actor WebSearchService {
         let queryVector = embedding(for: trimmedQuery, languageCode: detectLanguageCode(in: trimmedQuery))
 
         for result in searchResults.prefix(Constants.WebSearch.maxResults) {
-            guard let pageText = try await fetchReadableText(for: result.url), !pageText.isEmpty else { continue }
-            let boundedPageText = String(pageText.prefix(Constants.WebSearch.maxFetchedBodyCharacters))
-            let chunks = chunkedText(boundedPageText)
+            guard let page = try await fetchReadablePage(for: result.url),
+                  !page.bodyText.isEmpty else { continue }
+            let chunks = chunkedText(page.bodyText)
             for chunk in chunks.prefix(Constants.WebSearch.maxChunksScoredPerPage) {
                 let lexicalScore = lexicalSimilarity(query: trimmedQuery, text: chunk)
                 let semanticScore = score(
@@ -65,10 +71,10 @@ actor WebSearchService {
                         source: MessageSource(
                             id: "\(result.url.absoluteString)#\(candidates.count)",
                             kind: .web,
-                            title: result.title,
+                            title: page.title.isEmpty ? result.title : page.title,
                             excerpt: compactExcerpt(from: clippedText),
-                            location: result.url.host,
-                            url: result.url,
+                            location: page.url.host,
+                            url: page.url,
                             score: totalScore
                         ),
                         text: clippedText
@@ -126,6 +132,103 @@ actor WebSearchService {
         return MessageGroundingResult(contextBlock: contextBlock, sources: sources)
     }
 
+    func retrieveContext(forDirectURL url: URL, userQuery: String) async throws -> MessageGroundingResult {
+        guard let readablePage = try await fetchReadablePage(for: url) else {
+            return MessageGroundingResult(contextBlock: "", sources: [])
+        }
+
+        let normalizedQuery = normalizedReadURLQuery(userQuery, url: url)
+        let queryVector = normalizedQuery.isEmpty
+            ? nil
+            : embedding(for: normalizedQuery, languageCode: detectLanguageCode(in: normalizedQuery))
+
+        var candidates: [CandidateChunk] = []
+        let chunks = chunkedText(readablePage.bodyText)
+
+        for chunk in chunks.prefix(Constants.WebSearch.maxChunksScoredPerPage) {
+            let lexicalScore = normalizedQuery.isEmpty ? 0 : lexicalSimilarity(query: normalizedQuery, text: chunk)
+            let semanticScore = normalizedQuery.isEmpty ? 0 : score(
+                queryVector: queryVector,
+                chunkVector: embedding(for: chunk, languageCode: detectLanguageCode(in: chunk))
+            )
+            let totalScore = semanticScore > 0 ? (semanticScore * 0.8) + (lexicalScore * 0.2) : lexicalScore
+
+            let excerptLimit = Constants.WebSearch.maxExcerptCharactersPerSection
+            let clippedText = chunk.count > excerptLimit
+                ? String(chunk.prefix(excerptLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+                : chunk
+
+            candidates.append(
+                CandidateChunk(
+                    source: MessageSource(
+                        id: "\(readablePage.url.absoluteString)#\(candidates.count)",
+                        kind: .web,
+                        title: readablePage.title,
+                        excerpt: compactExcerpt(from: clippedText),
+                        location: readablePage.url.host,
+                        url: readablePage.url,
+                        score: totalScore
+                    ),
+                    text: clippedText
+                )
+            )
+        }
+
+        let rankedCandidates: [CandidateChunk]
+        let scoredCandidates = candidates.filter { ($0.source.score ?? 0) > 0 }
+        if !scoredCandidates.isEmpty {
+            rankedCandidates = scoredCandidates.sorted { ($0.source.score ?? 0) > ($1.source.score ?? 0) }
+        } else {
+            rankedCandidates = Array(candidates.prefix(3))
+        }
+
+        guard !rankedCandidates.isEmpty else {
+            return MessageGroundingResult(contextBlock: "", sources: [])
+        }
+
+        var contextSections: [String] = []
+        var sources: [MessageSource] = []
+        var usedCharacters = 0
+
+        for candidate in rankedCandidates {
+            var section = "Source: \(candidate.source.title)\nURL: \(candidate.source.url?.absoluteString ?? "")\n\(candidate.text)"
+            if usedCharacters + section.count > Constants.WebSearch.maxContextCharacters, !contextSections.isEmpty {
+                break
+            }
+            if section.count > Constants.WebSearch.maxContextCharacters {
+                section = String(section.prefix(Constants.WebSearch.maxContextCharacters)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+            }
+            contextSections.append(section)
+            usedCharacters += section.count
+        }
+
+        guard !contextSections.isEmpty else {
+            return MessageGroundingResult(contextBlock: "", sources: [])
+        }
+
+        sources.append(
+            MessageSource(
+                id: readablePage.url.absoluteString,
+                kind: .web,
+                title: readablePage.title,
+                excerpt: rankedCandidates.first?.source.excerpt ?? compactExcerpt(from: readablePage.bodyText),
+                location: readablePage.url.host,
+                url: readablePage.url,
+                score: rankedCandidates.first?.source.score
+            )
+        )
+
+        let contextBlock = """
+        The assistant may use the following excerpts from the user-provided link to answer this message.
+
+        These excerpts come from the exact URL the user shared. If the page content seems incomplete, inaccessible, or ambiguous, say so plainly.
+
+        \(contextSections.joined(separator: "\n\n---\n\n"))
+        """
+
+        return MessageGroundingResult(contextBlock: contextBlock, sources: sources)
+    }
+
     private func searchDuckDuckGo(query: String) async throws -> [SearchResult] {
         var components = URLComponents(string: "https://html.duckduckgo.com/html/")!
         components.queryItems = [
@@ -162,7 +265,7 @@ actor WebSearchService {
         return URL(string: href)
     }
 
-    private func fetchReadableText(for url: URL) async throws -> String? {
+    private func fetchReadablePage(for url: URL) async throws -> ReadablePage? {
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
@@ -171,20 +274,34 @@ actor WebSearchService {
               (200..<400).contains(httpResponse.statusCode) else {
             return nil
         }
+
+        if let mimeType = httpResponse.mimeType?.lowercased() {
+            let supportedTypes = ["text/html", "application/xhtml+xml", "text/plain"]
+            guard supportedTypes.contains(mimeType) else {
+                return nil
+            }
+        }
+
         let html = String(decoding: data, as: UTF8.self)
         #if canImport(SwiftSoup)
         let document = try SwiftSoup.parse(html)
         try document.select("script, style, noscript, svg").remove()
         let bodyText = try document.body()?.text() ?? ""
+        let title = normalizeWhitespace((try? document.title()) ?? url.host ?? url.absoluteString)
         let normalized = normalizeWhitespace(bodyText)
-        return normalized.isEmpty ? nil : normalized
+        guard !normalized.isEmpty else { return nil }
+        let boundedBodyText = String(normalized.prefix(Constants.WebSearch.maxFetchedBodyCharacters))
+        return ReadablePage(title: title, url: url, bodyText: boundedBodyText)
         #else
         let stripped = html
             .replacingOccurrences(of: #"<script[\s\S]*?</script>"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"<style[\s\S]*?</style>"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
         let normalized = normalizeWhitespace(stripped)
-        return normalized.isEmpty ? nil : normalized
+        guard !normalized.isEmpty else { return nil }
+        let title = normalizeWhitespace(extractedHTMLTitle(from: html) ?? url.host ?? url.absoluteString)
+        let boundedBodyText = String(normalized.prefix(Constants.WebSearch.maxFetchedBodyCharacters))
+        return ReadablePage(title: title, url: url, bodyText: boundedBodyText)
         #endif
     }
 
@@ -300,5 +417,25 @@ actor WebSearchService {
         text
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizedReadURLQuery(_ query: String, url: URL) -> String {
+        let withoutURL = query
+            .replacingOccurrences(of: url.absoluteString, with: " ")
+            .replacingOccurrences(of: url.absoluteString.removingPercentEncoding ?? url.absoluteString, with: " ")
+        return normalizeWhitespace(withoutURL)
+    }
+
+    private func extractedHTMLTitle(from html: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"(?is)<title[^>]*>(.*?)</title>"#) else {
+            return nil
+        }
+        let range = NSRange(html.startIndex..<html.endIndex, in: html)
+        guard let match = regex.firstMatch(in: html, range: range),
+              match.numberOfRanges > 1,
+              let titleRange = Range(match.range(at: 1), in: html) else {
+            return nil
+        }
+        return normalizeWhitespace(String(html[titleRange]))
     }
 }

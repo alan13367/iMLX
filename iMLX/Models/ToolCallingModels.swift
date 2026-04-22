@@ -38,7 +38,7 @@ nonisolated enum ToolDecision: Codable, Equatable, Sendable {
         )
     }
 
-    func encode(to encoder: any Encoder) throws {
+    func encode(to encoder: any Swift.Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .none:
@@ -55,6 +55,17 @@ nonisolated struct ToolCallRequest: Codable, Hashable, Sendable {
     let arguments: [String: String]
 }
 
+nonisolated struct ToolInputContext: Sendable {
+    let latestUserMessage: String
+    let attachedImages: [ChatAttachmentImage]
+    let detectedPublicURLs: [URL]
+
+    var singleDetectedPublicURL: URL? {
+        guard detectedPublicURLs.count == 1 else { return nil }
+        return detectedPublicURLs[0]
+    }
+}
+
 nonisolated struct ToolExecutionResult: Codable, Hashable, Sendable {
     let toolName: String
     let contextBlock: String
@@ -65,8 +76,50 @@ nonisolated struct ToolExecutionResult: Codable, Hashable, Sendable {
 
 nonisolated struct ToolCallTrace: Codable, Hashable, Sendable {
     let toolName: String
-    let rewrittenQuery: String?
+    let displayInput: String?
     let durationSeconds: TimeInterval?
     let success: Bool
     let sourceCount: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case toolName
+        case displayInput
+        case rewrittenQuery
+        case durationSeconds
+        case success
+        case sourceCount
+    }
+
+    init(
+        toolName: String,
+        displayInput: String?,
+        durationSeconds: TimeInterval?,
+        success: Bool,
+        sourceCount: Int
+    ) {
+        self.toolName = toolName
+        self.displayInput = displayInput
+        self.durationSeconds = durationSeconds
+        self.success = success
+        self.sourceCount = sourceCount
+    }
+
+    init(from decoder: any Swift.Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        toolName = try container.decode(String.self, forKey: .toolName)
+        displayInput = try container.decodeIfPresent(String.self, forKey: .displayInput)
+            ?? container.decodeIfPresent(String.self, forKey: .rewrittenQuery)
+        durationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .durationSeconds)
+        success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
+        sourceCount = try container.decodeIfPresent(Int.self, forKey: .sourceCount) ?? 0
+    }
+
+    func encode(to encoder: any Swift.Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(toolName, forKey: .toolName)
+        try container.encodeIfPresent(displayInput, forKey: .displayInput)
+        try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
+        try container.encode(success, forKey: .success)
+        try container.encode(sourceCount, forKey: .sourceCount)
+    }
 }

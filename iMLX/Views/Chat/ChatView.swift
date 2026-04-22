@@ -154,7 +154,7 @@ struct ChatView: View {
             ChatAccessoryStackView(
                 horizontalSizeClass: horizontalSizeClass,
                 errorMessage: chatViewModel.errorMessage,
-                webSearchNotice: chatViewModel.webSearchNotice,
+                toolNotice: chatViewModel.toolNotice,
                 toolActivityStatus: chatViewModel.toolActivityStatus,
                 isModelLoading: chatViewModel.isModelLoading,
                 selectedModelDisplayName: appState.selectedModel?.displayName,
@@ -172,7 +172,7 @@ struct ChatView: View {
                 inputText: $inputText,
                 isInputFocused: $isInputFocused,
                 onDismissError: dismissError,
-                onDismissWebSearchNotice: dismissWebSearchNotice,
+                onDismissToolNotice: dismissToolNotice,
                 onDismissMemoryNotice: chatViewModel.dismissMemoryNotice,
                 onOpenMemoryLibrary: openMemoryLibrary,
                 onOpenPersonaPicker: openPersonaPicker,
@@ -407,8 +407,8 @@ struct ChatView: View {
         chatViewModel.errorMessage = nil
     }
 
-    private func dismissWebSearchNotice() {
-        chatViewModel.webSearchNotice = nil
+    private func dismissToolNotice() {
+        chatViewModel.toolNotice = nil
     }
 
     private func openMemoryLibrary() {
@@ -794,7 +794,7 @@ private struct ChatMessageListSection: View {
 private struct ChatAccessoryStackView: View {
     let horizontalSizeClass: UserInterfaceSizeClass?
     let errorMessage: String?
-    let webSearchNotice: String?
+    let toolNotice: String?
     let toolActivityStatus: ToolActivityStatus?
     let isModelLoading: Bool
     let selectedModelDisplayName: String?
@@ -812,7 +812,7 @@ private struct ChatAccessoryStackView: View {
     @Binding var inputText: String
     @FocusState.Binding var isInputFocused: Bool
     let onDismissError: () -> Void
-    let onDismissWebSearchNotice: () -> Void
+    let onDismissToolNotice: () -> Void
     let onDismissMemoryNotice: () -> Void
     let onOpenMemoryLibrary: () -> Void
     let onOpenPersonaPicker: () -> Void
@@ -843,12 +843,12 @@ private struct ChatAccessoryStackView: View {
                 .frame(maxWidth: maxWidth)
             }
 
-            if let webSearchNotice {
+            if let toolNotice {
                 ChatNoticeBanner(
                     style: .info,
-                    message: webSearchNotice,
+                    message: toolNotice,
                     title: nil,
-                    onDismiss: onDismissWebSearchNotice
+                    onDismiss: onDismissToolNotice
                 )
                 .frame(maxWidth: maxWidth)
             }
@@ -1215,12 +1215,12 @@ private struct ToolActivityChainView: View {
                     state: planningState
                 )
 
-                if let query = searchQuery {
+                if let executionDetails {
                     ToolActivityConnector()
                     ToolActivityStepRow(
-                        icon: "globe",
-                        text: String(format: String.appLocalized("tool.activity.searching"), query),
-                        state: searchingState
+                        icon: executionDetails.icon,
+                        text: executionDetails.text,
+                        state: executionState
                     )
                 }
             }
@@ -1237,26 +1237,26 @@ private struct ToolActivityChainView: View {
         switch status {
         case .planning:
             return .active
-        case .searching:
+        case .running:
             return .completed
         }
     }
 
-    private var searchingState: ToolActivityStepState {
+    private var executionState: ToolActivityStepState {
         switch status {
         case .planning:
             return .pending
-        case .searching:
+        case .running:
             return .active
         }
     }
 
-    private var searchQuery: String? {
+    private var executionDetails: (icon: String, text: String)? {
         switch status {
         case .planning:
             return nil
-        case .searching(let query):
-            return query
+        case .running(let toolName, let displayInput):
+            return toolExecutionPresentation(toolName: toolName, displayInput: displayInput)
         }
     }
 }
@@ -1273,11 +1273,14 @@ private struct CompletedToolChainView: View {
                     state: .completed
                 )
 
-                if let query = trace.rewrittenQuery {
+                if let executionDetails = toolExecutionPresentation(
+                    toolName: trace.toolName,
+                    displayInput: trace.displayInput
+                ) {
                     ToolActivityConnector()
                     ToolActivityStepRow(
-                        icon: "globe",
-                        text: String(format: String.appLocalized("tool.activity.searching"), query),
+                        icon: executionDetails.icon,
+                        text: executionDetails.text,
                         state: trace.success ? .completed : .failed
                     )
                 }
@@ -1314,11 +1317,14 @@ struct ToolTraceChainView: View {
                     state: .completed
                 )
 
-                if let query = trace.rewrittenQuery {
+                if let executionDetails = toolExecutionPresentation(
+                    toolName: trace.toolName,
+                    displayInput: trace.displayInput
+                ) {
                     ToolActivityConnector()
                     ToolActivityStepRow(
-                        icon: "globe",
-                        text: String(format: String.appLocalized("tool.activity.searching"), query),
+                        icon: executionDetails.icon,
+                        text: executionDetails.text,
                         state: trace.success ? .completed : .failed
                     )
                 }
@@ -1335,7 +1341,7 @@ struct ToolTraceChainView: View {
             .padding(.top, 6)
         } label: {
             HStack(spacing: 8) {
-                Label(toolLabel, systemImage: trace.success ? "globe" : "globe.badge.chevron.backward")
+                Label(toolLabel, systemImage: trace.success ? toolTraceIcon(toolName: trace.toolName) : "exclamationmark.triangle")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(trace.success ? BrandPalette.cyan : .secondary)
                 if let duration = trace.durationSeconds {
@@ -1352,11 +1358,54 @@ struct ToolTraceChainView: View {
     }
 
     private var toolLabel: String {
-        if trace.success {
-            return String.appLocalized("tool.trace.web_search")
-        } else {
-            return String.appLocalized("tool.trace.web_search_failed")
-        }
+        toolTraceLabel(toolName: trace.toolName, success: trace.success)
+    }
+}
+
+private func toolExecutionPresentation(toolName: String, displayInput: String?) -> (icon: String, text: String)? {
+    switch toolName {
+    case "web_search":
+        guard let displayInput, !displayInput.isEmpty else { return nil }
+        return ("globe", String(format: String.appLocalized("tool.activity.searching"), displayInput))
+    case "read_url":
+        guard let displayInput, !displayInput.isEmpty else { return nil }
+        return ("link", String(format: String.appLocalized("tool.activity.read_url"), displayInput))
+    case "ocr_image_text":
+        return ("text.viewfinder", String.appLocalized("tool.activity.ocr_image_text"))
+    default:
+        return nil
+    }
+}
+
+private func toolTraceLabel(toolName: String, success: Bool) -> String {
+    switch (toolName, success) {
+    case ("read_url", true):
+        return String.appLocalized("tool.trace.read_url")
+    case ("read_url", false):
+        return String.appLocalized("tool.trace.read_url_failed")
+    case ("ocr_image_text", true):
+        return String.appLocalized("tool.trace.ocr_image_text")
+    case ("ocr_image_text", false):
+        return String.appLocalized("tool.trace.ocr_image_text_failed")
+    case ("web_search", true):
+        return String.appLocalized("tool.trace.web_search")
+    case ("web_search", false):
+        return String.appLocalized("tool.trace.web_search_failed")
+    default:
+        return success ? toolName : "\(toolName) Failed"
+    }
+}
+
+private func toolTraceIcon(toolName: String) -> String {
+    switch toolName {
+    case "read_url":
+        return "link"
+    case "ocr_image_text":
+        return "text.viewfinder"
+    case "web_search":
+        return "globe"
+    default:
+        return "wand.and.stars"
     }
 }
 

@@ -1206,6 +1206,38 @@ private struct ChatStatusCard: View {
     }
 }
 
+private struct ToolChainCardModifier: ViewModifier {
+    let accentColor: Color
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .liquidGlassSurface(
+                tint: accentColor.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous),
+                fallback: AnyShapeStyle(accentColor.opacity(0.06))
+            )
+            .overlay(alignment: .leading) {
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 16,
+                    bottomLeadingRadius: 16,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 0
+                )
+                .fill(BrandPalette.primaryGradient)
+                .frame(width: 2.5)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private extension View {
+    func toolChainCard(accent: Color = BrandPalette.cyan) -> some View {
+        modifier(ToolChainCardModifier(accentColor: accent))
+    }
+}
+
 private struct ToolActivityChainView: View {
     let status: ToolActivityStatus
 
@@ -1227,10 +1259,7 @@ private struct ToolActivityChainView: View {
                     )
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.fill.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .toolChainCard()
 
             Spacer(minLength: 36)
         }
@@ -1297,10 +1326,7 @@ private struct CompletedToolChainView: View {
                     )
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.fill.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .toolChainCard()
 
             Spacer(minLength: 36)
         }
@@ -1312,52 +1338,80 @@ struct ToolTraceChainView: View {
     @Binding var isExpanded: Bool
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 0) {
-                ToolActivityStepRow(
-                    icon: "wand.and.stars",
-                    text: String.appLocalized("tool.activity.planning"),
-                    state: .completed
-                )
-
-                if let executionDetails = toolExecutionPresentation(
-                    toolName: trace.toolName,
-                    displayInput: trace.displayInput
-                ) {
-                    ToolActivityConnector()
-                    ToolActivityStepRow(
-                        icon: executionDetails.icon,
-                        text: executionDetails.text,
-                        state: trace.success ? .completed : .failed
-                    )
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: trace.success ? toolTraceIcon(toolName: trace.toolName) : "exclamationmark.triangle")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(trace.success ? BrandPalette.cyan : .orange)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            Circle()
+                                .fill(trace.success ? BrandPalette.cyan.opacity(0.14) : Color.orange.opacity(0.14))
+                        )
 
-                if trace.success, trace.sourceCount > 0 {
-                    ToolActivityConnector()
+                    Text(toolLabel)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(trace.success ? BrandPalette.cyan : .secondary)
+
+                    if let duration = trace.durationSeconds {
+                        Text(String(format: "%.1fs", duration))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(.fill.quaternary))
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 0) {
                     ToolActivityStepRow(
-                        icon: "doc.text.magnifyingglass",
-                        text: String(format: String.appLocalized("tool.trace.sources_found"), trace.sourceCount),
+                        icon: "wand.and.stars",
+                        text: String.appLocalized("tool.activity.planning"),
                         state: .completed
                     )
+
+                    if let executionDetails = toolExecutionPresentation(
+                        toolName: trace.toolName,
+                        displayInput: trace.displayInput
+                    ) {
+                        ToolActivityConnector()
+                        ToolActivityStepRow(
+                            icon: executionDetails.icon,
+                            text: executionDetails.text,
+                            state: trace.success ? .completed : .failed
+                        )
+                    }
+
+                    if trace.success, trace.sourceCount > 0 {
+                        ToolActivityConnector()
+                        ToolActivityStepRow(
+                            icon: "doc.text.magnifyingglass",
+                            text: String(format: String.appLocalized("tool.trace.sources_found"), trace.sourceCount),
+                            state: .completed
+                        )
+                    }
                 }
-            }
-            .padding(.top, 6)
-        } label: {
-            HStack(spacing: 8) {
-                Label(toolLabel, systemImage: trace.success ? toolTraceIcon(toolName: trace.toolName) : "exclamationmark.triangle")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(trace.success ? BrandPalette.cyan : .secondary)
-                if let duration = trace.durationSeconds {
-                    Text(String(format: "%.1fs", duration))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                .padding(.top, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.fill.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .toolChainCard(accent: trace.success ? BrandPalette.cyan : .orange)
     }
 
     private var toolLabel: String {
@@ -1434,26 +1488,29 @@ struct ToolActivityStepRow: View {
                         .tint(BrandPalette.cyan)
                 case .completed:
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.caption2)
+                        .font(.caption)
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.green)
                 case .failed:
                     Image(systemName: "xmark.circle.fill")
-                        .font(.caption2)
+                        .font(.caption)
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.red)
                 case .pending:
                     Image(systemName: "circle")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.quaternary)
                 }
             }
-            .frame(width: 16, height: 16)
+            .frame(width: 18, height: 18)
 
             Image(systemName: icon)
-                .font(.caption2.weight(.semibold))
+                .font(.caption2.weight(.bold))
                 .foregroundStyle(iconColor)
+                .frame(width: 14)
 
             Text(text)
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(textColor)
                 .lineLimit(2)
         }
@@ -1480,10 +1537,10 @@ struct ToolActivityStepRow: View {
 
 struct ToolActivityConnector: View {
     var body: some View {
-        Rectangle()
-            .fill(.quaternary)
-            .frame(width: 1, height: 10)
-            .padding(.leading, 7.5)
+        Capsule()
+            .fill(BrandPalette.cyan.opacity(0.18))
+            .frame(width: 2, height: 12)
+            .padding(.leading, 8)
     }
 }
 

@@ -9,3 +9,4 @@ iMLX/Conversations/.DS_Store
 iMLX.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserstate
 .venv*
+.hf-datasets-cache/*

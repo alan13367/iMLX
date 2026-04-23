@@ -18,6 +18,7 @@ struct ModelInfo: Identifiable, Codable {
     var localURL: URL?
 
     enum ModelFamily: String, Codable, CaseIterable {
+        case imlx
         case qwen3
         case qwen35
         case qwen2vl
@@ -29,6 +30,7 @@ struct ModelInfo: Identifiable, Codable {
 
         var displayName: String {
             switch self {
+            case .imlx: return "iMLX"
             case .qwen3: return "Qwen 3"
             case .qwen35: return "Qwen 3.5"
             case .qwen2vl: return "Qwen 2-VL"
@@ -42,6 +44,8 @@ struct ModelInfo: Identifiable, Codable {
 
         var familyDescription: String {
             switch self {
+            case .imlx:
+                return "iMLX custom models, specifically fine-tuned for the iMLX app to enable perfect tool-calling and system awareness."
             case .qwen3:
                 return "Qwen 3 focuses on efficient reasoning and strong instruction following in compact local models."
             case .qwen35:
@@ -63,6 +67,7 @@ struct ModelInfo: Identifiable, Codable {
 
         var logoName: String {
             switch self {
+            case .imlx: return "BrandLogo"
             case .qwen3, .qwen35, .qwen2vl: return "qwen_logo"
             case .gemma3, .gemma4: return "gemma_logo"
             case .mistral3: return "mistral_logo"
@@ -72,14 +77,15 @@ struct ModelInfo: Identifiable, Codable {
 
         var sortOrder: Int {
             switch self {
-            case .qwen3: return 0
-            case .qwen35: return 1
-            case .qwen2vl: return 2
-            case .gemma3: return 3
-            case .gemma4: return 4
-            case .mistral3: return 5
-            case .lfm2: return 6
-            case .lfm25: return 7
+            case .imlx: return 0
+            case .qwen3: return 1
+            case .qwen35: return 2
+            case .qwen2vl: return 3
+            case .gemma3: return 4
+            case .gemma4: return 5
+            case .mistral3: return 6
+            case .lfm2: return 7
+            case .lfm25: return 8
             }
         }
     }

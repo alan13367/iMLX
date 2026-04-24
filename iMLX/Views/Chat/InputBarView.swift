@@ -71,7 +71,7 @@ struct InputBarView: View {
     }
 
     private var primarySymbolName: String {
-        isTextEmpty ? "mic.fill" : "arrow.up"
+        isTextEmpty ? "waveform" : "arrow.up"
     }
 
     private var primaryAccessibilityLabel: String {

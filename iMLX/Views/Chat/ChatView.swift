@@ -262,6 +262,8 @@ struct ChatView: View {
 
     private var chatContent: some View {
         ZStack {
+            ChatBackgroundView()
+            
             ChatEmptyStateView()
                 .opacity(isShowingEmptyState ? 1 : 0)
                 .allowsHitTesting(isShowingEmptyState)
@@ -518,6 +520,7 @@ struct ChatView: View {
     private var canPresentLiveVoice: Bool {
         !chatViewModel.isModelLoading
             && !chatViewModel.isGenerating
+            && !chatViewModel.isThinkingEnabled
             && appState.loadedModelId != nil
             && !isRunningOnSimulator
     }

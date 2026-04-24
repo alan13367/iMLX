@@ -66,8 +66,8 @@ struct MessageBubbleView: View, Equatable {
                         generationStats: message.generationStats,
                         isThinkingExpanded: $isThinkingExpanded,
                         isToolTraceExpanded: $isToolTraceExpanded,
-                        showCopyFeedback: $showCopyFeedback,
-                        openSourceURL: openSourceURL
+                        openSourceURL: openSourceURL,
+                        onCopy: { copy(text: $0) }
                     )
                 } else if !message.content.isEmpty {
                     MessageTextBubble(
@@ -78,6 +78,13 @@ struct MessageBubbleView: View, Equatable {
                         measureWidth: shouldMeasureUserBubbleWidth,
                         measuredWidth: $userBubbleWidth
                     )
+                    .contextMenu {
+                        Button {
+                            copy(text: message.content)
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+                    }
                 }
             }
 
@@ -93,6 +100,16 @@ struct MessageBubbleView: View, Equatable {
     private func openSourceURL(_ url: URL?) {
         guard let url else { return }
         openURL(url)
+    }
+
+    private func copy(text: String) {
+        UIPasteboard.general.setValue(text, forPasteboardType: UTType.plainText.identifier)
+        showCopyFeedback = true
+        Haptics.impactLight()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            showCopyFeedback = false
+        }
     }
 
     private func iconName(for kind: ConversationDocumentKind) -> String {
@@ -209,7 +226,7 @@ private struct MessageDocumentAttachmentStrip: View {
                         if role == .user {
                             BrandPalette.primaryGradient
                         } else {
-                            Color(.tertiarySystemFill)
+                            Rectangle().fill(.regularMaterial)
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -229,8 +246,8 @@ private struct AssistantMessageContent: View {
     let generationStats: GenerationStats?
     @Binding var isThinkingExpanded: Bool
     @Binding var isToolTraceExpanded: Bool
-    @Binding var showCopyFeedback: Bool
     let openSourceURL: (URL?) -> Void
+    let onCopy: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -264,24 +281,33 @@ private struct AssistantMessageContent: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .background(.fill.quaternary)
+                .background(.regularMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+                .contextMenu {
+                    if !isStreaming {
+                        Button {
+                            onCopy(parsedContent.copyableText)
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+                    }
+                }
             }
 
             if !parsedContent.response.isEmpty {
-                HStack(alignment: .bottom, spacing: 8) {
-                    MessageTextBubble(
-                        text: parsedContent.response,
-                        role: .assistant,
-                        isStreaming: isStreaming,
-                        foregroundStyle: .primary
-                    )
+                MessageTextBubble(
+                    text: parsedContent.response,
+                    role: .assistant,
+                    isStreaming: isStreaming,
+                    foregroundStyle: .primary
+                )
+                .contextMenu {
                     if !isStreaming {
-                        MessageCopyButton(
-                            copyText: parsedContent.copyableText,
-                            showCopyFeedback: $showCopyFeedback
-                        )
-                        .padding(.bottom, 4)
+                        Button {
+                            onCopy(parsedContent.copyableText)
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
                     }
                 }
             }
@@ -298,15 +324,7 @@ private struct AssistantMessageContent: View {
                         StatsOverlayView(stats: generationStats, isLive: false)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if parsedContent.response.isEmpty {
-                        HStack {
-                            Spacer()
-                            MessageCopyButton(
-                                copyText: parsedContent.copyableText,
-                                showCopyFeedback: $showCopyFeedback
-                            )
-                        }
-                    }
+
                 }
             }
         }
@@ -339,7 +357,7 @@ private struct MessageSourcesSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .background(.fill.quaternary)
+                    .background(.regularMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
@@ -392,7 +410,7 @@ private struct MessageTextBubble: View {
             .background(
                 role == .user
                     ? AnyShapeStyle(BrandPalette.primaryGradient)
-                    : AnyShapeStyle(.fill.tertiary)
+                    : AnyShapeStyle(.regularMaterial)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .background {
@@ -434,33 +452,7 @@ private struct MessageTextBody: View {
     }
 }
 
-private struct MessageCopyButton: View {
-    let copyText: String
-    @Binding var showCopyFeedback: Bool
 
-    var body: some View {
-        Button(action: copy) {
-            Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-        }
-        .buttonStyle(.plain)
-        .frame(minWidth: 44, minHeight: 44)
-        .accessibilityLabel("Copy response")
-    }
-
-    private func copy() {
-        UIPasteboard.general.setValue(copyText, forPasteboardType: UTType.plainText.identifier)
-        showCopyFeedback = true
-        Haptics.impactLight()
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
-            showCopyFeedback = false
-        }
-    }
-}
 
 private struct MessageCopyFeedbackView: View {
     let showCopyFeedback: Bool

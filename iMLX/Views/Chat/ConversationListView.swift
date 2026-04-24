@@ -120,16 +120,18 @@ struct ConversationListView: View {
                         }
                     }
                 } else {
-                    ToolbarItemGroup(placement: .topBarLeading) {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(action: createConversation) {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .accessibilityLabel("New conversation")
+                    }
+                    ToolbarItem(placement: .topBarLeading) {
                         if canClearAllConversations {
                             Button(String.appLocalized("common.select")) {
                                 startSelecting()
                             }
                         }
-                        Button(action: createConversation) {
-                            Image(systemName: "plus")
-                        }
-                        .accessibilityLabel("New conversation")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -141,34 +143,18 @@ struct ConversationListView: View {
                     }
                 }
             } else {
-                ToolbarItem(placement: .topBarLeading) {
-                    if isSelectionMode {
+                if isSelectionMode {
+                    ToolbarItem(placement: .topBarLeading) {
                         Button(String.appLocalized("common.cancel")) {
                             stopSelecting()
                         }
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if isSelectionMode {
-                        Button(String.appLocalized("common.cancel")) {
-                            stopSelecting()
-                        }
-                    } else if canClearAllConversations {
-                        Button(String.appLocalized("common.select")) {
-                            startSelecting()
-                        }
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if isSelectionMode {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
                         Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
                             toggleSelectAll()
                         }
                         .disabled(!canClearAllConversations)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if isSelectionMode {
+                        
                         Button(role: .destructive) {
                             isShowingDeleteSelectedAlert = true
                         } label: {
@@ -176,11 +162,20 @@ struct ConversationListView: View {
                         }
                         .disabled(!hasSelectedConversations)
                         .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
-                    } else {
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
                         Button(action: createConversation) {
-                            Image(systemName: "plus")
+                            Image(systemName: "square.and.pencil")
                         }
                         .accessibilityLabel("New conversation")
+                    }
+                    ToolbarItem(placement: .topBarLeading) {
+                        if canClearAllConversations {
+                            Button(String.appLocalized("common.select")) {
+                                startSelecting()
+                            }
+                        }
                     }
                 }
             }

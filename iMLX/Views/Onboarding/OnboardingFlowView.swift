@@ -9,16 +9,21 @@ private enum OnboardingStep: Int, CaseIterable {
 
     var title: String {
         switch self {
-        case .welcome:
-            "Welcome to iMLX"
-        case .modelSelection:
-            "Recommended starter models"
-        case .personasAndMemory:
-            "Personas and memory"
-        case .documentsAndVision:
-            "Documents and vision"
-        case .finish:
-            "You’re ready"
+        case .welcome: "Welcome to iMLX"
+        case .modelSelection: "Starter Models"
+        case .personasAndMemory: "Personas & Memory"
+        case .documentsAndVision: "Documents & Vision"
+        case .finish: "You’re Ready"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .welcome: "sparkles"
+        case .modelSelection: "cpu"
+        case .personasAndMemory: "brain"
+        case .documentsAndVision: "eye.fill"
+        case .finish: "checkmark.circle.fill"
         }
     }
 }
@@ -47,38 +52,74 @@ struct OnboardingFlowView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                OnboardingProgressHeader(
-                    title: step.title,
-                    stepIndex: step.rawValue,
-                    stepCount: OnboardingStep.allCases.count
-                )
+        ZStack(alignment: .bottom) {
+            ChatBackgroundView()
+                .ignoresSafeArea()
 
-                OnboardingStepContent(
-                    step: step,
-                    recommendedModels: recommendedModels,
-                    selectedModelID: selectedModelID,
-                    pendingStarterModelID: appState.pendingStarterModelId,
-                    modelDownloadSnapshots: appState.modelDownloadSnapshots,
-                    isSelectedModelDownloaded: isSelectedModelDownloaded,
-                    onSelectModel: selectModel
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            TabView(selection: $step) {
+                ForEach(OnboardingStep.allCases, id: \.self) { currentStep in
+                    ScrollView {
+                        VStack(spacing: 32) {
+                            OnboardingProgressHeader(
+                                step: currentStep,
+                                stepIndex: currentStep.rawValue,
+                                stepCount: OnboardingStep.allCases.count
+                            )
+                            .padding(.top, 60)
 
-                OnboardingFooter(
-                    step: step,
-                    isStartingDownload: isStartingDownload,
-                    selectedModel: selectedModel,
-                    downloadButtonTitle: downloadButtonTitle,
-                    onDownloadSelectedModel: startSelectedModelDownload,
-                    onSkipModelSelection: advance,
-                    onContinue: continueFlow,
-                    onBack: goBack
-                )
+                            OnboardingStepContent(
+                                step: currentStep,
+                                recommendedModels: recommendedModels,
+                                selectedModelID: selectedModelID,
+                                pendingStarterModelID: appState.pendingStarterModelId,
+                                modelDownloadSnapshots: appState.modelDownloadSnapshots,
+                                isSelectedModelDownloaded: isSelectedModelDownloaded,
+                                onSelectModel: selectModel
+                            )
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 220) // Give space for the footer
+                    }
+                    .scrollIndicators(.hidden)
+                    .tag(currentStep)
+                }
             }
-            .padding(24)
-            .navigationBarBackButtonHidden(true)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: step)
+            .onChange(of: step) { _, _ in
+                Haptics.selectionChanged()
+            }
+
+            // Fixed Footer
+            OnboardingFooter(
+                step: step,
+                isStartingDownload: isStartingDownload,
+                selectedModel: selectedModel,
+                downloadButtonTitle: downloadButtonTitle,
+                onDownloadSelectedModel: startSelectedModelDownload,
+                onSkipModelSelection: advance,
+                onContinue: continueFlow,
+                onBack: goBack
+            )
+            .padding(.horizontal, 24)
+            .padding(.bottom, 48)
+            .padding(.top, 40)
+            .background(
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0.0),
+                                .init(color: .black, location: 0.35),
+                                .init(color: .black, location: 1.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .ignoresSafeArea(edges: .bottom)
+            )
         }
     }
 
@@ -131,15 +172,33 @@ struct OnboardingFlowView: View {
 }
 
 private struct OnboardingProgressHeader: View {
-    let title: String
+    let step: OnboardingStep
     let stepIndex: Int
     let stepCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.largeTitle.weight(.bold))
-            ProgressView(value: Double(stepIndex + 1), total: Double(stepCount))
+        VStack(spacing: 24) {
+            Image(systemName: step.icon)
+                .font(.system(size: 56, weight: .light))
+                .foregroundStyle(BrandPalette.primaryGradient)
+                .symbolEffect(.bounce.up.byLayer, options: .nonRepeating)
+                .frame(height: 60)
+            
+            VStack(spacing: 12) {
+                Text(step.title)
+                    .font(.system(.title, design: .rounded).weight(.bold))
+                    .multilineTextAlignment(.center)
+                
+                HStack(spacing: 8) {
+                    ForEach(0..<stepCount, id: \.self) { i in
+                        Capsule()
+                            .fill(i == stepIndex ? BrandPalette.accent : Color.secondary.opacity(0.3))
+                            .frame(width: i == stepIndex ? 24 : 8, height: 8)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: stepIndex)
+                    }
+                }
+                .padding(.top, 4)
+            }
         }
     }
 }
@@ -159,14 +218,17 @@ private struct OnboardingStepContent: View {
             OnboardingFeatureList(
                 cards: [
                     OnboardingCardContent(
+                        icon: "iphone.gen3",
                         title: "Local-first by default",
                         body: "iMLX runs your chat models on-device. Your conversations, personas, documents, and memories stay on your Apple hardware unless you explicitly turn on a network feature."
                     ),
                     OnboardingCardContent(
+                        icon: "hand.raised.fill",
                         title: "Privacy before convenience",
                         body: "Web search is opt-in per conversation, and starter model downloads happen only when you choose them."
                     ),
                     OnboardingCardContent(
+                        icon: "cpu",
                         title: "Built for your device",
                         body: "We’ll recommend a small starter set of models based on this device’s memory tier so setup stays smooth."
                     )
@@ -182,10 +244,12 @@ private struct OnboardingStepContent: View {
             OnboardingFeatureList(
                 cards: [
                     OnboardingCardContent(
+                        icon: "person.2.fill",
                         title: "Personas shape the assistant",
                         body: "Each conversation can use a different persona, changing tone, focus, and prompting without swapping your model automatically."
                     ),
                     OnboardingCardContent(
+                        icon: "brain",
                         title: "Memory stays local",
                         body: "iMLX can infer useful memories from your chats, but pending memories stay reviewable before they become active."
                     )
@@ -195,10 +259,12 @@ private struct OnboardingStepContent: View {
             OnboardingFeatureList(
                 cards: [
                     OnboardingCardContent(
+                        icon: "doc.text.fill",
                         title: "Documents are grounded locally",
                         body: "Attach PDFs, CSVs, or text files to a conversation and iMLX retrieves relevant excerpts on-device before answering."
                     ),
                     OnboardingCardContent(
+                        icon: "eye.fill",
                         title: "Vision depends on the model",
                         body: "Only vision-capable models can work with photos. You can swap later if you need image understanding in a conversation."
                     )
@@ -223,17 +289,22 @@ private struct OnboardingModelSelectionStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Recommended starter models")
-                .font(.title2.weight(.semibold))
             Text("Choose one model to download now, or skip and browse models later.")
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 8)
 
             ForEach(recommendedModels) { model in
                 OnboardingStarterModelRow(
                     model: model,
                     isRecommended: recommendedModels.first?.id == model.id,
                     isSelected: selectedModelID == model.id,
-                    onSelect: { onSelectModel(model.id) }
+                    onSelect: {
+                        Haptics.selectionChanged()
+                        onSelectModel(model.id)
+                    }
                 )
             }
         }
@@ -256,6 +327,7 @@ private struct OnboardingFinishStep: View {
         VStack(alignment: .leading, spacing: 18) {
             OnboardingFeatureCard(
                 content: OnboardingCardContent(
+                    icon: "sparkles",
                     title: "You’re ready",
                     body: "Start chatting as soon as your model is loaded, or keep exploring personas, memory, and documents from the main app."
                 )
@@ -266,6 +338,7 @@ private struct OnboardingFinishStep: View {
                let model = recommendedModels.first(where: { $0.id == pendingStarterModelID }) {
                 OnboardingFeatureCard(
                     content: OnboardingCardContent(
+                        icon: "arrow.down.circle.fill",
                         title: "Starter model downloading",
                         body: "\(model.displayName) is downloading in the background.\n\n\(snapshot.displayStatus)"
                     )
@@ -273,6 +346,7 @@ private struct OnboardingFinishStep: View {
             } else if let selectedModel, isSelectedModelDownloaded {
                 OnboardingFeatureCard(
                     content: OnboardingCardContent(
+                        icon: "checkmark.circle.fill",
                         title: "Starter model ready",
                         body: "\(selectedModel.displayName) finished downloading and is ready to load."
                     )
@@ -305,32 +379,57 @@ private struct OnboardingFooter: View {
     let onBack: () -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             if step == .modelSelection {
                 if let selectedModel {
-                    Button(action: onDownloadSelectedModel) {
-                        if isStartingDownload {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            Text(downloadButtonTitle(selectedModel))
-                                .frame(maxWidth: .infinity)
+                    Button(action: {
+                        Haptics.impactLight()
+                        onDownloadSelectedModel()
+                    }) {
+                        HStack {
+                            if isStartingDownload {
+                                ProgressView()
+                            } else {
+                                Text(downloadButtonTitle(selectedModel))
+                            }
                         }
+                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
                     .disabled(isStartingDownload)
                 }
 
-                Button("Skip for now", action: onSkipModelSelection)
-                    .buttonStyle(.bordered)
+                Button(action: {
+                    Haptics.impactLight()
+                    onSkipModelSelection()
+                }) {
+                    Text("Skip for now")
+                        .frame(maxWidth: .infinity)
+                }
+                .liquidGlassButtonStyle(prominent: false)
             } else {
-                Button(step == .finish ? "Start Using iMLX" : "Continue", action: onContinue)
-                    .buttonStyle(.borderedProminent)
+                Button(action: {
+                    Haptics.impactLight()
+                    onContinue()
+                }) {
+                    Text(step == .finish ? "Start Using iMLX" : "Continue")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
             }
 
             if step.rawValue > OnboardingStep.welcome.rawValue && step != .finish {
-                Button("Back", action: onBack)
-                    .buttonStyle(.plain)
+                Button(action: {
+                    Haptics.selectionChanged()
+                    onBack()
+                }) {
+                    Text("Back")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -344,17 +443,19 @@ private struct OnboardingStarterModelRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(model.displayName)
                             .font(.headline)
+                            .foregroundStyle(.primary)
                         if isRecommended {
                             Text("Recommended")
-                                .font(.caption.weight(.semibold))
+                                .font(.caption2.weight(.bold))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
-                                .background(BrandPalette.accent.opacity(0.15), in: Capsule())
+                                .background(BrandPalette.primaryGradient, in: Capsule())
+                                .foregroundStyle(.white)
                         }
                     }
 
@@ -363,14 +464,26 @@ private struct OnboardingStarterModelRow: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
 
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? BrandPalette.accent : .secondary)
+                ZStack {
+                    Circle()
+                        .stroke(isSelected ? BrandPalette.accent : Color.secondary.opacity(0.3), lineWidth: 2)
+                        .frame(width: 24, height: 24)
+                    
+                    if isSelected {
+                        Circle()
+                            .fill(BrandPalette.primaryGradient)
+                            .frame(width: 14, height: 14)
+                    }
+                }
             }
-            .padding(16)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .padding(20)
+            .liquidGlassSurface(
+                tint: isSelected ? BrandPalette.accent.opacity(0.1) : nil,
+                in: RoundedRectangle(cornerRadius: 24),
+                interactive: true
+            )
         }
         .buttonStyle(.plain)
     }
@@ -378,6 +491,7 @@ private struct OnboardingStarterModelRow: View {
 
 private struct OnboardingCardContent: Identifiable {
     var id: String { title }
+    let icon: String
     let title: String
     let body: String
 }
@@ -386,26 +500,42 @@ private struct OnboardingFeatureCard: View {
     let content: OnboardingCardContent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(content.title)
-                .font(.headline)
-            Text(content.body)
-                .font(.body)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: content.icon)
+                .font(.title2)
+                .foregroundStyle(BrandPalette.primaryGradient)
+                .frame(width: 32)
+                .padding(.top, 2)
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text(content.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(content.body)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .liquidGlassSurface(in: RoundedRectangle(cornerRadius: 24))
     }
 }
 
 #Preview("Onboarding Card") {
-    OnboardingFeatureCard(
-        content: OnboardingCardContent(
-            title: "Privacy before convenience",
-            body: "Web search is opt-in per conversation, and starter model downloads happen only when you choose them."
+    ZStack {
+        ChatBackgroundView()
+            .ignoresSafeArea()
+        
+        OnboardingFeatureCard(
+            content: OnboardingCardContent(
+                icon: "hand.raised.fill",
+                title: "Privacy before convenience",
+                body: "Web search is opt-in per conversation, and starter model downloads happen only when you choose them."
+            )
         )
-    )
-    .padding()
+        .padding()
+    }
 }
+

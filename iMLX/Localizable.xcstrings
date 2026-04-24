@@ -1009,7 +1009,7 @@
         }
       }
     },
-    "Copy response" : {
+    "Copy" : {
 
     },
     "Delete conversation" : {
@@ -3747,9 +3747,6 @@
       }
     },
     "Recommended" : {
-
-    },
-    "Recommended starter models" : {
 
     },
     "Relation" : {

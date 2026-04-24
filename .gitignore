@@ -10,3 +10,7 @@ iMLX.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserstate
 .venv*
 .hf-datasets-cache/*
+training/artifacts/*
+!training/artifacts/README.md
+training/runs/*
+training/

@@ -32,7 +32,7 @@ struct ModelBrowserView: View {
         }
         .navigationTitle(String.appLocalized("models.browser.title"))
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     dismiss()
                 } label: {

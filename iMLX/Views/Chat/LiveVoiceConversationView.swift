@@ -124,19 +124,6 @@ private struct LiveVoiceHeaderBar: View {
 
     var body: some View {
         HStack {
-            Button(action: onClose) {
-                CloseButtonLabel(foregroundStyle: .white.opacity(0.72))
-                    .liquidGlassSurface(
-                        in: Circle(),
-                        fallback: AnyShapeStyle(.ultraThinMaterial),
-                        interactive: true
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(String.appLocalized("voice.close"))
-
-            Spacer()
-
             Text(voiceLocaleName)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.9))
@@ -147,6 +134,19 @@ private struct LiveVoiceHeaderBar: View {
                     in: Capsule(),
                     fallback: AnyShapeStyle(.ultraThinMaterial)
                 )
+
+            Spacer()
+
+            Button(action: onClose) {
+                CloseButtonLabel(foregroundStyle: .white.opacity(0.72))
+                    .liquidGlassSurface(
+                        in: Circle(),
+                        fallback: AnyShapeStyle(.ultraThinMaterial),
+                        interactive: true
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String.appLocalized("voice.close"))
         }
     }
 }

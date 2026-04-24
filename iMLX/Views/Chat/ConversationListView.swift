@@ -99,53 +99,89 @@ struct ConversationListView: View {
         }
         .navigationTitle(navigationTitle)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                if presentation == .modalSheet {
-                    Button {
-                        onClose?()
-                    } label: {
-                        CloseButtonLabel()
-                    }
-                    .accessibilityLabel(String.appLocalized("common.close"))
-                } else if isSelectionMode {
-                    Button(String.appLocalized("common.cancel")) {
-                        stopSelecting()
-                    }
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
+            if presentation == .modalSheet {
                 if isSelectionMode {
-                    Button(String.appLocalized("common.cancel")) {
-                        stopSelecting()
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
+                            toggleSelectAll()
+                        }
+                        .disabled(!canClearAllConversations)
+                        Button(role: .destructive) {
+                            isShowingDeleteSelectedAlert = true
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .disabled(!hasSelectedConversations)
+                        .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
                     }
-                } else if canClearAllConversations {
-                    Button(String.appLocalized("common.select")) {
-                        startSelecting()
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(String.appLocalized("common.cancel")) {
+                            stopSelecting()
+                        }
                     }
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                if isSelectionMode {
-                    Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
-                        toggleSelectAll()
-                    }
-                    .disabled(!canClearAllConversations)
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                if isSelectionMode {
-                    Button(role: .destructive) {
-                        isShowingDeleteSelectedAlert = true
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .disabled(!hasSelectedConversations)
-                    .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
                 } else {
-                    Button(action: createConversation) {
-                        Image(systemName: "plus")
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        if canClearAllConversations {
+                            Button(String.appLocalized("common.select")) {
+                                startSelecting()
+                            }
+                        }
+                        Button(action: createConversation) {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("New conversation")
                     }
-                    .accessibilityLabel("New conversation")
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            onClose?()
+                        } label: {
+                            CloseButtonLabel()
+                        }
+                        .accessibilityLabel(String.appLocalized("common.close"))
+                    }
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    if isSelectionMode {
+                        Button(String.appLocalized("common.cancel")) {
+                            stopSelecting()
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if isSelectionMode {
+                        Button(String.appLocalized("common.cancel")) {
+                            stopSelecting()
+                        }
+                    } else if canClearAllConversations {
+                        Button(String.appLocalized("common.select")) {
+                            startSelecting()
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if isSelectionMode {
+                        Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
+                            toggleSelectAll()
+                        }
+                        .disabled(!canClearAllConversations)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if isSelectionMode {
+                        Button(role: .destructive) {
+                            isShowingDeleteSelectedAlert = true
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .disabled(!hasSelectedConversations)
+                        .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
+                    } else {
+                        Button(action: createConversation) {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("New conversation")
+                    }
                 }
             }
         }

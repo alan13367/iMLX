@@ -89,7 +89,7 @@ struct MemoryLibraryView: View {
         .navigationTitle(String.appLocalized("memory.library.title"))
         .toolbar {
             if let onClose {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onClose) {
                         CloseButtonLabel()
                     }

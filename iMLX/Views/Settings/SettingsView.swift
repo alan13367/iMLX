@@ -109,7 +109,7 @@ struct SettingsView: View {
         }
         .navigationTitle(String.appLocalized("settings.title"))
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     dismiss()
                 } label: {

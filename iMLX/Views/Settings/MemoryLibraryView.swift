@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MemoryLibraryView: View {
     let appState: AppState
+    var onClose: (() -> Void)?
 
     @State private var editingMemory: UserMemory?
     @State private var selectedMemoryDetail: MemoryDetail?
@@ -86,6 +87,16 @@ struct MemoryLibraryView: View {
             }
         }
         .navigationTitle(String.appLocalized("memory.library.title"))
+        .toolbar {
+            if let onClose {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel(String.appLocalized("common.close"))
+                }
+            }
+        }
         .sheet(item: $editingMemory) { memory in
             NavigationStack {
                 MemoryEditorView(appState: appState, memory: memory)

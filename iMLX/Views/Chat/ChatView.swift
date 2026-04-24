@@ -359,22 +359,19 @@ struct ChatView: View {
         NavigationStack {
             switch sheet {
             case .conversations:
-                ConversationListView(appState: appState, presentation: .modalSheet) { _ in
+                ConversationListView(
+                    appState: appState,
+                    presentation: .modalSheet,
+                    onClose: { utilitySheet = nil }
+                ) { _ in
                     utilitySheet = nil
                 }
             case .models:
                 ModelBrowserView(appState: appState)
             case .memoryLibrary:
-                MemoryLibraryView(appState: appState)
+                MemoryLibraryView(appState: appState, onClose: { utilitySheet = nil })
             case .settings:
                 SettingsView(appState: appState)
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(String.appLocalized("common.done")) {
-                    utilitySheet = nil
-                }
             }
         }
     }

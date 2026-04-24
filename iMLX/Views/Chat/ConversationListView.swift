@@ -8,10 +8,13 @@ enum ConversationListPresentation {
 struct ConversationListView: View {
     let appState: AppState
     var presentation: ConversationListPresentation = .rootNavigation
+    var onClose: (() -> Void)?
     var onSelect: (UUID) -> Void
 
     @State private var conversationPendingDeletion: Conversation?
-    @State private var isShowingClearAllAlert = false
+    @State private var isShowingDeleteSelectedAlert = false
+    @State private var isSelectionMode = false
+    @State private var selectedConversationIDs: Set<UUID> = []
 
     private var isShowingDeleteAlert: Binding<Bool> {
         Binding(
@@ -24,12 +27,20 @@ struct ConversationListView: View {
         )
     }
 
-    private var showsInlineDeleteButton: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
-    }
-
     private var canClearAllConversations: Bool {
         !appState.conversations.isEmpty
+    }
+
+    private var allConversationIDs: Set<UUID> {
+        Set(appState.conversations.map(\.id))
+    }
+
+    private var hasSelectedConversations: Bool {
+        !selectedConversationIDs.isEmpty
+    }
+
+    private var hasSelectedAllConversations: Bool {
+        canClearAllConversations && selectedConversationIDs == allConversationIDs
     }
 
     private var navigationTitle: String {
@@ -47,22 +58,40 @@ struct ConversationListView: View {
                     ConversationListItem(
                         conversation: conversation,
                         isActive: appState.activeConversationId == conversation.id,
-                        showsInlineDeleteButton: showsInlineDeleteButton,
+                        isSelectionMode: isSelectionMode,
+                        isSelected: selectedConversationIDs.contains(conversation.id),
                         onOpen: { selectConversation(conversation.id) },
-                        onDelete: { confirmDeletion(for: conversation) }
+                        onToggleSelection: { toggleSelection(for: conversation.id) }
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            confirmDeletion(for: conversation)
-                        } label: {
-                            Label(String.appLocalized("common.delete"), systemImage: "trash")
+                        if !isSelectionMode {
+                            Button(role: .destructive) {
+                                confirmDeletion(for: conversation)
+                            } label: {
+                                Label(String.appLocalized("common.delete"), systemImage: "trash")
+                            }
                         }
                     }
                     .contextMenu {
-                        Button(role: .destructive) {
-                            confirmDeletion(for: conversation)
-                        } label: {
-                            Label(String.appLocalized("common.delete"), systemImage: "trash")
+                        if isSelectionMode {
+                            Button {
+                                toggleSelection(for: conversation.id)
+                            } label: {
+                                Label(
+                                    selectedConversationIDs.contains(conversation.id)
+                                        ? String.appLocalized("conversation.deselect")
+                                        : String.appLocalized("common.select"),
+                                    systemImage: selectedConversationIDs.contains(conversation.id)
+                                        ? "checkmark.circle.fill"
+                                        : "circle"
+                                )
+                            }
+                        } else {
+                            Button(role: .destructive) {
+                                confirmDeletion(for: conversation)
+                            } label: {
+                                Label(String.appLocalized("common.delete"), systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -71,20 +100,53 @@ struct ConversationListView: View {
         .navigationTitle(navigationTitle)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                if canClearAllConversations {
-                    Button(role: .destructive) {
-                        isShowingClearAllAlert = true
+                if presentation == .modalSheet {
+                    Button {
+                        onClose?()
                     } label: {
-                        Image(systemName: "trash")
+                        Image(systemName: "xmark")
                     }
-                    .accessibilityLabel(String.appLocalized("conversation.clear_all"))
+                    .accessibilityLabel(String.appLocalized("common.close"))
+                } else if isSelectionMode {
+                    Button(String.appLocalized("common.cancel")) {
+                        stopSelecting()
+                    }
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: createConversation) {
-                    Image(systemName: "plus")
+                if isSelectionMode {
+                    Button(String.appLocalized("common.cancel")) {
+                        stopSelecting()
+                    }
+                } else if canClearAllConversations {
+                    Button(String.appLocalized("common.select")) {
+                        startSelecting()
+                    }
                 }
-                .accessibilityLabel("New conversation")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if isSelectionMode {
+                    Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
+                        toggleSelectAll()
+                    }
+                    .disabled(!canClearAllConversations)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if isSelectionMode {
+                    Button(role: .destructive) {
+                        isShowingDeleteSelectedAlert = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(!hasSelectedConversations)
+                    .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
+                } else {
+                    Button(action: createConversation) {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("New conversation")
+                }
             }
         }
         .alert(
@@ -101,15 +163,15 @@ struct ConversationListView: View {
         } message: { conversation in
             Text(String(format: String.appLocalized("conversation.delete_message"), conversation.displayTitle))
         }
-        .alert(String.appLocalized("conversation.clear_alert_title"), isPresented: $isShowingClearAllAlert) {
-            Button(String.appLocalized("conversation.clear_confirm"), role: .destructive) {
-                clearAllConversations()
+        .alert(String.appLocalized("conversation.delete_selected_title"), isPresented: $isShowingDeleteSelectedAlert) {
+            Button(String.appLocalized("common.delete"), role: .destructive) {
+                deleteSelectedConversations()
             }
             Button(String.appLocalized("common.cancel"), role: .cancel) {
-                isShowingClearAllAlert = false
+                isShowingDeleteSelectedAlert = false
             }
         } message: {
-            Text(String.appLocalized("conversation.clear_alert_message"))
+            Text(String(format: String.appLocalized("conversation.delete_selected_message"), selectedConversationIDs.count))
         }
     }
 
@@ -117,15 +179,6 @@ struct ConversationListView: View {
         appState.deleteConversation(conversation.id)
         if conversationPendingDeletion?.id == conversation.id {
             conversationPendingDeletion = nil
-        }
-    }
-
-    private func clearAllConversations() {
-        appState.clearAllConversations()
-        isShowingClearAllAlert = false
-        conversationPendingDeletion = nil
-        if let id = appState.activeConversationId {
-            onSelect(id)
         }
     }
 
@@ -141,6 +194,41 @@ struct ConversationListView: View {
 
     private func confirmDeletion(for conversation: Conversation) {
         conversationPendingDeletion = conversation
+    }
+
+    private func startSelecting() {
+        isSelectionMode = true
+        selectedConversationIDs = []
+    }
+
+    private func stopSelecting() {
+        isSelectionMode = false
+        selectedConversationIDs = []
+    }
+
+    private func toggleSelection(for id: UUID) {
+        if selectedConversationIDs.contains(id) {
+            selectedConversationIDs.remove(id)
+        } else {
+            selectedConversationIDs.insert(id)
+        }
+    }
+
+    private func toggleSelectAll() {
+        selectedConversationIDs = hasSelectedAllConversations ? [] : allConversationIDs
+    }
+
+    private func deleteSelectedConversations() {
+        let ids = selectedConversationIDs
+        for id in ids {
+            appState.deleteConversation(id)
+        }
+        isShowingDeleteSelectedAlert = false
+        conversationPendingDeletion = nil
+        stopSelecting()
+        if let id = appState.activeConversationId {
+            onSelect(id)
+        }
     }
 
     private var emptyContent: some View {
@@ -161,13 +249,29 @@ struct ConversationListView: View {
 private struct ConversationListItem: View {
     let conversation: Conversation
     let isActive: Bool
-    let showsInlineDeleteButton: Bool
+    let isSelectionMode: Bool
+    let isSelected: Bool
     let onOpen: () -> Void
-    let onDelete: () -> Void
+    let onToggleSelection: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Button(action: onOpen) {
+            if isSelectionMode {
+                Button(action: onToggleSelection) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(isSelected ? .blue : .secondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(
+                    isSelected
+                        ? String.appLocalized("conversation.deselect")
+                        : String.appLocalized("common.select")
+                )
+            }
+
+            Button(action: isSelectionMode ? onToggleSelection : onOpen) {
                 ConversationRow(
                     conversation: conversation,
                     isActive: isActive,
@@ -177,25 +281,7 @@ private struct ConversationListItem: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(conversation.displayTitle)
-            .accessibilityHint("Open conversation")
-
-            if showsInlineDeleteButton {
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .liquidGlassSurface(
-                            tint: .red.opacity(0.14),
-                            in: Circle(),
-                            fallback: AnyShapeStyle(.fill.tertiary),
-                            interactive: true
-                        )
-                }
-                .buttonStyle(.borderless)
-                .frame(width: 44, height: 44)
-                .accessibilityLabel("Delete conversation")
-            }
+            .accessibilityHint(isSelectionMode ? String.appLocalized("common.select") : "Open conversation")
         }
     }
 }

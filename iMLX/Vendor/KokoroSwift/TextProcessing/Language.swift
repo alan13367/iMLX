@@ -12,4 +12,8 @@ nonisolated public enum Language: String, CaseIterable {
   case enUS = "en-us"
   /// GB English (British English).
   case enGB = "en-gb"
+  /// Spanish.
+  case spanish = "es"
+  /// Mandarin Chinese.
+  case mandarinChinese = "zh"
 }

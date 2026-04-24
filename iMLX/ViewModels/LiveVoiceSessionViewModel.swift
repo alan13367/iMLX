@@ -10,7 +10,7 @@ final class LiveVoiceSessionViewModel {
 
     var partialTranscript = ""
     var lastUserTranscript = ""
-    var statusText = "Voice mode is ready."
+    var statusText = String.appLocalized("voice.status.ready")
     var errorMessage: String?
     var memoryWarningMessage: String?
     var isListening = false
@@ -27,6 +27,8 @@ final class LiveVoiceSessionViewModel {
     private let playbackService = SpeechPlaybackService()
     private var isSessionActive = true
     private var suspendedModelForPlayback: ModelInfo?
+    private var turnTask: Task<Void, Never>?
+    private var activeSpeakSession: UUID?
 
     init(appState: AppState, chatViewModel: ChatViewModel) {
         self.appState = appState
@@ -44,11 +46,6 @@ final class LiveVoiceSessionViewModel {
         return .idle
     }
 
-    var localeSupportMessage: String? {
-        guard !voiceLocale.supportsLiveKokoroSynthesis else { return nil }
-        return "Kokoro live voice is currently available only in English in this build."
-    }
-
     var canStartListening: Bool {
         !isPreparingAssets
             && !isRestoringConversationModel
@@ -56,20 +53,20 @@ final class LiveVoiceSessionViewModel {
             && !isSpeaking
             && !isGeneratingReply
             && !needsAssetDownload
-            && localeSupportMessage == nil
             && (appState.loadedModelId != nil || suspendedModelForPlayback != nil)
             && !isRunningOnSimulator
     }
 
+    var canStopSpeaking: Bool {
+        isSpeaking && !isGeneratingReply
+    }
+
     var unavailableReason: String? {
         if isRunningOnSimulator {
-            return "Live voice is available only on a physical device."
+            return String.appLocalized("voice.status.device_only")
         }
         if appState.loadedModelId == nil && suspendedModelForPlayback == nil && !isRestoringConversationModel {
-            return "Load a chat model before starting live voice."
-        }
-        if let localeSupportMessage {
-            return localeSupportMessage
+            return String.appLocalized("voice.status.load_model")
         }
         return nil
     }
@@ -83,28 +80,28 @@ final class LiveVoiceSessionViewModel {
         } else if let memoryWarningMessage {
             statusText = memoryWarningMessage
         } else if needsAssetDownload {
-            statusText = "Local voice needs a one-time Kokoro download for \(voiceLocale.displayName)."
+            statusText = String(format: String.appLocalized("voice.status.download_needed"), voiceLocale.displayName)
         } else if isGeneratingReply {
-            statusText = "Generating..."
+            statusText = String.appLocalized("voice.status.generating")
         } else if isRestoringConversationModel {
-            statusText = "Reloading the chat model for the next turn."
+            statusText = String.appLocalized("voice.status.reloading_model")
         } else if !isListening && !isSpeaking {
-            statusText = "Tap the mic to start a live voice conversation."
+            statusText = String.appLocalized("voice.status.tap_mic")
         }
     }
 
     func downloadAssets() async {
         errorMessage = nil
         isPreparingAssets = true
-        statusText = "Downloading local voice assets..."
+        statusText = String.appLocalized("voice.status.downloading_assets")
 
         do {
             _ = try await appState.speechAssetService.prepareAssets(for: voiceLocale)
             needsAssetDownload = false
-            statusText = "Voice assets are ready."
+            statusText = String.appLocalized("voice.status.assets_ready")
         } catch {
             errorMessage = error.localizedDescription
-            statusText = "Voice asset download failed."
+            statusText = String.appLocalized("voice.status.asset_download_failed")
         }
 
         isPreparingAssets = false
@@ -114,20 +111,33 @@ final class LiveVoiceSessionViewModel {
         if isListening {
             recognitionService.stopRecognition()
             isListening = false
-            statusText = "Listening stopped."
+            statusText = String.appLocalized("voice.status.listening_stopped")
             return
         }
         await startListeningCycle()
     }
 
+    func stopSpeaking() async {
+        guard canStopSpeaking else { return }
+        activeSpeakSession = nil
+        playbackService.stop()
+        isSpeaking = false
+        statusText = String.appLocalized("voice.status.tap_mic")
+        await resumeConversationModelIfNeeded()
+    }
+
     func invalidateForLanguageChange() async {
         await close()
-        errorMessage = "Voice mode closed because the app language changed."
+        errorMessage = String.appLocalized("voice.status.language_changed")
         await refresh()
     }
 
     func close() async {
         isSessionActive = false
+        activeSpeakSession = nil
+        turnTask?.cancel()
+        turnTask = nil
+        chatViewModel.stopGeneration(discardPartialResponse: true)
         recognitionService.stopRecognition()
         playbackService.stop()
         await appState.inferenceService.unloadSpeechSynthesisResources()
@@ -146,35 +156,38 @@ final class LiveVoiceSessionViewModel {
         refreshMemoryWarning(for: .startListening)
         guard memoryWarningMessage == nil else {
             errorMessage = memoryWarningMessage
-            statusText = "Not enough free memory for live voice."
+            statusText = String.appLocalized("voice.status.memory_low")
             return
         }
         guard !needsAssetDownload else {
-            statusText = "Download the local voice assets to continue."
+            statusText = String.appLocalized("voice.status.download_to_continue")
             return
         }
 
         let hasPermissions = await recognitionService.requestPermissions()
         guard hasPermissions else {
-            errorMessage = "Microphone and speech recognition permissions are required for live voice."
-            statusText = "Permissions are required."
+            errorMessage = String.appLocalized("voice.status.permissions_required_detail")
+            statusText = String.appLocalized("voice.status.permissions_required")
             return
         }
 
         partialTranscript = ""
         errorMessage = nil
-        statusText = "Listening..."
+        statusText = String.appLocalized("voice.status.listening")
 
         do {
             try recognitionService.startRecognition(
                 locale: voiceLocale,
                 onPartial: { [weak self] transcript in
                     guard let self else { return }
+                    guard self.isSessionActive else { return }
                     self.partialTranscript = transcript
                 },
                 onFinal: { [weak self] transcript in
                     guard let self else { return }
-                    Task { @MainActor in
+                    guard self.isSessionActive else { return }
+                    self.turnTask?.cancel()
+                    self.turnTask = Task { @MainActor in
                         await self.handleRecognizedTranscript(transcript)
                     }
                 }
@@ -182,41 +195,54 @@ final class LiveVoiceSessionViewModel {
             isListening = true
         } catch {
             errorMessage = error.localizedDescription
-            statusText = "Unable to start listening."
+            statusText = String.appLocalized("voice.status.listening_failed")
         }
     }
 
     private func handleRecognizedTranscript(_ transcript: String) async {
+        guard isSessionActive, !Task.isCancelled else { return }
         isListening = false
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            statusText = "I didn't catch that. Tap the mic to try again."
+            statusText = String.appLocalized("voice.status.no_speech")
             return
         }
 
         partialTranscript = ""
         lastUserTranscript = trimmed
         isGeneratingReply = true
-        statusText = "Generating..."
+        statusText = String.appLocalized("voice.status.generating")
 
         guard let assistantMessage = await chatViewModel.sendMessageAndWait(
             trimmed,
             allowPostReplyTasks: false
         ) else {
             isGeneratingReply = false
-            statusText = "No reply was generated."
+            guard isSessionActive, !Task.isCancelled else { return }
+            statusText = String.appLocalized("voice.status.no_reply")
+            return
+        }
+        guard isSessionActive, !Task.isCancelled else {
+            isGeneratingReply = false
             return
         }
 
         await suspendConversationModelForPlaybackIfNeeded()
+        guard isSessionActive, !Task.isCancelled else {
+            isGeneratingReply = false
+            await resumeConversationModelIfNeeded()
+            return
+        }
         isGeneratingReply = false
         await speak(assistantMessage.content)
     }
 
     private func speak(_ text: String) async {
+        guard isSessionActive, !Task.isCancelled else { return }
         guard let assetLocations = await appState.speechAssetService.fileLocations(for: voiceLocale) else {
+            guard isSessionActive, !Task.isCancelled else { return }
             needsAssetDownload = true
-            statusText = "Download the local voice assets to continue."
+            statusText = String.appLocalized("voice.status.download_to_continue")
             return
         }
 
@@ -224,12 +250,14 @@ final class LiveVoiceSessionViewModel {
         if let memoryWarningMessage {
             await resumeConversationModelIfNeeded()
             errorMessage = memoryWarningMessage
-            statusText = "Not enough free memory to speak the reply."
+            statusText = String.appLocalized("voice.status.speech_memory_low")
             return
         }
 
+        let session = UUID()
+        activeSpeakSession = session
         isSpeaking = true
-        statusText = "Preparing speech..."
+        statusText = String.appLocalized("voice.status.preparing_speech")
 
         do {
             let speech = try await appState.inferenceService.synthesizeSpeech(
@@ -237,24 +265,46 @@ final class LiveVoiceSessionViewModel {
                 locale: voiceLocale,
                 assets: assetLocations
             )
+            guard isSessionActive, !Task.isCancelled, activeSpeakSession == session else {
+                isSpeaking = false
+                activeSpeakSession = nil
+                await resumeConversationModelIfNeeded()
+                return
+            }
             try playbackService.play(speech) { [weak self] in
                 guard let self else { return }
                 Task { @MainActor in
+                    guard self.isSessionActive, self.activeSpeakSession == session else { return }
+                    self.activeSpeakSession = nil
                     self.isSpeaking = false
-                    self.statusText = "Preparing next turn..."
+                    self.statusText = String.appLocalized("voice.status.preparing_next_turn")
                     await self.resumeConversationModelIfNeeded()
-                    self.statusText = "Listening..."
+                    self.statusText = String.appLocalized("voice.status.listening")
                     if self.isSessionActive {
                         await self.startListeningCycle()
                     }
                 }
             }
         } catch {
+            activeSpeakSession = nil
+            guard isSessionActive, !Task.isCancelled else { return }
             isSpeaking = false
             await resumeConversationModelIfNeeded()
-            errorMessage = error.localizedDescription
-            statusText = "Unable to speak the reply."
+            errorMessage = speechErrorMessage(for: error)
+            statusText = String.appLocalized("voice.status.speech_failed")
         }
+    }
+
+    private func speechErrorMessage(for error: Error) -> String {
+        if let g2pError = error as? G2PProcessorError {
+            switch g2pError {
+            case .invalidPhonemeOutput:
+                return String.appLocalized("voice.status.speech_text_unsupported")
+            case .processorNotInitialized, .unsupportedLanguage:
+                return String.appLocalized("voice.status.speech_failed")
+            }
+        }
+        return error.localizedDescription
     }
 
     private func suspendConversationModelForPlaybackIfNeeded() async {
@@ -310,9 +360,9 @@ final class LiveVoiceSessionViewModel {
 
         switch stage {
         case .startListening:
-            memoryWarningMessage = "Live voice needs more free memory before it starts. Close background apps and try again. Available now: \(availableMemoryMB) MB."
+            memoryWarningMessage = String(format: String.appLocalized("voice.status.memory_warning_start"), availableMemoryMB)
         case .speechSynthesis:
-            memoryWarningMessage = "Live voice is too close to the memory limit to synthesize speech safely. Close background apps and try again. Available now: \(availableMemoryMB) MB."
+            memoryWarningMessage = String(format: String.appLocalized("voice.status.memory_warning_speech"), availableMemoryMB)
         }
     }
 

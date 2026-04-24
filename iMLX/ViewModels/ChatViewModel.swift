@@ -87,6 +87,7 @@ final class ChatViewModel {
     private var memoryExtractionTasks: [UUID: Task<Void, Never>] = [:]
     private var titleGenerationTasks: [UUID: Task<Void, Never>] = [:]
     private var suppressedMemoryNoticeKey: String?
+    private var shouldDiscardCancelledGeneration = false
 
     init(appState: AppState, deviceCapabilityService: DeviceCapabilityService = DeviceCapabilityService()) {
         self.appState = appState
@@ -127,6 +128,7 @@ final class ChatViewModel {
     func sendMessage(_ text: String) {
         let normalizedText = prepareToSendMessage(text)
         guard let normalizedText else { return }
+        shouldDiscardCancelledGeneration = false
         generationTask = Task<ChatMessage?, Never> { @MainActor [self] in
             return await self.performSendMessage(normalizedText, allowPostReplyTasks: true)
         }
@@ -136,6 +138,7 @@ final class ChatViewModel {
     func sendMessageAndWait(_ text: String, allowPostReplyTasks: Bool = true) async -> ChatMessage? {
         let normalizedText = prepareToSendMessage(text)
         guard let normalizedText else { return nil }
+        shouldDiscardCancelledGeneration = false
         let task = Task<ChatMessage?, Never> { @MainActor [self] in
             return await self.performSendMessage(normalizedText, allowPostReplyTasks: allowPostReplyTasks)
         }
@@ -483,7 +486,7 @@ final class ChatViewModel {
             Self.debugToolLog("send cancelled")
             toolActivityStatus = nil
             flushResponseToUI(force: true)
-            if !accumulatedResponse.isEmpty {
+            if !shouldDiscardCancelledGeneration, !accumulatedResponse.isEmpty {
                 await updatePeakMemoryUsage()
                 let elapsed = Date().timeIntervalSince(startTime)
                 let partialMessage = ChatMessage(
@@ -543,11 +546,15 @@ final class ChatViewModel {
         self.currentToolTrace = nil
         self.isGenerating = false
         self.generationTask = nil
+        self.shouldDiscardCancelledGeneration = false
         return completedAssistantMessage
     }
 
     @MainActor
-    func stopGeneration() {
+    func stopGeneration(discardPartialResponse: Bool = false) {
+        if discardPartialResponse {
+            shouldDiscardCancelledGeneration = true
+        }
         generationTask?.cancel()
         generationTask = nil
         toolActivityStatus = nil

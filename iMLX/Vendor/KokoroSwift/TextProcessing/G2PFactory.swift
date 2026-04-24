@@ -10,6 +10,8 @@ nonisolated public enum G2P {
   case misaki
   /// eSpeak NG-based G2P engine supporting multiple languages.
   case eSpeakNG
+  /// Swift-native multilingual G2P engine.
+  case multilingual
 }
 
 /// Factory class for creating G2P processor instances.
@@ -34,6 +36,9 @@ nonisolated final class G2PFactory {
     
     case .misaki:
       return MisakiG2PProcessor()
+
+    case .multilingual:
+      return MultilingualKokoroG2PProcessor()
 
     case .eSpeakNG:
 #if canImport(eSpeakNGLib)

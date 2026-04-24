@@ -31,10 +31,8 @@ nonisolated enum VoiceLocale: String, CaseIterable, Codable, Identifiable {
 
     var supportsLiveKokoroSynthesis: Bool {
         switch self {
-        case .english:
+        case .english, .spanish, .simplifiedChinese:
             true
-        case .spanish, .simplifiedChinese:
-            false
         }
     }
 
@@ -43,9 +41,9 @@ nonisolated enum VoiceLocale: String, CaseIterable, Codable, Identifiable {
         case .english:
             "af_heart"
         case .spanish:
-            "af_heart"
+            "ef_dora"
         case .simplifiedChinese:
-            "af_heart"
+            "zf_xiaoxiao"
         }
     }
 

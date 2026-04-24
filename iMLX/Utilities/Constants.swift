@@ -361,6 +361,13 @@ nonisolated enum Constants {
         static let substringMatchBoost = 0.25
     }
 
+    enum SpeechSynthesis {
+        /// Upper bound on assistant text passed to Kokoro per reply (whitespace-normalized). Larger values use more time and memory.
+        static let maxInputCharacters = 3_000
+        /// How many TTS segments to generate and stitch per reply; each segment is a bounded slice of the input.
+        static let maxChunks = 12
+    }
+
     enum UI {
         static let streamingResponseFlushInterval: TimeInterval = 1.0 / 30.0
     }

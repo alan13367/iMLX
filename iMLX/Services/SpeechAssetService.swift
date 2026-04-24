@@ -42,14 +42,22 @@ actor SpeechAssetService {
     init() {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
-        assetsDirectory = appSupport.appendingPathComponent(Constants.Storage.speechAssetsDirectory, isDirectory: true)
+        self.init(assetsDirectory: appSupport.appendingPathComponent(Constants.Storage.speechAssetsDirectory, isDirectory: true))
+    }
+
+    init(assetsDirectory: URL, session: URLSession? = nil) {
+        self.assetsDirectory = assetsDirectory
         stateFileURL = assetsDirectory.appendingPathComponent(Constants.Storage.speechAssetsStateFilename)
 
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 60 * 30
-        configuration.timeoutIntervalForResource = 60 * 60
-        session = URLSession(configuration: configuration)
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.waitsForConnectivity = true
+            configuration.timeoutIntervalForRequest = 60 * 30
+            configuration.timeoutIntervalForResource = 60 * 60
+            self.session = URLSession(configuration: configuration)
+        }
 
         try? fileManager.createDirectory(at: assetsDirectory, withIntermediateDirectories: true)
         activatedLocales = Self.loadPersistedState(from: stateFileURL)

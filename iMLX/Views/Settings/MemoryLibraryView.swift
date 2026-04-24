@@ -91,7 +91,7 @@ struct MemoryLibraryView: View {
             if let onClose {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: onClose) {
-                        Image(systemName: "xmark")
+                        CloseButtonLabel()
                     }
                     .accessibilityLabel(String.appLocalized("common.close"))
                 }

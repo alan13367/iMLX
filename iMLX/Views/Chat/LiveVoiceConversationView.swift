@@ -49,8 +49,9 @@ struct LiveVoiceConversationView: View {
 
                 LiveVoiceMicButton(
                     isListening: viewModel.isListening,
+                    isSpeaking: viewModel.isSpeaking,
                     isEnabled: micButtonEnabled,
-                    onTap: toggleListening
+                    onTap: primaryControlTap
                 )
                 .padding(.bottom, 40)
             }
@@ -72,7 +73,7 @@ struct LiveVoiceConversationView: View {
     }
 
     private var micButtonEnabled: Bool {
-        viewModel.canStartListening || viewModel.isListening
+        viewModel.canStartListening || viewModel.isListening || viewModel.canStopSpeaking
     }
 
     private func close() {
@@ -90,10 +91,14 @@ struct LiveVoiceConversationView: View {
         }
     }
 
-    private func toggleListening() {
+    private func primaryControlTap() {
         Haptics.impactMedium()
         Task {
-            await viewModel.toggleListening()
+            if viewModel.isSpeaking, viewModel.canStopSpeaking {
+                await viewModel.stopSpeaking()
+            } else {
+                await viewModel.toggleListening()
+            }
         }
     }
 }
@@ -119,6 +124,19 @@ private struct LiveVoiceHeaderBar: View {
 
     var body: some View {
         HStack {
+            Button(action: onClose) {
+                CloseButtonLabel(foregroundStyle: .white.opacity(0.72))
+                    .liquidGlassSurface(
+                        in: Circle(),
+                        fallback: AnyShapeStyle(.ultraThinMaterial),
+                        interactive: true
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String.appLocalized("voice.close"))
+
+            Spacer()
+
             Text(voiceLocaleName)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.9))
@@ -129,22 +147,6 @@ private struct LiveVoiceHeaderBar: View {
                     in: Capsule(),
                     fallback: AnyShapeStyle(.ultraThinMaterial)
                 )
-
-            Spacer()
-
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .frame(width: 36, height: 36)
-                    .liquidGlassSurface(
-                        in: Circle(),
-                        fallback: AnyShapeStyle(.ultraThinMaterial),
-                        interactive: true
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(String.appLocalized("voice.close"))
         }
     }
 }
@@ -352,19 +354,35 @@ private struct LiveVoiceAssetDownloadCard: View {
 
 private struct LiveVoiceMicButton: View {
     let isListening: Bool
+    let isSpeaking: Bool
     let isEnabled: Bool
     let onTap: () -> Void
 
+    /// Red “stop” affordance when recording or when TTS is playing (tap stops that activity).
+    private var isStopMode: Bool {
+        isListening || isSpeaking
+    }
+
+    private var accessibilityLabel: String {
+        if isListening {
+            return String.appLocalized("voice.stop_listening")
+        }
+        if isSpeaking {
+            return String.appLocalized("voice.stop_speaking")
+        }
+        return String.appLocalized("voice.start_listening")
+    }
+
     private var tint: Color? {
         guard isEnabled else { return nil }
-        return isListening ? .red.opacity(0.3) : BrandPalette.cyan.opacity(0.22)
+        return isStopMode ? .red.opacity(0.3) : BrandPalette.cyan.opacity(0.22)
     }
 
     private var fallback: some ShapeStyle {
         if !isEnabled {
             return AnyShapeStyle(Color.secondary.opacity(0.15))
         }
-        if isListening {
+        if isStopMode {
             return AnyShapeStyle(Color.red)
         }
         return AnyShapeStyle(BrandPalette.cyan.opacity(0.9))
@@ -372,13 +390,13 @@ private struct LiveVoiceMicButton: View {
 
     private var glow: Color {
         guard isEnabled else { return .clear }
-        return isListening ? .red.opacity(0.4) : BrandPalette.cyan.opacity(0.3)
+        return isStopMode ? .red.opacity(0.4) : BrandPalette.cyan.opacity(0.3)
     }
 
     var body: some View {
         Button(action: onTap) {
             ZStack {
-                if isListening {
+                if isStopMode {
                     Circle()
                         .fill(Color.red.opacity(0.15))
                         .frame(width: 108, height: 108)
@@ -388,7 +406,7 @@ private struct LiveVoiceMicButton: View {
                         .frame(width: 108, height: 108)
                 }
 
-                Image(systemName: isListening ? "stop.fill" : "mic.fill")
+                Image(systemName: isStopMode ? "stop.fill" : "mic.fill")
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 88, height: 88)
@@ -396,17 +414,17 @@ private struct LiveVoiceMicButton: View {
                         tint: tint,
                         in: Circle(),
                         fallback: AnyShapeStyle(fallback),
-                        interactive: true
+                        interactive: isEnabled
                     )
             }
-            .shadow(color: glow, radius: isListening ? 20 : 12, x: 0, y: 4)
+            .shadow(color: glow, radius: isStopMode ? 20 : 12, x: 0, y: 4)
         }
         .buttonStyle(.plain)
-        .disabled(!isEnabled && !isListening)
+        .disabled(!isEnabled)
         .opacity(isEnabled ? 1.0 : 0.4)
-        .animation(.easeInOut(duration: 0.3), value: isListening)
+        .animation(.easeInOut(duration: 0.3), value: isStopMode)
         .animation(.easeInOut(duration: 0.3), value: isEnabled)
-        .accessibilityLabel(isListening ? "Stop listening" : "Start listening")
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -425,6 +443,6 @@ private struct LiveVoiceMicButton: View {
 #Preview("Voice Mic Button") {
     ZStack {
         LiveVoiceBackground()
-        LiveVoiceMicButton(isListening: false, isEnabled: true, onTap: {})
+        LiveVoiceMicButton(isListening: false, isSpeaking: false, isEnabled: true, onTap: {})
     }
 }

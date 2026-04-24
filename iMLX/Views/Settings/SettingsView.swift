@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+
     let appState: AppState
     @State private var showClearModelsAlert = false
     private let deviceCapability = DeviceCapabilityService()
@@ -66,24 +68,24 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Speech Assets") {
-                LabeledContent("Resolved voice locale") {
+            Section(String.appLocalized("settings.speech_assets.section")) {
+                LabeledContent(String.appLocalized("settings.speech_assets.resolved_locale")) {
                     Text(appState.resolvedVoiceLocale.displayName)
                 }
-                LabeledContent("Core model") {
-                    Text(appState.speechAssetStatus.hasCoreModel ? "Installed" : "Not installed")
+                LabeledContent(String.appLocalized("settings.speech_assets.core_model")) {
+                    Text(appState.speechAssetStatus.hasCoreModel ? String.appLocalized("settings.speech_assets.installed") : String.appLocalized("settings.speech_assets.not_installed"))
                 }
-                LabeledContent("Voice locales") {
+                LabeledContent(String.appLocalized("settings.speech_assets.cached_locales")) {
                     Text(
                         appState.speechAssetStatus.activatedLocales.isEmpty
-                            ? "None"
+                            ? String.appLocalized("settings.speech_assets.none")
                             : appState.speechAssetStatus.activatedLocales
                                 .sorted { $0.displayName < $1.displayName }
                                 .map(\.displayName)
                                 .joined(separator: ", ")
                     )
                 }
-                Button("Clear speech assets", role: .destructive) {
+                Button(String.appLocalized("settings.speech_assets.clear"), role: .destructive) {
                     Task {
                         await appState.clearSpeechAssets()
                     }
@@ -106,6 +108,16 @@ struct SettingsView: View {
             }
         }
         .navigationTitle(String.appLocalized("settings.title"))
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    CloseButtonLabel()
+                }
+                .accessibilityLabel(String.appLocalized("common.close"))
+            }
+        }
         .alert(String.appLocalized("settings.clear_alert_title"), isPresented: $showClearModelsAlert) {
             Button(String.appLocalized("common.cancel"), role: .cancel) {}
             Button(String.appLocalized("settings.clear_confirm"), role: .destructive) {

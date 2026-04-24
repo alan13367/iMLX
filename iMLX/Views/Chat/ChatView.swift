@@ -147,72 +147,21 @@ struct ChatView: View {
     }
 
     var body: some View {
-        chatContent
+        visibleChatContent
         .navigationTitle(conversationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ChatAccessoryStackView(
-                horizontalSizeClass: horizontalSizeClass,
-                errorMessage: chatViewModel.errorMessage,
-                toolNotice: chatViewModel.toolNotice,
-                toolActivityStatus: chatViewModel.toolActivityStatus,
-                isModelLoading: chatViewModel.isModelLoading,
-                selectedModelDisplayName: appState.selectedModel?.displayName,
-                isGenerating: chatViewModel.isGenerating,
-                memoryNotice: chatViewModel.memoryNotice,
-                activePersona: chatViewModel.activePersona,
-                pendingDocuments: chatViewModel.pendingDocuments,
-                pendingImages: chatViewModel.pendingImages,
-                canUseThinking: chatViewModel.canUseThinking,
-                isThinkingEnabled: chatViewModel.isThinkingEnabled,
-                canSendMessage: canSendMessage,
-                canPresentLiveVoice: canPresentLiveVoice,
-                canUseVision: chatViewModel.canUseVision,
-                isWebSearchEnabled: chatViewModel.isWebSearchEnabled,
-                inputText: $inputText,
-                isInputFocused: $isInputFocused,
-                onDismissError: dismissError,
-                onDismissToolNotice: dismissToolNotice,
-                onDismissMemoryNotice: chatViewModel.dismissMemoryNotice,
-                onOpenMemoryLibrary: openMemoryLibrary,
-                onOpenPersonaPicker: openPersonaPicker,
-                onRemoveDocument: chatViewModel.removeDocument,
-                onRemovePendingImage: chatViewModel.removePendingImage(id:),
-                onOpenAttachmentImporter: openDocumentImporter,
-                onOpenCamera: openCamera,
-                onOpenPhotoLibrary: openPhotoLibrary,
-                onToggleThinking: chatViewModel.toggleThinking,
-                onVoiceTap: openLiveVoice,
-                onSend: sendMessage,
-                onStop: chatViewModel.stopGeneration,
-                onToggleWebSearch: handleWebSearchToggleTap
-            )
+            chatAccessoryInset
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                ChatToolbarMenu(
-                    onOpenConversations: openConversationHistory,
-                    onOpenModels: openModels,
-                    onOpenSettings: openSettings
-                )
+                leadingToolbarContent
             }
             ToolbarItem(placement: .principal) {
-                modelStatus
+                principalToolbarContent
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if appState.loadedModelId != nil {
-                    ChatToolbarIconButton(
-                        systemImage: "eject",
-                        accessibilityLabel: String.appLocalized("models.picker.unload"),
-                        action: unloadModel
-                    )
-                }
-
-                ChatToolbarIconButton(
-                    systemImage: "square.and.pencil",
-                    accessibilityLabel: String.appLocalized("New conversation"),
-                    action: startNewConversation
-                )
+                trailingToolbarContent
             }
         }
         .scrollDismissesKeyboard(.interactively)
@@ -285,7 +234,7 @@ struct ChatView: View {
                 isPresented: $showPersonaPicker
             )
         }
-        .sheet(isPresented: $showLiveVoice) {
+        .fullScreenCover(isPresented: $showLiveVoice) {
             LiveVoiceConversationView(appState: appState, chatViewModel: chatViewModel)
         }
         .sheet(isPresented: $showWebSearchDisclosure) {
@@ -300,6 +249,15 @@ struct ChatView: View {
 
     private var isShowingEmptyState: Bool {
         chatViewModel.messages.isEmpty && !chatViewModel.isGenerating && chatViewModel.currentResponse.isEmpty
+    }
+
+    @ViewBuilder
+    private var visibleChatContent: some View {
+        if showLiveVoice {
+            Color.clear
+        } else {
+            chatContent
+        }
     }
 
     private var chatContent: some View {
@@ -324,6 +282,54 @@ struct ChatView: View {
             .opacity(isShowingEmptyState ? 0 : 1)
             .allowsHitTesting(!isShowingEmptyState)
         }
+    }
+
+    @ViewBuilder
+    private var chatAccessoryInset: some View {
+        if showLiveVoice {
+            EmptyView()
+        } else {
+            chatAccessoryStack
+        }
+    }
+
+    private var chatAccessoryStack: some View {
+        ChatAccessoryStackView(
+            horizontalSizeClass: horizontalSizeClass,
+            errorMessage: chatViewModel.errorMessage,
+            toolNotice: chatViewModel.toolNotice,
+            toolActivityStatus: chatViewModel.toolActivityStatus,
+            isModelLoading: chatViewModel.isModelLoading,
+            selectedModelDisplayName: appState.selectedModel?.displayName,
+            isGenerating: chatViewModel.isGenerating,
+            memoryNotice: chatViewModel.memoryNotice,
+            activePersona: chatViewModel.activePersona,
+            pendingDocuments: chatViewModel.pendingDocuments,
+            pendingImages: chatViewModel.pendingImages,
+            canUseThinking: chatViewModel.canUseThinking,
+            isThinkingEnabled: chatViewModel.isThinkingEnabled,
+            canSendMessage: canSendMessage,
+            canPresentLiveVoice: canPresentLiveVoice,
+            canUseVision: chatViewModel.canUseVision,
+            isWebSearchEnabled: chatViewModel.isWebSearchEnabled,
+            inputText: $inputText,
+            isInputFocused: $isInputFocused,
+            onDismissError: dismissError,
+            onDismissToolNotice: dismissToolNotice,
+            onDismissMemoryNotice: chatViewModel.dismissMemoryNotice,
+            onOpenMemoryLibrary: openMemoryLibrary,
+            onOpenPersonaPicker: openPersonaPicker,
+            onRemoveDocument: chatViewModel.removeDocument,
+            onRemovePendingImage: chatViewModel.removePendingImage(id:),
+            onOpenAttachmentImporter: openDocumentImporter,
+            onOpenCamera: openCamera,
+            onOpenPhotoLibrary: openPhotoLibrary,
+            onToggleThinking: chatViewModel.toggleThinking,
+            onVoiceTap: openLiveVoice,
+            onSend: sendMessage,
+            onStop: { chatViewModel.stopGeneration() },
+            onToggleWebSearch: handleWebSearchToggleTap
+        )
     }
 
     private var conversationTitle: String {
@@ -392,6 +398,47 @@ struct ChatView: View {
         }
     }
 
+    @ViewBuilder
+    private var leadingToolbarContent: some View {
+        if showLiveVoice {
+            EmptyView()
+        } else {
+            ChatToolbarMenu(
+                onOpenConversations: openConversationHistory,
+                onOpenModels: openModels,
+                onOpenSettings: openSettings
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var principalToolbarContent: some View {
+        if showLiveVoice {
+            EmptyView()
+        } else {
+            modelStatus
+        }
+    }
+
+    @ViewBuilder
+    private var trailingToolbarContent: some View {
+        if !showLiveVoice && appState.loadedModelId != nil {
+            ChatToolbarIconButton(
+                systemImage: "eject",
+                accessibilityLabel: String.appLocalized("models.picker.unload"),
+                action: unloadModel
+            )
+        }
+
+        if !showLiveVoice {
+            ChatToolbarIconButton(
+                systemImage: "square.and.pencil",
+                accessibilityLabel: String.appLocalized("New conversation"),
+                action: startNewConversation
+            )
+        }
+    }
+
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSendMessage else { return }
@@ -433,6 +480,7 @@ struct ChatView: View {
     }
 
     private func openLiveVoice() {
+        isInputFocused = false
         showLiveVoice = true
     }
 

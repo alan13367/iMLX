@@ -9,6 +9,8 @@ nonisolated enum G2PProcessorError : Error {
   case processorNotInitialized
   /// The requested language is not supported by this processor.
   case unsupportedLanguage
+  /// The processor produced text that cannot be consumed by the Kokoro tokenizer.
+  case invalidPhonemeOutput
 }
 
 /// Protocol defining the interface for grapheme-to-phoneme processors.

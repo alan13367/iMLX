@@ -104,7 +104,7 @@ struct ConversationListView: View {
                     Button {
                         onClose?()
                     } label: {
-                        Image(systemName: "xmark")
+                        CloseButtonLabel()
                     }
                     .accessibilityLabel(String.appLocalized("common.close"))
                 } else if isSelectionMode {

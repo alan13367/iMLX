@@ -13,6 +13,7 @@ actor InferenceService {
     private var kokoroTTS: KokoroTTS?
     private var kokoroVoiceEmbedding: MLXArray?
     private var kokoroAssets: SpeechAssetFileLocations?
+    private var kokoroVoiceLocale: VoiceLocale?
 
     var isModelLoaded: Bool {
         modelContainer != nil
@@ -161,8 +162,14 @@ actor InferenceService {
 
         MLX.Memory.clearCache()
 
-        if kokoroAssets != assets || kokoroTTS == nil || kokoroVoiceEmbedding == nil {
-            kokoroTTS = KokoroTTS(modelPath: assets.modelURL)
+        if kokoroAssets != assets || kokoroTTS == nil || kokoroVoiceEmbedding == nil || kokoroVoiceLocale != locale {
+            let g2p: G2P = {
+                switch locale {
+                case .english: return .misaki
+                case .spanish, .simplifiedChinese: return .multilingual
+                }
+            }()
+            kokoroTTS = KokoroTTS(modelPath: assets.modelURL, g2p: g2p)
             let voiceWeights = try MLX.loadArrays(url: assets.voiceURL)
             guard let firstKey = voiceWeights.keys.sorted().first,
                   let voiceEmbedding = voiceWeights[firstKey] else {
@@ -170,6 +177,7 @@ actor InferenceService {
             }
             kokoroVoiceEmbedding = voiceEmbedding
             kokoroAssets = assets
+            kokoroVoiceLocale = locale
         }
 
         guard let kokoroTTS,
@@ -177,7 +185,13 @@ actor InferenceService {
             throw InferenceError.speechAssetsUnavailable
         }
 
-        let language: Language = .enUS
+        let language: Language = {
+            switch locale {
+            case .english: return .enUS
+            case .spanish: return .spanish
+            case .simplifiedChinese: return .mandarinChinese
+            }
+        }()
         let chunks = speechChunks(for: text)
         guard !chunks.isEmpty else {
             throw InferenceError.speechTextEmpty
@@ -221,7 +235,7 @@ actor InferenceService {
             text
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .prefix(360)
+            .prefix(Constants.SpeechSynthesis.maxInputCharacters)
         )
         guard !normalizedText.isEmpty else {
             return []
@@ -254,7 +268,7 @@ actor InferenceService {
             chunks.append(currentChunk)
         }
 
-        return Array(chunks.prefix(3))
+        return Array(chunks.prefix(Constants.SpeechSynthesis.maxChunks))
     }
 
     private func splitIntoWordChunks(_ text: String, maxCharacters: Int) -> [String] {
@@ -292,6 +306,7 @@ actor InferenceService {
         kokoroTTS = nil
         kokoroVoiceEmbedding = nil
         kokoroAssets = nil
+        kokoroVoiceLocale = nil
         MLX.Memory.clearCache()
     }
 

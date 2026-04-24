@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ModelBrowserView: View {
+    @Environment(\.dismiss) private var dismiss
+
     let appState: AppState
     @State private var viewModel: ModelManagerViewModel
 
@@ -29,6 +31,16 @@ struct ModelBrowserView: View {
             }
         }
         .navigationTitle(String.appLocalized("models.browser.title"))
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    CloseButtonLabel()
+                }
+                .accessibilityLabel(String.appLocalized("common.close"))
+            }
+        }
         .task {
             refreshDownloadStatus()
         }

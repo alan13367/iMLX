@@ -708,12 +708,17 @@ private struct ChatMessageListSection: View {
     @State private var streamingAutoscrollEnabled = true
     @State private var contentOverflows = false
     @State private var scrollPinnedToBottom = true
+    @State private var contentHeight: CGFloat = 0
+    @State private var finalizationStickToBottomTask: Task<Void, Never>?
+    @State private var shouldStickToBottomDuringFinalization = false
+    @State private var scrollViewResetKey = UUID()
+    @State private var isStreamingThinkingExpanded = true
 
     var body: some View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 12, pinnedViews: [.sectionHeaders]) {
                         ForEach(messages) { message in
                             MessageBubbleView(message: message)
                                 .equatable()
@@ -731,17 +736,24 @@ private struct ChatMessageListSection: View {
                                 .transition(.opacity)
                         }
 
-                        if !currentResponse.isEmpty {
-                            MessageBubbleView(
-                                message: ChatMessage(
-                                    role: .assistant,
-                                    content: currentResponse + (isGenerating ? "▊" : "")
-                                ),
-                                isStreaming: true,
-                                parsedAssistantContent: parsedResponse
-                            )
+                        if !currentResponse.isEmpty, shouldPinStreamingThinkingHeader {
+                            Section {
+                                streamingMessageBubble
+                            } header: {
+                                StreamingThinkingPinnedHeader(
+                                    isExpanded: $isStreamingThinkingExpanded,
+                                    isWaitingForAnswer: parsedResponse.response.isEmpty
+                                ) {
+                                    guard streamingAutoscrollEnabled else { return }
+                                    scheduleAutoscroll(using: proxy, repeatAfterLayoutChange: true)
+                                }
+                            }
                             .id("streaming")
                             .transition(.opacity)
+                        } else if !currentResponse.isEmpty {
+                            streamingMessageBubble
+                                .id("streaming")
+                                .transition(.opacity)
                         }
 
                         Color.clear
@@ -751,6 +763,7 @@ private struct ChatMessageListSection: View {
                     .padding(.horizontal)
                     .padding(.vertical, 12)
                 }
+                .id(scrollViewResetKey)
                 .simultaneousGesture(
                     TapGesture().onEnded(onTranscriptTap)
                 )
@@ -763,6 +776,14 @@ private struct ChatMessageListSection: View {
                 }, action: { _, state in
                     contentOverflows = state.contentOverflows
                     scrollPinnedToBottom = state.isPinnedToBottom
+                })
+                .onScrollGeometryChange(for: CGFloat.self, of: { geometry in
+                    geometry.contentSize.height
+                }, action: { _, height in
+                    contentHeight = height
+                    guard shouldStickToBottomDuringFinalization else { return }
+                    guard streamingAutoscrollEnabled else { return }
+                    scrollToBottom(using: proxy, animated: false)
                 })
                 .onScrollPhaseChange { _, newPhase in
                     guard newPhase == .tracking || newPhase == .interacting else { return }
@@ -777,17 +798,31 @@ private struct ChatMessageListSection: View {
                 }
                 .task(id: messages.count) {
                     guard streamingAutoscrollEnabled else { return }
-                    streamingScrollTask?.cancel()
-                    scrollToBottom(using: proxy)
+                    scheduleAutoscroll(using: proxy)
                 }
-                .task(id: currentResponse.count) {
+                .task(id: streamingAutoscrollKey) {
                     guard streamingAutoscrollEnabled else { return }
                     guard isGenerating else { return }
                     guard !currentResponse.isEmpty else { return }
                     scheduleAutoscroll(using: proxy)
                 }
+                .task(id: isGenerating) {
+                    if isGenerating {
+                        isStreamingThinkingExpanded = true
+                        return
+                    }
+                    guard streamingAutoscrollEnabled else { return }
+                    guard !messages.isEmpty else { return }
+                    stickToBottomDuringFinalization(using: proxy)
+                }
+                .task(id: contentHeight) {
+                    guard shouldStickToBottomDuringFinalization else { return }
+                    guard streamingAutoscrollEnabled else { return }
+                    scrollToBottom(using: proxy, animated: false)
+                }
                 .onDisappear {
                     streamingScrollTask?.cancel()
+                    finalizationStickToBottomTask?.cancel()
                 }
 
                 if contentOverflows && (!scrollPinnedToBottom || !streamingAutoscrollEnabled) {
@@ -818,6 +853,33 @@ private struct ChatMessageListSection: View {
         }
     }
 
+    private var shouldPinStreamingThinkingHeader: Bool {
+        guard isGenerating else { return false }
+        guard let thinking = parsedResponse.thinking else { return false }
+        return !thinking.isEmpty
+    }
+
+    private var streamingMessageBubble: some View {
+        MessageBubbleView(
+            message: ChatMessage(
+                role: .assistant,
+                content: currentResponse + (isGenerating ? "▊" : "")
+            ),
+            isStreaming: true,
+            parsedAssistantContent: parsedResponse,
+            thinkingExpansion: $isStreamingThinkingExpanded,
+            showsThinkingHeader: !shouldPinStreamingThinkingHeader
+        )
+    }
+
+    private var streamingAutoscrollKey: Int {
+        guard !currentResponse.isEmpty else { return 0 }
+        let visibleCharacterCount = parsedResponse.response.isEmpty
+            ? currentResponse.count
+            : parsedResponse.response.count
+        return 1 + visibleCharacterCount / Constants.UI.streamingAutoscrollCharacterStride
+    }
+
     private func resumeAutoscroll(using proxy: ScrollViewProxy) {
         streamingScrollTask?.cancel()
         scrollToBottom(using: proxy)
@@ -825,19 +887,82 @@ private struct ChatMessageListSection: View {
         scheduleAutoscroll(using: proxy)
     }
 
-    private func scheduleAutoscroll(using proxy: ScrollViewProxy) {
+    private func scheduleAutoscroll(using proxy: ScrollViewProxy, repeatAfterLayoutChange: Bool = false) {
         streamingScrollTask?.cancel()
         streamingScrollTask = Task { @MainActor in
             defer { streamingScrollTask = nil }
             try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled else { return }
             scrollToBottom(using: proxy)
+            guard repeatAfterLayoutChange else { return }
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            scrollToBottom(using: proxy)
         }
     }
 
     private func scrollToBottom(using proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.15)) {
+        scrollToBottom(using: proxy, animated: true)
+    }
+
+    private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.15)) {
+                proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
+            }
+        } else {
             proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
+        }
+    }
+
+    private func stickToBottomDuringFinalization(using proxy: ScrollViewProxy) {
+        finalizationStickToBottomTask?.cancel()
+        shouldStickToBottomDuringFinalization = true
+        scrollViewResetKey = UUID()
+        scheduleAutoscroll(using: proxy, repeatAfterLayoutChange: true)
+        finalizationStickToBottomTask = Task { @MainActor in
+            defer {
+                shouldStickToBottomDuringFinalization = false
+                finalizationStickToBottomTask = nil
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            scrollToBottom(using: proxy, animated: false)
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            scrollToBottom(using: proxy, animated: false)
+        }
+    }
+}
+
+private struct StreamingThinkingPinnedHeader: View {
+    @Binding var isExpanded: Bool
+    let isWaitingForAnswer: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack {
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+                onToggle()
+            } label: {
+                ThinkingDisclosureLabel(
+                    isExpanded: isExpanded,
+                    isStreaming: true,
+                    isWaitingForAnswer: isWaitingForAnswer
+                )
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String.appLocalized("message.thinking"))
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            Spacer(minLength: 36)
         }
     }
 }

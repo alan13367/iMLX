@@ -474,6 +474,9 @@
     "Choose one model to download now, or skip and browse models later." : {
 
     },
+    "Collapsed" : {
+
+    },
     "common.cancel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1428,6 +1431,9 @@
       }
     },
     "Evidence" : {
+
+    },
+    "Expanded" : {
 
     },
     "Forget" : {

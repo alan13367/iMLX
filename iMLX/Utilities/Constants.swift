@@ -370,6 +370,8 @@ nonisolated enum Constants {
 
     enum UI {
         static let streamingResponseFlushInterval: TimeInterval = 1.0 / 30.0
+        static let streamingThinkingFlushInterval: TimeInterval = 1.0 / 8.0
+        static let streamingAutoscrollCharacterStride = 96
     }
 
     enum WebSearch {

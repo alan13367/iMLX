@@ -10,6 +10,8 @@ struct MessageBubbleView: View, Equatable {
     let message: ChatMessage
     let isStreaming: Bool
     let parsedAssistantContent: ParsedAssistantContent?
+    private let thinkingExpansion: Binding<Bool>?
+    private let showsThinkingHeader: Bool
 
     @State private var showCopyFeedback = false
     @State private var isThinkingExpanded = false
@@ -28,10 +30,18 @@ struct MessageBubbleView: View, Equatable {
         message.role == .user && (message.attachedImages?.count == 1)
     }
 
-    init(message: ChatMessage, isStreaming: Bool = false, parsedAssistantContent: ParsedAssistantContent? = nil) {
+    init(
+        message: ChatMessage,
+        isStreaming: Bool = false,
+        parsedAssistantContent: ParsedAssistantContent? = nil,
+        thinkingExpansion: Binding<Bool>? = nil,
+        showsThinkingHeader: Bool = true
+    ) {
         self.message = message
         self.isStreaming = isStreaming
         self.parsedAssistantContent = parsedAssistantContent
+        self.thinkingExpansion = thinkingExpansion
+        self.showsThinkingHeader = showsThinkingHeader
     }
 
     static func == (lhs: MessageBubbleView, rhs: MessageBubbleView) -> Bool {
@@ -64,8 +74,9 @@ struct MessageBubbleView: View, Equatable {
                         toolTrace: message.toolTrace,
                         retrievedSources: message.retrievedSources ?? [],
                         generationStats: message.generationStats,
-                        isThinkingExpanded: $isThinkingExpanded,
+                        isThinkingExpanded: thinkingExpansion ?? $isThinkingExpanded,
                         isToolTraceExpanded: $isToolTraceExpanded,
+                        showsThinkingHeader: showsThinkingHeader,
                         openSourceURL: openSourceURL,
                         onCopy: { copy(text: $0) }
                     )
@@ -246,6 +257,7 @@ private struct AssistantMessageContent: View {
     let generationStats: GenerationStats?
     @Binding var isThinkingExpanded: Bool
     @Binding var isToolTraceExpanded: Bool
+    let showsThinkingHeader: Bool
     let openSourceURL: (URL?) -> Void
     let onCopy: (String) -> Void
 
@@ -258,39 +270,50 @@ private struct AssistantMessageContent: View {
                 )
             }
             if let thinking = parsedContent.thinking, !thinking.isEmpty {
-                DisclosureGroup(isExpanded: $isThinkingExpanded) {
-                    MessageTextBody(
+                if showsThinkingHeader {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                isThinkingExpanded.toggle()
+                            }
+                        } label: {
+                            ThinkingDisclosureLabel(
+                                isExpanded: isThinkingExpanded,
+                                isStreaming: isStreaming,
+                                isWaitingForAnswer: parsedContent.response.isEmpty
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        ThinkingTextContent(
+                            text: thinking,
+                            isStreaming: isStreaming,
+                            isExpanded: isThinkingExpanded
+                        )
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .contextMenu {
+                        if !isStreaming {
+                            Button {
+                                onCopy(parsedContent.copyableText)
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                            }
+                        }
+                    }
+                } else {
+                    ThinkingTextContent(
                         text: thinking,
                         isStreaming: isStreaming,
-                        linkTint: BrandPalette.accent
+                        isExpanded: isThinkingExpanded
                     )
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                } label: {
-                    HStack(spacing: 8) {
-                        Label(String.appLocalized("message.thinking"), systemImage: "brain.head.profile")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        if isStreaming && parsedContent.response.isEmpty {
-                            Text(String.appLocalized("message.waiting_final"))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .contextMenu {
-                    if !isStreaming {
-                        Button {
-                            onCopy(parsedContent.copyableText)
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                        }
-                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
             }
 
@@ -327,6 +350,49 @@ private struct AssistantMessageContent: View {
 
                 }
             }
+        }
+    }
+}
+
+struct ThinkingDisclosureLabel: View {
+    let isExpanded: Bool
+    let isStreaming: Bool
+    let isWaitingForAnswer: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label(String.appLocalized("message.thinking"), systemImage: "brain.head.profile")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            if isStreaming && isWaitingForAnswer {
+                Text(String.appLocalized("message.waiting_final"))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.bold))
+                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+}
+
+private struct ThinkingTextContent: View {
+    let text: String
+    let isStreaming: Bool
+    let isExpanded: Bool
+
+    var body: some View {
+        if isExpanded {
+            MessageTextBody(
+                text: text,
+                isStreaming: isStreaming,
+                linkTint: BrandPalette.accent
+            )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
         }
     }
 }

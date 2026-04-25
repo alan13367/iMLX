@@ -253,7 +253,10 @@ final class ChatViewModel {
         @MainActor
         func flushResponseToUI(force: Bool = false) {
             let now = Date()
-            guard force || now.timeIntervalSince(lastResponseFlush) >= Constants.UI.streamingResponseFlushInterval else { return }
+            let flushInterval = thinkingEnabled && latestParsedResponse.response.isEmpty
+                ? Constants.UI.streamingThinkingFlushInterval
+                : Constants.UI.streamingResponseFlushInterval
+            guard force || now.timeIntervalSince(lastResponseFlush) >= flushInterval else { return }
             refreshParsedResponse()
             self.currentResponse = accumulatedResponse
             self.currentParsedResponse = latestParsedResponse

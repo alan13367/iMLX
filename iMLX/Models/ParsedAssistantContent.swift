@@ -52,6 +52,16 @@ nonisolated struct ParsedAssistantContent: Equatable {
             return
         }
 
+        if let channelDelimited = Self.parseChannelDelimitedThinking(normalizedContent) {
+            let cleanedResponse = Self.stripAnswerHeading(channelDelimited.response)
+            self.init(
+                thinking: channelDelimited.thinking,
+                response: cleanedResponse,
+                copyableText: cleanedResponse.isEmpty ? channelDelimited.thinking : cleanedResponse
+            )
+            return
+        }
+
         if let inferred = Self.parseInferredThinking(normalizedContent, isStreaming: isStreaming) {
             self.init(
                 thinking: inferred.thinking,
@@ -117,6 +127,23 @@ nonisolated struct ParsedAssistantContent: Equatable {
         }
 
         return nil
+    }
+
+    private static func parseChannelDelimitedThinking(_ rawContent: String) -> (thinking: String, response: String)? {
+        let pattern = #"<\|channel(?:\|[^>]*)?>"#
+        let range = NSRange(rawContent.startIndex..<rawContent.endIndex, in: rawContent)
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: rawContent, range: range),
+              let markerRange = Range(match.range, in: rawContent) else {
+            return nil
+        }
+
+        let thinking = rawContent[..<markerRange.lowerBound]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let response = rawContent[markerRange.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !thinking.isEmpty else { return nil }
+        return (thinking, response)
     }
 
     private static func parseInferredThinking(_ rawContent: String, isStreaming: Bool) -> (thinking: String, response: String)? {

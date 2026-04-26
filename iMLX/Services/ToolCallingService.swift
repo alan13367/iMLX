@@ -55,6 +55,8 @@ actor ToolCallingService {
     init(
         webSearchService: WebSearchService,
         imageOCRService: ImageOCRService = ImageOCRService(),
+        documentLibraryService: DocumentLibraryService = DocumentLibraryService(),
+        calendarBriefService: CalendarBriefService = CalendarBriefService(),
         toolExecutionTimeoutSeconds: TimeInterval = Constants.ToolCalling.toolExecutionTimeoutSeconds
     ) {
         let readURLTool = ToolDefinition(
@@ -99,24 +101,63 @@ actor ToolCallingService {
                 executionClass: .network
             )
         )
+        let documentTool = ToolDefinition(
+            name: "document_synthesize",
+            description: "Retrieves bounded excerpts from attached conversation documents for summaries, comparisons, extraction, and document Q&A.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "query",
+                    type: "string",
+                    required: true,
+                    description: "The user's document-focused question or synthesis request."
+                )
+            ],
+            metadata: ToolMetadata(
+                requiresAttachedDocuments: true,
+                executionClass: .local
+            )
+        )
+        let calendarTool = ToolDefinition(
+            name: "calendar_brief",
+            description: "Reads local calendar events for a bounded date range and returns a private schedule brief.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "range",
+                    type: "string",
+                    required: true,
+                    description: "One of: today, tomorrow, this_week, next_7_days."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
 
         let readURLExecutor = ReadURLToolExecutor(webSearchService: webSearchService)
         let ocrExecutor = OCRImageTextToolExecutor(imageOCRService: imageOCRService)
         let webSearchExecutor = WebSearchToolExecutor(webSearchService: webSearchService)
+        let documentExecutor = DocumentSynthesizeToolExecutor(documentLibraryService: documentLibraryService)
+        let calendarExecutor = CalendarBriefToolExecutor(calendarBriefService: calendarBriefService)
 
         self.toolExecutionTimeoutSeconds = toolExecutionTimeoutSeconds
-        self.registeredTools = [readURLTool, ocrTool, webSearchTool]
+        self.registeredTools = [readURLTool, ocrTool, webSearchTool, documentTool, calendarTool]
         self.registeredExecutors = [
             readURLExecutor.toolName: readURLExecutor,
             ocrExecutor.toolName: ocrExecutor,
-            webSearchExecutor.toolName: webSearchExecutor
+            webSearchExecutor.toolName: webSearchExecutor,
+            documentExecutor.toolName: documentExecutor,
+            calendarExecutor.toolName: calendarExecutor
         ]
     }
 
-    func context(for userMessage: ChatMessage) -> ToolInputContext {
+    func context(
+        for userMessage: ChatMessage,
+        attachedDocuments: [ConversationDocumentReference] = [],
+        hasNewlyAttachedDocuments: Bool = false
+    ) -> ToolInputContext {
         ToolInputContext(
             latestUserMessage: userMessage.content,
             attachedImages: userMessage.attachedImages ?? [],
+            attachedDocuments: attachedDocuments,
+            hasNewlyAttachedDocuments: hasNewlyAttachedDocuments,
             detectedPublicURLs: detectedPublicURLs(in: userMessage.content)
         )
     }
@@ -174,6 +215,17 @@ actor ToolCallingService {
             return .call(ToolCallRequest(toolName: readURLTool.name, arguments: arguments))
         }
 
+        if let documentTool = toolsByName["document_synthesize"],
+           shouldForceDocumentSynthesis(for: userMessage, context: context),
+           case .success(let arguments) = validatedArguments(
+                ["query": userMessage],
+                for: documentTool,
+                context: context
+           ) {
+            Self.debugLog("deterministic arbitration selected document_synthesize for attached document request")
+            return .call(ToolCallRequest(toolName: documentTool.name, arguments: arguments))
+        }
+
         switch plannedDecision {
         case .call(let request):
             guard let normalizedRequest = normalizedRequest(
@@ -198,6 +250,17 @@ actor ToolCallingService {
            ) {
             Self.debugLog("heuristic fallback selected ocr_image_text for text-focused image request")
             return .call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments))
+        }
+
+        if let calendarTool = toolsByName["calendar_brief"],
+           let range = heuristicCalendarRange(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                ["range": range.rawValue],
+                for: calendarTool,
+                context: context
+           ) {
+            Self.debugLog("heuristic fallback selected calendar_brief for schedule request")
+            return .call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments))
         }
 
         if preferThinkingFallback,
@@ -432,6 +495,11 @@ actor ToolCallingService {
             return .failure(.invalidArguments("This tool requires at least one attached image on the latest user message."))
         }
 
+        if toolDefinition.metadata.requiresAttachedDocuments,
+           context?.attachedDocuments.isEmpty != false {
+            return .failure(.invalidArguments("This tool requires at least one attached document in the current conversation."))
+        }
+
         if toolDefinition.metadata.requiresSinglePublicURL,
            context?.singleDetectedPublicURL == nil,
            rawArguments["url"] == nil {
@@ -515,6 +583,8 @@ actor ToolCallingService {
 
         let currentTurnContext = [
             "- Attached image count: \(context.attachedImages.count)",
+            "- Attached document count: \(context.attachedDocuments.count)",
+            "- Newly attached documents this turn: \(context.hasNewlyAttachedDocuments ? "yes" : "no")",
             "- Detected public URL: \(context.singleDetectedPublicURL?.absoluteString ?? (context.detectedPublicURLs.isEmpty ? "none" : "multiple URLs detected"))"
         ]
         .joined(separator: "\n")
@@ -572,6 +642,9 @@ actor ToolCallingService {
         if tool.metadata.requiresAttachedImages && context.attachedImages.isEmpty {
             return false
         }
+        if tool.metadata.requiresAttachedDocuments && context.attachedDocuments.isEmpty {
+            return false
+        }
         if tool.metadata.requiresSinglePublicURL && context.singleDetectedPublicURL == nil {
             return false
         }
@@ -616,6 +689,20 @@ actor ToolCallingService {
                 return .failure(.invalidArguments("Argument `url` must be a public http or https URL."))
             }
             return .success(normalizedURL.absoluteString)
+
+        case "range":
+            guard let rawValue else {
+                return argument.required
+                    ? .failure(.invalidArguments("Argument `range` is required."))
+                    : .success(nil)
+            }
+            guard let range = normalizedStringValue(from: rawValue)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased(),
+                  CalendarBriefRange(rawValue: range) != nil else {
+                return .failure(.invalidArguments("Argument `range` must be one of: today, tomorrow, this_week, next_7_days."))
+            }
+            return .success(range)
 
         default:
             return normalizedPrimitiveValue(for: argument, rawValue: rawValue)
@@ -835,6 +922,30 @@ actor ToolCallingService {
                 Self.debugLog("planner recovered prose decision for \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
+            case "document_synthesize":
+                let query = userMessage ?? context.latestUserMessage
+                guard case .success(let arguments) = validatedArguments(
+                    ["query": query],
+                    for: toolDefinition,
+                    context: context
+                ) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
+            case "calendar_brief":
+                guard let range = heuristicCalendarRange(for: userMessage ?? context.latestUserMessage),
+                      case .success(let arguments) = validatedArguments(
+                        ["range": range.rawValue],
+                        for: toolDefinition,
+                        context: context
+                      ) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
             default:
                 continue
             }
@@ -987,6 +1098,87 @@ actor ToolCallingService {
 
         return containsSayPattern
             || (!tokens.intersection(actionTokens).isEmpty && !tokens.intersection(textTokens).isEmpty)
+    }
+
+    private nonisolated func shouldForceDocumentSynthesis(for userMessage: String, context: ToolInputContext) -> Bool {
+        guard !context.attachedDocuments.isEmpty else { return false }
+        if context.hasNewlyAttachedDocuments {
+            return true
+        }
+
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+
+        let documentPhrases = [
+            "this document",
+            "the document",
+            "this pdf",
+            "the pdf",
+            "this file",
+            "the file",
+            "attached document",
+            "attached pdf",
+            "attached file",
+            "summarize this",
+            "summarise this",
+            "summarize the document",
+            "summarise the document",
+            "key points",
+            "action items",
+            "extract from",
+            "compare the documents",
+            "what does it say",
+            "what does this say"
+        ]
+
+        if documentPhrases.contains(where: { normalized.contains($0) }) {
+            return true
+        }
+
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let documentTokens = Set(["document", "documents", "pdf", "file", "files", "attachment", "attachments", "csv", "report"])
+        let actionTokens = Set(["summarize", "summarise", "compare", "extract", "find", "answer", "explain", "analyze", "analyse", "list"])
+
+        return !tokens.intersection(documentTokens).isEmpty
+            && !tokens.intersection(actionTokens).isEmpty
+    }
+
+    private nonisolated func heuristicCalendarRange(for userMessage: String) -> CalendarBriefRange? {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return nil }
+
+        let calendarMarkers = [
+            "calendar",
+            "schedule",
+            "agenda",
+            "availability",
+            "available",
+            "busy",
+            "free",
+            "appointments",
+            "meetings",
+            "events",
+            "conflicts",
+            "what do i have",
+            "what's on"
+        ]
+        guard calendarMarkers.contains(where: { normalized.contains($0) }) else {
+            return nil
+        }
+
+        if normalized.contains("tomorrow") {
+            return .tomorrow
+        }
+        if normalized.contains("this week") || normalized.contains("week") {
+            return .thisWeek
+        }
+        if normalized.contains("next 7 days")
+            || normalized.contains("next seven days")
+            || normalized.contains("coming 7 days")
+            || normalized.contains("upcoming") {
+            return .next7Days
+        }
+        return .today
     }
 
     private nonisolated func heuristicWebSearchQuery(for userMessage: String) -> String? {
@@ -1191,6 +1383,69 @@ private struct OCRImageTextToolExecutor: ToolExecutor {
             contextBlock: result.contextBlock,
             sources: result.sources,
             durationSeconds: duration
+        )
+    }
+}
+
+private struct DocumentSynthesizeToolExecutor: ToolExecutor {
+    let toolName = "document_synthesize"
+    let documentLibraryService: DocumentLibraryService
+
+    func execute(arguments: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult {
+        guard !context.attachedDocuments.isEmpty else {
+            throw ToolExecutionFailure.invalidArguments("At least one attached document is required.")
+        }
+
+        let query = (arguments["query"] ?? context.latestUserMessage)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            throw ToolExecutionFailure.invalidArguments("A document query is required.")
+        }
+
+        let startTime = Date()
+        let result = await documentLibraryService.retrieveContext(
+            for: query,
+            documents: context.attachedDocuments
+        )
+
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("No relevant document excerpts were found.")
+        }
+
+        return ToolExecutionResult(
+            toolName: toolName,
+            status: .success,
+            message: nil,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            durationSeconds: Date().timeIntervalSince(startTime)
+        )
+    }
+}
+
+private struct CalendarBriefToolExecutor: ToolExecutor {
+    let toolName = "calendar_brief"
+    let calendarBriefService: CalendarBriefService
+
+    func execute(arguments: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
+        guard let rawRange = arguments["range"],
+              let range = CalendarBriefRange(rawValue: rawRange) else {
+            throw ToolExecutionFailure.invalidArguments("A supported calendar range is required.")
+        }
+
+        let startTime = Date()
+        let result = try await calendarBriefService.retrieveContext(for: range)
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("No calendar events were found.")
+        }
+
+        return ToolExecutionResult(
+            toolName: toolName,
+            status: .success,
+            message: nil,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            durationSeconds: Date().timeIntervalSince(startTime)
         )
     }
 }

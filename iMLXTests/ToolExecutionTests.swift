@@ -127,6 +127,32 @@ final class ToolExecutionTests: XCTestCase {
         XCTAssertEqual(result.status, .invalidArguments)
     }
 
+    func testExecuteRejectsDocumentSynthesisWithoutAttachedDocuments() async throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let result = try await service.execute(
+            call: ToolCallRequest(toolName: "document_synthesize", arguments: ["query": "summarize"]),
+            tools: ["document_synthesize": SlowExecutor(toolName: "document_synthesize")],
+            context: emptyContext
+        )
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.status, .invalidArguments)
+    }
+
+    func testExecuteRejectsInvalidCalendarRange() async throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let result = try await service.execute(
+            call: ToolCallRequest(toolName: "calendar_brief", arguments: ["range": "next_month"]),
+            tools: ["calendar_brief": SlowExecutor(toolName: "calendar_brief")],
+            context: emptyContext
+        )
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.status, .invalidArguments)
+    }
+
     func testExecutePropagatesCancellation() async {
         let service = ToolCallingService(
             webSearchService: WebSearchService(),

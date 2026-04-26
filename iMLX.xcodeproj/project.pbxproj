@@ -385,6 +385,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to capture photos for visual models.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access for live voice conversations.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "We need speech recognition to transcribe your voice locally for live conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -421,6 +423,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to capture photos for visual models.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access for live voice conversations.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "We need speech recognition to transcribe your voice locally for live conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

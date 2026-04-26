@@ -34,17 +34,20 @@ nonisolated enum ToolExecutionClass: String, Codable, Hashable, Sendable {
 nonisolated struct ToolMetadata: Codable, Hashable, Sendable {
     let requiresWebAccessToggle: Bool
     let requiresAttachedImages: Bool
+    let requiresAttachedDocuments: Bool
     let requiresSinglePublicURL: Bool
     let executionClass: ToolExecutionClass
 
     init(
         requiresWebAccessToggle: Bool = false,
         requiresAttachedImages: Bool = false,
+        requiresAttachedDocuments: Bool = false,
         requiresSinglePublicURL: Bool = false,
         executionClass: ToolExecutionClass = .local
     ) {
         self.requiresWebAccessToggle = requiresWebAccessToggle
         self.requiresAttachedImages = requiresAttachedImages
+        self.requiresAttachedDocuments = requiresAttachedDocuments
         self.requiresSinglePublicURL = requiresSinglePublicURL
         self.executionClass = executionClass
     }
@@ -95,7 +98,23 @@ nonisolated struct ToolCallRequest: Codable, Hashable, Sendable {
 nonisolated struct ToolInputContext: Sendable {
     let latestUserMessage: String
     let attachedImages: [ChatAttachmentImage]
+    let attachedDocuments: [ConversationDocumentReference]
+    let hasNewlyAttachedDocuments: Bool
     let detectedPublicURLs: [URL]
+
+    init(
+        latestUserMessage: String,
+        attachedImages: [ChatAttachmentImage],
+        attachedDocuments: [ConversationDocumentReference] = [],
+        hasNewlyAttachedDocuments: Bool = false,
+        detectedPublicURLs: [URL]
+    ) {
+        self.latestUserMessage = latestUserMessage
+        self.attachedImages = attachedImages
+        self.attachedDocuments = attachedDocuments
+        self.hasNewlyAttachedDocuments = hasNewlyAttachedDocuments
+        self.detectedPublicURLs = detectedPublicURLs
+    }
 
     var singleDetectedPublicURL: URL? {
         guard detectedPublicURLs.count == 1 else { return nil }

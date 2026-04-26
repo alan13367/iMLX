@@ -1602,6 +1602,16 @@ private func toolExecutionPresentation(toolName: String, displayInput: String?) 
         return ("link", String(format: String.appLocalized("tool.activity.read_url"), displayInput))
     case "ocr_image_text":
         return ("text.viewfinder", String.appLocalized("tool.activity.ocr_image_text"))
+    case "document_synthesize":
+        guard let displayInput, !displayInput.isEmpty else {
+            return ("doc.text.magnifyingglass", String.appLocalized("tool.activity.document_synthesize"))
+        }
+        return ("doc.text.magnifyingglass", String(format: String.appLocalized("tool.activity.document_synthesize_query"), displayInput))
+    case "calendar_brief":
+        guard let displayInput, !displayInput.isEmpty else {
+            return ("calendar", String.appLocalized("tool.activity.calendar_brief"))
+        }
+        return ("calendar", String(format: String.appLocalized("tool.activity.calendar_brief_range"), displayInput))
     default:
         return nil
     }
@@ -1621,6 +1631,14 @@ private func toolTraceLabel(toolName: String, success: Bool) -> String {
         return String.appLocalized("tool.trace.web_search")
     case ("web_search", false):
         return String.appLocalized("tool.trace.web_search_failed")
+    case ("document_synthesize", true):
+        return String.appLocalized("tool.trace.document_synthesize")
+    case ("document_synthesize", false):
+        return String.appLocalized("tool.trace.document_synthesize_failed")
+    case ("calendar_brief", true):
+        return String.appLocalized("tool.trace.calendar_brief")
+    case ("calendar_brief", false):
+        return String.appLocalized("tool.trace.calendar_brief_failed")
     default:
         return success ? toolName : "\(toolName) Failed"
     }
@@ -1634,6 +1652,10 @@ private func toolTraceIcon(toolName: String) -> String {
         return "text.viewfinder"
     case "web_search":
         return "globe"
+    case "document_synthesize":
+        return "doc.text.magnifyingglass"
+    case "calendar_brief":
+        return "calendar"
     default:
         return "wand.and.stars"
     }

@@ -30,6 +30,7 @@ final class AppState {
     let personaService = PersonaService()
     let memoryService = MemorySystem()
     let documentLibraryService = DocumentLibraryService()
+    let calendarBriefService = CalendarBriefService()
     var conversations: [Conversation] = []
     var personas: [Persona] = []
     var memories: [UserMemory] = []
@@ -47,7 +48,11 @@ final class AppState {
         self.manifestService = ManifestService()
         self.downloadService = ModelDownloadService(manifestService: manifestService)
         self.speechAssetService = SpeechAssetService()
-        self.toolCallingService = ToolCallingService(webSearchService: webSearchService)
+        self.toolCallingService = ToolCallingService(
+            webSearchService: webSearchService,
+            documentLibraryService: documentLibraryService,
+            calendarBriefService: calendarBriefService
+        )
         preferredAppLanguageCode = userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
         if let persistedOnboardingState = userDefaults.object(forKey: Keys.hasCompletedOnboarding) as? Bool {
             hasCompletedOnboarding = persistedOnboardingState

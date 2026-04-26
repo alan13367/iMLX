@@ -262,6 +262,111 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
+    func testResolvedDecisionForcesDocumentSynthesisForNewlyAttachedDocument() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Please summarize this",
+            attachedImages: [],
+            attachedDocuments: [sampleDocument],
+            hasNewlyAttachedDocuments: true,
+            detectedPublicURLs: []
+        )
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .call(
+                ToolCallRequest(
+                    toolName: "calendar_brief",
+                    arguments: ["range": "today"]
+                )
+            ),
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [documentTool, calendarTool],
+            preferThinkingFallback: false
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(
+                ToolCallRequest(
+                    toolName: "document_synthesize",
+                    arguments: ["query": "Please summarize this"]
+                )
+            )
+        )
+    }
+
+    func testResolvedDecisionKeepsReadURLPrecedenceOverDocumentSynthesis() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Summarize this PDF and this link https://example.com",
+            attachedImages: [],
+            attachedDocuments: [sampleDocument],
+            hasNewlyAttachedDocuments: true,
+            detectedPublicURLs: [URL(string: "https://example.com")!]
+        )
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .none,
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [readURLTool, documentTool],
+            preferThinkingFallback: false
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(
+                ToolCallRequest(
+                    toolName: "read_url",
+                    arguments: ["url": "https://example.com"]
+                )
+            )
+        )
+    }
+
+    func testResolvedDecisionDoesNotForceDocumentSynthesisForUnrelatedTurn() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "What is the capital of France?",
+            attachedImages: [],
+            attachedDocuments: [sampleDocument],
+            detectedPublicURLs: []
+        )
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .none,
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [documentTool],
+            preferThinkingFallback: false
+        )
+
+        XCTAssertEqual(decision, .none)
+    }
+
+    func testResolvedDecisionRecoversCalendarBriefForScheduleRequest() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .none,
+            userMessage: "What is on my calendar tomorrow?",
+            context: emptyContext,
+            tools: [calendarTool],
+            preferThinkingFallback: false
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(
+                ToolCallRequest(
+                    toolName: "calendar_brief",
+                    arguments: ["range": "tomorrow"]
+                )
+            )
+        )
+    }
+
     func testThinkingFallbackDoesNotTriggerWithoutEligibleWebSearchTool() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
@@ -368,11 +473,55 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
+    private var documentTool: ToolDefinition {
+        ToolDefinition(
+            name: "document_synthesize",
+            description: "Retrieves bounded excerpts from attached conversation documents.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "query",
+                    type: "string",
+                    required: true,
+                    description: "Document query."
+                )
+            ],
+            metadata: ToolMetadata(
+                requiresAttachedDocuments: true,
+                executionClass: .local
+            )
+        )
+    }
+
+    private var calendarTool: ToolDefinition {
+        ToolDefinition(
+            name: "calendar_brief",
+            description: "Reads local calendar events for a bounded date range.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "range",
+                    type: "string",
+                    required: true,
+                    description: "One of today, tomorrow, this_week, next_7_days."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+    }
+
     private var emptyContext: ToolInputContext {
         ToolInputContext(
             latestUserMessage: "",
             attachedImages: [],
             detectedPublicURLs: []
+        )
+    }
+
+    private var sampleDocument: ConversationDocumentReference {
+        ConversationDocumentReference(
+            id: "doc-1",
+            displayName: "Sample",
+            kind: .pdf,
+            importedAt: Date(timeIntervalSince1970: 0)
         )
     }
 }

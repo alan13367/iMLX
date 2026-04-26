@@ -215,37 +215,143 @@ private struct MessageDocumentAttachmentStrip: View {
         .frame(maxWidth: .infinity)
     }
 
+    @ViewBuilder
     private var content: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(attachedDocuments) { document in
-                    HStack(spacing: 8) {
-                        Image(systemName: iconName(document.kind))
-                            .foregroundStyle(role == .user ? .white : BrandPalette.cyan)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(document.displayName)
-                                .font(.caption.weight(.semibold))
-                                .lineLimit(1)
-                            Text(document.kind.displayName)
-                                .font(.caption2)
-                                .foregroundStyle(role == .user ? .white.opacity(0.8) : .secondary)
-                        }
+        if attachedDocuments.count == 1, let document = attachedDocuments.first {
+            MessageDocumentAttachmentCard(
+                document: document,
+                iconName: iconName(document.kind),
+                showsShadow: role == .user
+            )
+            .frame(maxWidth: 310, alignment: role == .user ? .trailing : .leading)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(attachedDocuments) { document in
+                        MessageDocumentAttachmentCard(
+                            document: document,
+                            iconName: iconName(document.kind),
+                            showsShadow: role == .user
+                        )
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background {
-                        if role == .user {
-                            BrandPalette.primaryGradient
-                        } else {
-                            Rectangle().fill(.regularMaterial)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
+                .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
             }
-            .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
+            .frame(maxWidth: 320, alignment: role == .user ? .trailing : .leading)
         }
-        .frame(maxWidth: 260)
+    }
+}
+
+private struct MessageDocumentAttachmentCard: View {
+    let document: ConversationDocumentReference
+    let iconName: String
+    let showsShadow: Bool
+
+    private var theme: DocumentAttachmentTheme {
+        DocumentAttachmentTheme(kind: document.kind)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(theme.iconFill)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(theme.accent)
+                            .frame(width: 4)
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(theme.accent.opacity(0.72), lineWidth: 1.2)
+                    }
+
+                Image(systemName: iconName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(theme.accent)
+
+                FoldedDocumentCorner(color: theme.accent)
+                    .frame(width: 13, height: 13)
+            }
+            .frame(width: 42, height: 48)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(document.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.title)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(document.kind.displayName.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(theme.accent)
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 12)
+        .padding(.vertical, 9)
+        .frame(width: 280, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.fill)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(theme.border, lineWidth: 1.4)
+        }
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(theme.accent)
+                .frame(width: 5)
+                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 8))
+        }
+        .shadow(color: showsShadow ? theme.accent.opacity(0.20) : .clear, radius: 10, x: 0, y: 4)
+    }
+}
+
+private struct DocumentAttachmentTheme {
+    let accent: Color
+    let fill: Color
+    let border: Color
+    let iconFill: Color
+    let title: Color
+
+    init(kind: ConversationDocumentKind) {
+        switch kind {
+        case .pdf:
+            accent = Color(red: 0.94, green: 0.18, blue: 0.22)
+            fill = Color(red: 1.00, green: 0.96, blue: 0.95).opacity(0.95)
+            border = accent.opacity(0.78)
+            iconFill = Color.white.opacity(0.92)
+            title = Color(red: 0.28, green: 0.04, blue: 0.05)
+        case .csv:
+            accent = Color(red: 0.07, green: 0.58, blue: 0.29)
+            fill = Color(red: 0.93, green: 0.99, blue: 0.95).opacity(0.95)
+            border = accent.opacity(0.78)
+            iconFill = Color.white.opacity(0.92)
+            title = Color(red: 0.04, green: 0.24, blue: 0.13)
+        case .text:
+            accent = Color(red: 0.15, green: 0.42, blue: 0.92)
+            fill = Color(red: 0.94, green: 0.97, blue: 1.00).opacity(0.95)
+            border = accent.opacity(0.76)
+            iconFill = Color.white.opacity(0.92)
+            title = Color(red: 0.05, green: 0.14, blue: 0.34)
+        }
+    }
+}
+
+private struct FoldedDocumentCorner: View {
+    let color: Color
+
+    var body: some View {
+        UnevenRoundedRectangle(bottomLeadingRadius: 3, topTrailingRadius: 7)
+            .fill(color.opacity(0.18))
+            .overlay(
+                UnevenRoundedRectangle(bottomLeadingRadius: 3, topTrailingRadius: 7)
+                    .stroke(color.opacity(0.42), lineWidth: 0.8)
+            )
     }
 }
 

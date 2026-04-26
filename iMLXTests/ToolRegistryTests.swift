@@ -10,7 +10,7 @@ final class ToolRegistryTests: XCTestCase {
             context: emptyContext
         )
 
-        XCTAssertEqual(tools.map(\.name), ["web_search"])
+        XCTAssertEqual(tools.map(\.name), ["web_search", "calendar_brief"])
     }
 
     func testNoToolsAreAvailableWhenToggleIsOff() async {
@@ -21,7 +21,7 @@ final class ToolRegistryTests: XCTestCase {
             context: emptyContext
         )
 
-        XCTAssertTrue(tools.isEmpty)
+        XCTAssertEqual(tools.map(\.name), ["calendar_brief"])
     }
 
     func testExecutorRegistryContainsWebSearchExecutor() async {
@@ -30,6 +30,8 @@ final class ToolRegistryTests: XCTestCase {
         let executors = await service.executors()
 
         XCTAssertNotNil(executors["web_search"])
+        XCTAssertNotNil(executors["document_synthesize"])
+        XCTAssertNotNil(executors["calendar_brief"])
     }
 
     func testReadURLToolIsAvailableWhenSingleURLIsPresent() async {
@@ -45,7 +47,7 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertEqual(tools.map(\.name), ["read_url", "web_search"])
+        XCTAssertEqual(tools.map(\.name), ["read_url", "web_search", "calendar_brief"])
     }
 
     func testReadURLToolIsUnavailableWhenToggleIsOff() async {
@@ -61,7 +63,7 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertTrue(tools.isEmpty)
+        XCTAssertEqual(tools.map(\.name), ["calendar_brief"])
     }
 
     func testReadURLToolIsUnavailableWhenMultipleURLsArePresent() async {
@@ -80,7 +82,7 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertEqual(tools.map(\.name), ["web_search"])
+        XCTAssertEqual(tools.map(\.name), ["web_search", "calendar_brief"])
     }
 
     func testOCRToolIsAvailableWhenImagesAreAttached() async {
@@ -96,7 +98,25 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertEqual(tools.map(\.name), ["ocr_image_text"])
+        XCTAssertEqual(tools.map(\.name), ["ocr_image_text", "calendar_brief"])
+    }
+
+    func testDocumentToolIsAvailableWhenDocumentsAreAttached() async {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Summarize this PDF",
+            attachedImages: [],
+            attachedDocuments: [sampleDocument],
+            hasNewlyAttachedDocuments: true,
+            detectedPublicURLs: []
+        )
+
+        let tools = await service.enabledTools(
+            webSearchEnabled: false,
+            context: context
+        )
+
+        XCTAssertEqual(tools.map(\.name), ["document_synthesize", "calendar_brief"])
     }
 
     private var emptyContext: ToolInputContext {
@@ -104,6 +124,15 @@ final class ToolRegistryTests: XCTestCase {
             latestUserMessage: "",
             attachedImages: [],
             detectedPublicURLs: []
+        )
+    }
+
+    private var sampleDocument: ConversationDocumentReference {
+        ConversationDocumentReference(
+            id: "doc-1",
+            displayName: "Sample",
+            kind: .pdf,
+            importedAt: Date(timeIntervalSince1970: 0)
         )
     }
 }

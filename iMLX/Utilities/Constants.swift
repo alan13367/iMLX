@@ -406,6 +406,9 @@ nonisolated enum Constants {
         - For web_search, rewrite the user's question into an optimized search engine query.
         - Use read_url when the latest message includes a specific public URL and the user wants that page read or summarized.
         - Use ocr_image_text when the user wants visible text extracted, translated, or summarized from attached images.
+        - Use document_synthesize when attached documents are needed for summaries, comparisons, extraction, key points, action items, or document Q&A.
+        - Use calendar_brief when the user asks about their schedule, agenda, availability, conflicts, events, appointments, or meetings.
+        - For calendar_brief, choose range from: today, tomorrow, this_week, next_7_days.
         - Do NOT call tools for greetings, thanks, follow-ups that don't need tool input, or questions the model can answer directly.
         - Keep search queries short, specific, and entity-focused.
         - At most one tool call is allowed.

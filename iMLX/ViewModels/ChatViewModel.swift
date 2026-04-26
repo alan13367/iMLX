@@ -195,7 +195,11 @@ final class ChatViewModel {
             attachedImages: pendingImages.isEmpty ? nil : pendingImages,
             attachedDocuments: pendingDocuments.isEmpty ? nil : pendingDocuments
         )
-        let toolContext = await appState.toolCallingService.context(for: userMessage)
+        let toolContext = await appState.toolCallingService.context(
+            for: userMessage,
+            attachedDocuments: attachedDocuments,
+            hasNewlyAttachedDocuments: !pendingDocuments.isEmpty
+        )
         messages.append(userMessage)
         let handledExplicitMemoryCommand = handleExplicitMemoryCommands(in: text, userMessage: userMessage)
 
@@ -225,10 +229,6 @@ final class ChatViewModel {
         var lastResponseFlush = Date.distantPast
         var shouldForceFinalAnswerFollowUp = false
         var peakMemoryMB = await self.currentMemoryUsage()
-        let retrievalResult = await self.appState.documentLibraryService.retrieveContext(
-            for: text,
-            documents: self.attachedDocuments
-        )
         var toolResult: ToolExecutionResult?
         var toolTrace: ToolCallTrace?
 
@@ -344,28 +344,27 @@ final class ChatViewModel {
                 memoryRetrievalResult.contextBlock,
                 for: loadedModel
             )
-            let documentContext = self.promptDocumentContext(
-                retrievalResult.contextBlock,
-                for: loadedModel
-            )
-            let webContext = self.promptWebContext(
+            let toolContextBlock = self.promptToolContext(
                 toolResult?.contextBlock ?? "",
                 for: loadedModel
             )
+            let effectiveUserPrompt = self.promptWithToolContext(
+                userPrompt: text,
+                toolContext: toolContextBlock
+            )
             Self.debugToolLog(
-                "generation context: documents=\(retrievalResult.sources.count) toolSources=\(toolResult?.sources.count ?? 0) " +
-                "toolContextChars=\(webContext.count)"
+                "generation context: tool=\(toolResult?.toolName ?? "none") toolSources=\(toolResult?.sources.count ?? 0) " +
+                "toolContextChars=\(toolContextBlock.count)"
             )
             let effectiveSystemPrompt = self.mergedSystemPrompt(
                 base: systemPrompt,
                 memoryContext: memoryContext,
-                documentContext: documentContext,
-                webContext: webContext,
+                toolContext: "",
                 thinkingEnabled: thinkingEnabled
             )
 
             let stream = await self.inferenceService.generate(
-                prompt: text,
+                prompt: effectiveUserPrompt,
                 images: userMessage.attachedImages,
                 thinkingEnabled: loadedModel?.supportsThinking == true ? thinkingEnabled : nil,
                 history: history,
@@ -401,15 +400,14 @@ final class ChatViewModel {
 
             if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: latestParsedResponse, thinkingEnabled: thinkingEnabled) {
                 let followUpStream = await self.inferenceService.generate(
-                    prompt: text,
+                    prompt: effectiveUserPrompt,
                     images: userMessage.attachedImages,
                     thinkingEnabled: false,
                     history: history,
                     systemPrompt: self.finalAnswerSystemPrompt(
                         base: systemPrompt,
                         memoryContext: memoryContext,
-                        documentContext: documentContext,
-                        webContext: webContext
+                        toolContext: ""
                     ),
                     maxTokens: generationBudget.finalAnswerMaxTokens,
                     temperature: temperature,
@@ -451,10 +449,7 @@ final class ChatViewModel {
                 let assistantMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
-                        retrievedSources: combinedSources(
-                            retrievalResult.sources,
-                            toolResult?.sources ?? []
-                        ),
+                        retrievedSources: combinedSources(toolResult?.sources ?? []),
                         toolTrace: toolTrace,
                         generationStats: generationStats
                     )
@@ -495,10 +490,7 @@ final class ChatViewModel {
                 let partialMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
-                        retrievedSources: combinedSources(
-                            retrievalResult.sources,
-                            toolResult?.sources ?? []
-                        ),
+                        retrievedSources: combinedSources(toolResult?.sources ?? []),
                         toolTrace: toolTrace,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
@@ -522,10 +514,7 @@ final class ChatViewModel {
                 let partialMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
-                        retrievedSources: combinedSources(
-                            retrievalResult.sources,
-                            toolResult?.sources ?? []
-                        ),
+                        retrievedSources: combinedSources(toolResult?.sources ?? []),
                         toolTrace: toolTrace,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
@@ -825,8 +814,7 @@ final class ChatViewModel {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
-    private func combinedSources(_ documentSources: [MessageSource], _ toolSources: [MessageSource]) -> [MessageSource]? {
-        let sources = documentSources + toolSources
+    private func combinedSources(_ sources: [MessageSource]) -> [MessageSource]? {
         return sources.isEmpty ? nil : sources
     }
 
@@ -839,6 +827,10 @@ final class ChatViewModel {
                 ?? context.singleDetectedPublicURL?.absoluteString
         case "ocr_image_text":
             return nil
+        case "document_synthesize":
+            return request.arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "calendar_brief":
+            return request.arguments["range"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         default:
             return nil
         }
@@ -854,6 +846,10 @@ final class ChatViewModel {
                 return String.appLocalized("tool.notice.ocr_failed")
             case "web_search":
                 return String.appLocalized("tool.notice.search_failed")
+            case "document_synthesize":
+                return String.appLocalized("tool.notice.document_failed")
+            case "calendar_brief":
+                return String.appLocalized("tool.notice.calendar_failed")
             default:
                 return String.appLocalized("tool.notice.search_failed")
             }
@@ -868,6 +864,10 @@ final class ChatViewModel {
                     : String.appLocalized("tool.notice.ocr_no_text")
             case "web_search":
                 return String.appLocalized("tool.notice.search_no_content")
+            case "document_synthesize":
+                return String.appLocalized("tool.notice.document_no_content")
+            case "calendar_brief":
+                return String.appLocalized("tool.notice.calendar_no_content")
             default:
                 return String.appLocalized("tool.notice.search_failed")
             }
@@ -880,6 +880,10 @@ final class ChatViewModel {
                 return String.appLocalized("tool.notice.ocr_failed")
             case "web_search":
                 return String.appLocalized("tool.notice.search_failed")
+            case "document_synthesize":
+                return String.appLocalized("tool.notice.document_failed")
+            case "calendar_brief":
+                return String.appLocalized("tool.notice.calendar_failed")
             default:
                 return String.appLocalized("tool.notice.search_failed")
             }
@@ -1248,18 +1252,26 @@ final class ChatViewModel {
             }
     }
 
-    private func promptDocumentContext(_ context: String, for model: ModelInfo?) -> String {
+    private func promptToolContext(_ context: String, for model: ModelInfo?) -> String {
         guard isMemoryConstrainedLargeModel(model) else { return context }
         let characterLimit = Constants.Generation.memoryConstrainedDocumentContextCharacters
         guard context.count > characterLimit else { return context }
         return String(context.prefix(characterLimit))
     }
 
-    private func promptWebContext(_ context: String, for model: ModelInfo?) -> String {
-        guard isMemoryConstrainedLargeModel(model) else { return context }
-        let characterLimit = Constants.Generation.memoryConstrainedDocumentContextCharacters
-        guard context.count > characterLimit else { return context }
-        return String(context.prefix(characterLimit))
+    private func promptWithToolContext(userPrompt: String, toolContext: String) -> String {
+        let trimmedToolContext = toolContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToolContext.isEmpty else { return userPrompt }
+
+        return """
+        Use the tool result below to answer the user's request. The tool result is available content; do not ask the user to provide it again. If the tool result is insufficient, say what is missing.
+
+        Tool result:
+        \(trimmedToolContext)
+
+        User request:
+        \(userPrompt)
+        """
     }
 
     private func promptMemoryContext(_ context: String, for model: ModelInfo?) -> String {
@@ -1283,7 +1295,7 @@ final class ChatViewModel {
         max(1.0, min(requested, 2.0))
     }
 
-    private func mergedSystemPrompt(base: String, memoryContext: String, documentContext: String, webContext: String, thinkingEnabled: Bool) -> String {
+    private func mergedSystemPrompt(base: String, memoryContext: String, toolContext: String, thinkingEnabled: Bool) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
@@ -1293,13 +1305,9 @@ final class ChatViewModel {
         if !trimmedMemoryContext.isEmpty {
             parts.append(trimmedMemoryContext)
         }
-        let trimmedDocumentContext = documentContext.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedDocumentContext.isEmpty {
-            parts.append(trimmedDocumentContext)
-        }
-        let trimmedWebContext = webContext.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedWebContext.isEmpty {
-            parts.append(trimmedWebContext)
+        let trimmedToolContext = toolContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedToolContext.isEmpty {
+            parts.append(trimmedToolContext)
         }
         if thinkingEnabled {
             parts.append(Constants.Generation.conciseThinkingInstruction)
@@ -1307,7 +1315,7 @@ final class ChatViewModel {
         return parts.joined(separator: "\n\n")
     }
 
-    private func finalAnswerSystemPrompt(base: String, memoryContext: String, documentContext: String, webContext: String) -> String {
+    private func finalAnswerSystemPrompt(base: String, memoryContext: String, toolContext: String) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
@@ -1317,13 +1325,9 @@ final class ChatViewModel {
         if !trimmedMemoryContext.isEmpty {
             parts.append(trimmedMemoryContext)
         }
-        let trimmedDocumentContext = documentContext.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedDocumentContext.isEmpty {
-            parts.append(trimmedDocumentContext)
-        }
-        let trimmedWebContext = webContext.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedWebContext.isEmpty {
-            parts.append(trimmedWebContext)
+        let trimmedToolContext = toolContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedToolContext.isEmpty {
+            parts.append(trimmedToolContext)
         }
         parts.append(Constants.Generation.finalAnswerOnlyInstruction)
         return parts.joined(separator: "\n\n")

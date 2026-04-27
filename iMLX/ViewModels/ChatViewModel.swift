@@ -48,6 +48,7 @@ final class ChatViewModel {
     var currentParsedResponse: ParsedAssistantContent = .empty
     var isGenerating: Bool = false
     var isModelLoading: Bool = false
+    var loadingModel: ModelInfo?
     var errorMessage: String?
     var memoryNotice: ChatMemoryNotice?
     var activeConversationId: UUID?
@@ -56,6 +57,7 @@ final class ChatViewModel {
     var toolNotice: String?
     var toolActivityStatus: ToolActivityStatus?
     var currentToolTrace: ToolCallTrace?
+    var lastFailedUserMessageId: UUID?
 
     var canUseThinking: Bool {
         resolvedCurrentModel()?.supportsThinking == true
@@ -121,6 +123,7 @@ final class ChatViewModel {
         toolNotice = nil
         toolActivityStatus = nil
         currentToolTrace = nil
+        lastFailedUserMessageId = nil
         updateThinkingAvailability(for: resolvedCurrentModel())
     }
 
@@ -209,6 +212,7 @@ final class ChatViewModel {
         errorMessage = nil
         toolNotice = nil
         toolActivityStatus = nil
+        lastFailedUserMessageId = nil
         pendingImages.removeAll()
         pendingDocuments.removeAll()
 
@@ -528,6 +532,7 @@ final class ChatViewModel {
                 completedAssistantMessage = partialMessage
             }
             self.errorMessage = error.localizedDescription
+            self.lastFailedUserMessageId = userMessage.id
             self.saveCurrentConversation()
             Haptics.notificationError()
         }
@@ -543,6 +548,36 @@ final class ChatViewModel {
     }
 
     @MainActor
+    func retryLastUserMessage() {
+        guard !isGenerating else { return }
+        guard let failedId = lastFailedUserMessageId,
+              let userIndex = messages.lastIndex(where: { $0.id == failedId && $0.role == .user })
+        else {
+            lastFailedUserMessageId = nil
+            return
+        }
+
+        let failedMessage = messages[userIndex]
+        let restoredText = failedMessage.content
+        let restoredImages = failedMessage.attachedImages ?? []
+        let restoredDocuments = failedMessage.attachedDocuments ?? []
+
+        if userIndex < messages.count - 1 {
+            messages.removeSubrange((userIndex + 1)..<messages.count)
+        }
+        messages.remove(at: userIndex)
+
+        pendingImages = restoredImages
+        pendingDocuments = restoredDocuments
+
+        errorMessage = nil
+        toolNotice = nil
+        lastFailedUserMessageId = nil
+        saveCurrentConversation()
+        sendMessage(restoredText)
+    }
+
+    @MainActor
     func stopGeneration(discardPartialResponse: Bool = false) {
         if discardPartialResponse {
             shouldDiscardCancelledGeneration = true
@@ -555,6 +590,7 @@ final class ChatViewModel {
     @MainActor
     func loadModel(_ model: ModelInfo) async {
         isModelLoading = true
+        loadingModel = model
         errorMessage = nil
 
         do {
@@ -587,6 +623,7 @@ final class ChatViewModel {
         }
 
         isModelLoading = false
+        loadingModel = nil
     }
 
     @MainActor

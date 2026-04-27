@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 import UniformTypeIdentifiers
 
 private enum ChatUtilitySheet: String, Identifiable {
@@ -128,7 +129,6 @@ struct ChatView: View {
     @State private var chatViewModel: ChatViewModel
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
-    @State private var showModelPicker = false
     @State private var showPersonaPicker = false
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
@@ -137,6 +137,9 @@ struct ChatView: View {
     @State private var showLiveVoice = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var utilitySheet: ChatUtilitySheet?
+    @State private var toast: ChatToastModel?
+    @State private var toastDismissTask: Task<Void, Never>?
+    @State private var downloadedModels: [ModelInfo] = []
     let appState: AppState
     let conversationId: UUID
 
@@ -148,6 +151,10 @@ struct ChatView: View {
 
     var body: some View {
         visibleChatContent
+        .overlay(alignment: .top) {
+            ChatToastView(toast: toast)
+                .padding(.top, 4)
+        }
         .navigationTitle(conversationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -183,9 +190,21 @@ struct ChatView: View {
         }
         .onChange(of: appState.loadedModelId) { _, _ in
             handlePendingShortcutRoute()
+            Task { await refreshDownloadedModels() }
         }
         .onChange(of: chatViewModel.isModelLoading) { _, _ in
             handlePendingShortcutRoute()
+        }
+        .onChange(of: utilitySheet) { oldValue, newValue in
+            if oldValue == .models, newValue == nil {
+                Task { await refreshDownloadedModels() }
+            }
+        }
+        .task(id: appState.modelDownloadSnapshots.count) {
+            await refreshDownloadedModels()
+        }
+        .task {
+            await refreshDownloadedModels()
         }
         .onChange(of: selectedPhotoItem) {
             if let item = selectedPhotoItem {
@@ -278,8 +297,12 @@ struct ChatView: View {
                 parsedResponse: chatViewModel.currentParsedResponse,
                 toolActivityStatus: chatViewModel.toolActivityStatus,
                 currentToolTrace: chatViewModel.currentToolTrace,
+                lastFailedUserMessageId: chatViewModel.lastFailedUserMessageId,
                 conversationResetKey: appState.activeConversationId ?? conversationId,
-                onTranscriptTap: { isInputFocused = false }
+                onTranscriptTap: { isInputFocused = false },
+                onCopy: copyText(_:),
+                onRetry: retryLastUserMessage,
+                onOpenSourceURL: openSourceURL(_:)
             )
             .opacity(isShowingEmptyState ? 0 : 1)
             .allowsHitTesting(!isShowingEmptyState)
@@ -302,7 +325,7 @@ struct ChatView: View {
             toolNotice: chatViewModel.toolNotice,
             toolActivityStatus: chatViewModel.toolActivityStatus,
             isModelLoading: chatViewModel.isModelLoading,
-            selectedModelDisplayName: appState.selectedModel?.displayName,
+            selectedModelDisplayName: chatViewModel.loadingModel?.displayName ?? appState.selectedModel?.displayName,
             isGenerating: chatViewModel.isGenerating,
             memoryNotice: chatViewModel.memoryNotice,
             activePersona: chatViewModel.activePersona,
@@ -385,19 +408,16 @@ struct ChatView: View {
     }
 
     private var modelStatus: some View {
-        ChatModelStatusButton(
+        ChatModelStatusMenu(
             isModelLoading: chatViewModel.isModelLoading,
-            selectedModelDisplayName: appState.selectedModel?.displayName,
+            selectedModelDisplayName: chatViewModel.loadingModel?.displayName ?? appState.selectedModel?.displayName,
+            loadedModelId: appState.loadedModelId,
             loadedModelDisplayName: appState.modelInfo(id: appState.loadedModelId)?.displayName,
-            onTap: { showModelPicker = true }
+            downloadedModels: downloadedModels,
+            onSelectModel: selectModelFromMenu,
+            onUnload: unloadModelFromMenu,
+            onManageModels: openModels
         )
-        .sheet(isPresented: $showModelPicker) {
-            ModelPickerSheet(
-                appState: appState,
-                chatViewModel: chatViewModel,
-                isPresented: $showModelPicker
-            )
-        }
     }
 
     @ViewBuilder
@@ -424,14 +444,6 @@ struct ChatView: View {
 
     @ViewBuilder
     private var trailingToolbarContent: some View {
-        if !showLiveVoice && appState.loadedModelId != nil {
-            ChatToolbarIconButton(
-                systemImage: "eject",
-                accessibilityLabel: String.appLocalized("models.picker.unload"),
-                action: unloadModel
-            )
-        }
-
         if !showLiveVoice {
             ChatToolbarIconButton(
                 systemImage: "square.and.pencil",
@@ -450,6 +462,62 @@ struct ChatView: View {
 
     private func dismissError() {
         chatViewModel.errorMessage = nil
+    }
+
+    private func copyText(_ text: String) {
+        UIPasteboard.general.setValue(text, forPasteboardType: UTType.plainText.identifier)
+        Haptics.impactLight()
+        presentToast(
+            ChatToastModel(
+                message: String.appLocalized("message.copied"),
+                symbol: "checkmark.circle.fill"
+            )
+        )
+    }
+
+    private func retryLastUserMessage() {
+        chatViewModel.retryLastUserMessage()
+    }
+
+    private func openSourceURL(_ url: URL?) {
+        guard let url else { return }
+        UIApplication.shared.open(url)
+    }
+
+    private func refreshDownloadedModels() async {
+        let refreshed = await appState.reconcileModelCatalogState()
+        downloadedModels = refreshed
+    }
+
+    private func selectModelFromMenu(_ model: ModelInfo) {
+        #if targetEnvironment(simulator)
+        Task { @MainActor in
+            await chatViewModel.unloadModel()
+            chatViewModel.errorMessage = InferenceError.simulatorUnsupported.localizedDescription
+        }
+        #else
+        Task { @MainActor in
+            await chatViewModel.loadModel(model)
+        }
+        #endif
+    }
+
+    private func unloadModelFromMenu() {
+        Task { @MainActor in
+            await chatViewModel.unloadModel()
+        }
+    }
+
+    private func presentToast(_ model: ChatToastModel) {
+        toast = model
+        toastDismissTask?.cancel()
+        toastDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.6))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.22)) {
+                toast = nil
+            }
+        }
     }
 
     private func dismissToolNotice() {
@@ -501,12 +569,6 @@ struct ChatView: View {
         utilitySheet = .settings
     }
 
-    private func unloadModel() {
-        Task {
-            await chatViewModel.unloadModel()
-        }
-    }
-
     private func startNewConversation() {
         isInputFocused = false
         chatViewModel.startNewConversation()
@@ -548,8 +610,8 @@ struct ChatView: View {
             return
         }
 
-        if appState.selectedModel == nil && !showModelPicker {
-            showModelPicker = true
+        if appState.selectedModel == nil && utilitySheet != .models {
+            openModels()
         }
     }
 
@@ -616,58 +678,116 @@ private struct ChatToolbarIconButton: View {
     }
 }
 
-private struct ChatModelStatusButton: View {
+private struct ChatModelStatusMenu: View {
     let isModelLoading: Bool
     let selectedModelDisplayName: String?
+    let loadedModelId: String?
     let loadedModelDisplayName: String?
-    let onTap: () -> Void
+    let downloadedModels: [ModelInfo]
+    let onSelectModel: (ModelInfo) -> Void
+    let onUnload: () -> Void
+    let onManageModels: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                if isModelLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(selectedModelDisplayName ?? String.appLocalized("chat.loading_model"))
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                } else if let loadedModelDisplayName {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                    Text(loadedModelDisplayName)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    Text(String.appLocalized("chat.select_model"))
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+        Menu {
+            if downloadedModels.isEmpty {
+                Section {
+                    Text(String.appLocalized("chat.model_menu.no_downloads"))
+                }
+            } else {
+                Section {
+                    ForEach(downloadedModels) { model in
+                        Button {
+                            onSelectModel(model)
+                        } label: {
+                            if model.id == loadedModelId {
+                                Label(model.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(model.displayName)
+                            }
+                        }
+                    }
                 }
             }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .liquidGlassSurface(in: Capsule(), interactive: true)
+
+            if loadedModelId != nil {
+                Section {
+                    Button(role: .destructive, action: onUnload) {
+                        Label(
+                            String.appLocalized("models.picker.unload"),
+                            systemImage: "eject"
+                        )
+                    }
+                }
+            }
+
+            Section {
+                Button(action: onManageModels) {
+                    Label(
+                        String.appLocalized("chat.model_menu.manage"),
+                        systemImage: "square.and.arrow.down"
+                    )
+                }
+            }
+        } label: {
+            ChatModelStatusLabel(
+                isModelLoading: isModelLoading,
+                selectedModelDisplayName: selectedModelDisplayName,
+                loadedModelDisplayName: loadedModelDisplayName
+            )
         }
-        .buttonStyle(.plain)
+        .menuOrder(.fixed)
         .accessibilityLabel(
             loadedModelDisplayName == nil
                 ? String.appLocalized("chat.select_model")
                 : String.appLocalized("chat.change_model_a11y")
         )
         .accessibilityHint(String.appLocalized("chat.model_picker_hint"))
+    }
+}
+
+private struct ChatModelStatusLabel: View {
+    let isModelLoading: Bool
+    let selectedModelDisplayName: String?
+    let loadedModelDisplayName: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isModelLoading {
+                ProgressView()
+                    .controlSize(.small)
+                Text(selectedModelDisplayName ?? String.appLocalized("chat.loading_model"))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+            } else if let loadedModelDisplayName {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                Text(loadedModelDisplayName)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Text(String.appLocalized("chat.select_model"))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .liquidGlassSurface(in: Capsule(), interactive: true)
     }
 }
 
@@ -701,8 +821,12 @@ private struct ChatMessageListSection: View {
     let parsedResponse: ParsedAssistantContent
     let toolActivityStatus: ToolActivityStatus?
     let currentToolTrace: ToolCallTrace?
+    let lastFailedUserMessageId: UUID?
     let conversationResetKey: UUID
     let onTranscriptTap: () -> Void
+    let onCopy: (String) -> Void
+    let onRetry: () -> Void
+    let onOpenSourceURL: (URL?) -> Void
 
     @State private var streamingScrollTask: Task<Void, Never>?
     @State private var streamingAutoscrollEnabled = true
@@ -714,39 +838,66 @@ private struct ChatMessageListSection: View {
     @State private var scrollViewResetKey = UUID()
     @State private var isStreamingThinkingExpanded = true
 
+    private var deliveryContext: MessageDeliveryContext {
+        MessageDeliveryContext(
+            isGenerating: isGenerating,
+            hasStartedStreaming: !currentResponse.isEmpty,
+            lastFailedUserMessageId: lastFailedUserMessageId,
+            lastUserMessageId: messages.last(where: { $0.role == .user })?.id
+        )
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(spacing: 12, pinnedViews: [.sectionHeaders]) {
+                    LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
                         ForEach(messages) { message in
-                            MessageBubbleView(message: message)
-                                .equatable()
-                                .id(message.id)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                            MessageRow(
+                                message: message,
+                                deliveryState: deliveryContext.state(for: message.id),
+                                onCopy: onCopy,
+                                onRetry: lastFailedUserMessageId == message.id ? onRetry : nil,
+                                onOpenSourceURL: onOpenSourceURL
+                            )
+                            .equatable()
+                            .id(message.id)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
 
                         if let toolActivityStatus {
-                            ToolActivityChainView(status: toolActivityStatus)
-                                .id("toolActivity")
-                                .transition(.opacity)
+                            HStack {
+                                MessageToolCallCard(phase: toolPhase(for: toolActivityStatus))
+                                Spacer(minLength: 24)
+                            }
+                            .id("toolActivity")
+                            .transition(.opacity)
                         } else if let currentToolTrace, isGenerating {
-                            CompletedToolChainView(trace: currentToolTrace)
-                                .id("toolTraceInline")
-                                .transition(.opacity)
+                            HStack {
+                                MessageToolCallCard(phase: .completed(currentToolTrace))
+                                Spacer(minLength: 24)
+                            }
+                            .id("toolTraceInline")
+                            .transition(.opacity)
                         }
 
                         if !currentResponse.isEmpty, shouldPinStreamingThinkingHeader {
                             Section {
                                 streamingMessageBubble
                             } header: {
-                                StreamingThinkingPinnedHeader(
+                                MessageThinkingPanel(
+                                    text: nil,
+                                    isStreaming: true,
+                                    isWaitingForAnswer: parsedResponse.response.isEmpty,
+                                    mode: .pinnedHeader,
                                     isExpanded: $isStreamingThinkingExpanded,
-                                    isWaitingForAnswer: parsedResponse.response.isEmpty
-                                ) {
-                                    guard streamingAutoscrollEnabled else { return }
-                                    scheduleAutoscroll(using: proxy, repeatAfterLayoutChange: true)
-                                }
+                                    onToggle: {
+                                        guard streamingAutoscrollEnabled else { return }
+                                        scheduleAutoscroll(using: proxy, repeatAfterLayoutChange: true)
+                                    }
+                                )
+                                .padding(.trailing, 24)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .id("streaming")
                             .transition(.opacity)
@@ -860,16 +1011,25 @@ private struct ChatMessageListSection: View {
     }
 
     private var streamingMessageBubble: some View {
-        MessageBubbleView(
+        MessageRow(
             message: ChatMessage(
                 role: .assistant,
-                content: currentResponse + (isGenerating ? "▊" : "")
+                content: currentResponse
             ),
             isStreaming: true,
             parsedAssistantContent: parsedResponse,
+            showsThinkingHeader: !shouldPinStreamingThinkingHeader,
             thinkingExpansion: $isStreamingThinkingExpanded,
-            showsThinkingHeader: !shouldPinStreamingThinkingHeader
+            onCopy: onCopy
         )
+    }
+
+    private func toolPhase(for status: ToolActivityStatus) -> MessageToolCallCard.Phase {
+        switch status {
+        case .planning: return .planning
+        case .running(let toolName, let displayInput):
+            return .running(toolName: toolName, displayInput: displayInput)
+        }
     }
 
     private var streamingAutoscrollKey: Int {
@@ -931,38 +1091,6 @@ private struct ChatMessageListSection: View {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             scrollToBottom(using: proxy, animated: false)
-        }
-    }
-}
-
-private struct StreamingThinkingPinnedHeader: View {
-    @Binding var isExpanded: Bool
-    let isWaitingForAnswer: Bool
-    let onToggle: () -> Void
-
-    var body: some View {
-        HStack {
-            Button {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    isExpanded.toggle()
-                }
-                onToggle()
-            } label: {
-                ThinkingDisclosureLabel(
-                    isExpanded: isExpanded,
-                    isStreaming: true,
-                    isWaitingForAnswer: isWaitingForAnswer
-                )
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(String.appLocalized("message.thinking"))
-            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-            Spacer(minLength: 36)
         }
     }
 }
@@ -1376,366 +1504,6 @@ private struct ChatStatusCard: View {
         .padding(.vertical, 12)
         .liquidGlassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.horizontal)
-    }
-}
-
-private struct ToolChainCardModifier: ViewModifier {
-    let accentColor: Color
-
-    func body(content: Content) -> some View {
-        content
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .liquidGlassSurface(
-                tint: accentColor.opacity(0.08),
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous),
-                fallback: AnyShapeStyle(accentColor.opacity(0.06))
-            )
-            .overlay(alignment: .leading) {
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 16,
-                    bottomLeadingRadius: 16,
-                    bottomTrailingRadius: 0,
-                    topTrailingRadius: 0
-                )
-                .fill(BrandPalette.primaryGradient)
-                .frame(width: 2.5)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
-private extension View {
-    func toolChainCard(accent: Color = BrandPalette.cyan) -> some View {
-        modifier(ToolChainCardModifier(accentColor: accent))
-    }
-}
-
-private struct ToolActivityChainView: View {
-    let status: ToolActivityStatus
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 0) {
-                ToolActivityStepRow(
-                    icon: "wand.and.stars",
-                    text: String.appLocalized("tool.activity.planning"),
-                    state: planningState
-                )
-
-                if let executionDetails {
-                    ToolActivityConnector()
-                    ToolActivityStepRow(
-                        icon: executionDetails.icon,
-                        text: executionDetails.text,
-                        state: executionState
-                    )
-                }
-            }
-            .toolChainCard()
-
-            Spacer(minLength: 36)
-        }
-    }
-
-    private var planningState: ToolActivityStepState {
-        switch status {
-        case .planning:
-            return .active
-        case .running:
-            return .completed
-        }
-    }
-
-    private var executionState: ToolActivityStepState {
-        switch status {
-        case .planning:
-            return .pending
-        case .running:
-            return .active
-        }
-    }
-
-    private var executionDetails: (icon: String, text: String)? {
-        switch status {
-        case .planning:
-            return nil
-        case .running(let toolName, let displayInput):
-            return toolExecutionPresentation(toolName: toolName, displayInput: displayInput)
-        }
-    }
-}
-
-private struct CompletedToolChainView: View {
-    let trace: ToolCallTrace
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 0) {
-                ToolActivityStepRow(
-                    icon: "wand.and.stars",
-                    text: String.appLocalized("tool.activity.planning"),
-                    state: .completed
-                )
-
-                if let executionDetails = toolExecutionPresentation(
-                    toolName: trace.toolName,
-                    displayInput: trace.displayInput
-                ) {
-                    ToolActivityConnector()
-                    ToolActivityStepRow(
-                        icon: executionDetails.icon,
-                        text: executionDetails.text,
-                        state: trace.success ? .completed : .failed
-                    )
-                }
-
-                if trace.success, trace.sourceCount > 0 {
-                    ToolActivityConnector()
-                    ToolActivityStepRow(
-                        icon: "doc.text.magnifyingglass",
-                        text: String(format: String.appLocalized("tool.trace.sources_found"), trace.sourceCount),
-                        state: .completed
-                    )
-                }
-            }
-            .toolChainCard()
-
-            Spacer(minLength: 36)
-        }
-    }
-}
-
-struct ToolTraceChainView: View {
-    let trace: ToolCallTrace
-    @Binding var isExpanded: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: trace.success ? toolTraceIcon(toolName: trace.toolName) : "exclamationmark.triangle")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(trace.success ? BrandPalette.cyan : .orange)
-                        .frame(width: 24, height: 24)
-                        .background(
-                            Circle()
-                                .fill(trace.success ? BrandPalette.cyan.opacity(0.14) : Color.orange.opacity(0.14))
-                        )
-
-                    Text(toolLabel)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(trace.success ? BrandPalette.cyan : .secondary)
-
-                    if let duration = trace.durationSeconds {
-                        Text(String(format: "%.1fs", duration))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(.fill.quaternary))
-                    }
-
-                    Spacer(minLength: 4)
-
-                    Image(systemName: "chevron.down")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 0) {
-                    ToolActivityStepRow(
-                        icon: "wand.and.stars",
-                        text: String.appLocalized("tool.activity.planning"),
-                        state: .completed
-                    )
-
-                    if let executionDetails = toolExecutionPresentation(
-                        toolName: trace.toolName,
-                        displayInput: trace.displayInput
-                    ) {
-                        ToolActivityConnector()
-                        ToolActivityStepRow(
-                            icon: executionDetails.icon,
-                            text: executionDetails.text,
-                            state: trace.success ? .completed : .failed
-                        )
-                    }
-
-                    if trace.success, trace.sourceCount > 0 {
-                        ToolActivityConnector()
-                        ToolActivityStepRow(
-                            icon: "doc.text.magnifyingglass",
-                            text: String(format: String.appLocalized("tool.trace.sources_found"), trace.sourceCount),
-                            state: .completed
-                        )
-                    }
-                }
-                .padding(.top, 10)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .toolChainCard(accent: trace.success ? BrandPalette.cyan : .orange)
-    }
-
-    private var toolLabel: String {
-        toolTraceLabel(toolName: trace.toolName, success: trace.success)
-    }
-}
-
-private func toolExecutionPresentation(toolName: String, displayInput: String?) -> (icon: String, text: String)? {
-    switch toolName {
-    case "web_search":
-        guard let displayInput, !displayInput.isEmpty else { return nil }
-        return ("globe", String(format: String.appLocalized("tool.activity.searching"), displayInput))
-    case "read_url":
-        guard let displayInput, !displayInput.isEmpty else { return nil }
-        return ("link", String(format: String.appLocalized("tool.activity.read_url"), displayInput))
-    case "ocr_image_text":
-        return ("text.viewfinder", String.appLocalized("tool.activity.ocr_image_text"))
-    case "document_synthesize":
-        guard let displayInput, !displayInput.isEmpty else {
-            return ("doc.text.magnifyingglass", String.appLocalized("tool.activity.document_synthesize"))
-        }
-        return ("doc.text.magnifyingglass", String(format: String.appLocalized("tool.activity.document_synthesize_query"), displayInput))
-    case "calendar_brief":
-        guard let displayInput, !displayInput.isEmpty else {
-            return ("calendar", String.appLocalized("tool.activity.calendar_brief"))
-        }
-        return ("calendar", String(format: String.appLocalized("tool.activity.calendar_brief_range"), displayInput))
-    default:
-        return nil
-    }
-}
-
-private func toolTraceLabel(toolName: String, success: Bool) -> String {
-    switch (toolName, success) {
-    case ("read_url", true):
-        return String.appLocalized("tool.trace.read_url")
-    case ("read_url", false):
-        return String.appLocalized("tool.trace.read_url_failed")
-    case ("ocr_image_text", true):
-        return String.appLocalized("tool.trace.ocr_image_text")
-    case ("ocr_image_text", false):
-        return String.appLocalized("tool.trace.ocr_image_text_failed")
-    case ("web_search", true):
-        return String.appLocalized("tool.trace.web_search")
-    case ("web_search", false):
-        return String.appLocalized("tool.trace.web_search_failed")
-    case ("document_synthesize", true):
-        return String.appLocalized("tool.trace.document_synthesize")
-    case ("document_synthesize", false):
-        return String.appLocalized("tool.trace.document_synthesize_failed")
-    case ("calendar_brief", true):
-        return String.appLocalized("tool.trace.calendar_brief")
-    case ("calendar_brief", false):
-        return String.appLocalized("tool.trace.calendar_brief_failed")
-    default:
-        return success ? toolName : "\(toolName) Failed"
-    }
-}
-
-private func toolTraceIcon(toolName: String) -> String {
-    switch toolName {
-    case "read_url":
-        return "link"
-    case "ocr_image_text":
-        return "text.viewfinder"
-    case "web_search":
-        return "globe"
-    case "document_synthesize":
-        return "doc.text.magnifyingglass"
-    case "calendar_brief":
-        return "calendar"
-    default:
-        return "wand.and.stars"
-    }
-}
-
-enum ToolActivityStepState {
-    case pending
-    case active
-    case completed
-    case failed
-}
-
-struct ToolActivityStepRow: View {
-    let icon: String
-    let text: String
-    let state: ToolActivityStepState
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ZStack {
-                switch state {
-                case .active:
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(BrandPalette.cyan)
-                case .completed:
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.green)
-                case .failed:
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.caption)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.red)
-                case .pending:
-                    Image(systemName: "circle")
-                        .font(.caption)
-                        .foregroundStyle(.quaternary)
-                }
-            }
-            .frame(width: 18, height: 18)
-
-            Image(systemName: icon)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(iconColor)
-                .frame(width: 14)
-
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(textColor)
-                .lineLimit(2)
-        }
-    }
-
-    private var iconColor: Color {
-        switch state {
-        case .active: BrandPalette.cyan
-        case .completed: .secondary
-        case .failed: .secondary
-        case .pending: Color(.quaternaryLabel)
-        }
-    }
-
-    private var textColor: Color {
-        switch state {
-        case .active: .primary
-        case .completed: .secondary
-        case .failed: .secondary
-        case .pending: Color(.quaternaryLabel)
-        }
-    }
-}
-
-struct ToolActivityConnector: View {
-    var body: some View {
-        Capsule()
-            .fill(BrandPalette.cyan.opacity(0.18))
-            .frame(width: 2, height: 12)
-            .padding(.leading, 8)
     }
 }
 

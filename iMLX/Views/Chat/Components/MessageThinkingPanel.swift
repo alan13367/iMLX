@@ -1,4 +1,5 @@
 import SwiftUI
+import Textual
 
 /// Single canonical disclosure for assistant "thinking" reasoning.
 ///
@@ -122,16 +123,11 @@ struct MessageThinkingPanel: View {
     }
 }
 
-/// Markdown-aware text renderer used by message bubbles and panels.
+/// Markdown-aware text renderer used by assistant messages and thinking panels.
 ///
 /// During streaming we render the raw plain text (markdown parsing is expensive
-/// and unstable mid-stream); once the message is finalized we render inline
-/// markdown so bold/links/inline code render correctly.
-///
-/// SwiftUI's `Text(AttributedString)` only renders inline markdown — block
-/// elements like bullet/numbered lists pass through as literal `*`/`-`/`1.`.
-/// Before parsing we normalize common list prefixes to a real bullet glyph so
-/// chat answers don't look like raw markdown.
+/// and unstable mid-stream); once the message is finalized Textual renders
+/// block-level Markdown such as lists, code fences, blockquotes, and tables.
 struct MessageMarkdownText: View {
     let text: String
     let isStreaming: Bool
@@ -141,58 +137,69 @@ struct MessageMarkdownText: View {
         if isStreaming {
             Text(text)
         } else {
-            let normalized = MessageMarkdownText.normalizeListPrefixes(text)
-            if let attributed = try? AttributedString(
-                markdown: normalized,
-                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-            ) {
-                Text(attributed)
-                    .tint(linkTint)
-            } else {
-                Text(normalized)
-            }
+            StructuredText(markdown: MarkdownSanitizer.removingRemoteImages(from: text))
+                .textual.structuredTextStyle(.gitHub)
+                .textual.inlineStyle(chatInlineStyle)
+                .textual.headingStyle(IMLXChatHeadingStyle())
+                .textual.paragraphStyle(IMLXChatParagraphStyle())
+                .textual.codeBlockStyle(IMLXChatCodeBlockStyle())
+                .textual.overflowMode(.scroll)
+                .textual.textSelection(.enabled)
+                .tint(linkTint)
         }
     }
 
-    /// Replaces leading `* `, `- `, `+ ` markers with `•  ` and renders
-    /// `<n>. ` numbered markers as `n.  ` with consistent spacing. Preserves
-    /// indentation so nested lists keep their visual depth.
-    static func normalizeListPrefixes(_ source: String) -> String {
-        var result = ""
-        result.reserveCapacity(source.count)
-        var isFirstLine = true
-        for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
-            if !isFirstLine { result.append("\n") }
-            isFirstLine = false
-            result.append(transformedLine(String(line)))
-        }
-        return result
+    private var chatInlineStyle: InlineStyle {
+        InlineStyle()
+            .code(
+                .monospaced,
+                .fontScale(0.88),
+                .backgroundColor(BrandPalette.accent.opacity(0.12))
+            )
+            .strong(.fontWeight(.semibold))
+            .link(.foregroundColor(linkTint))
     }
+}
 
-    private static func transformedLine(_ line: String) -> String {
-        let leadingWhitespace = line.prefix(while: { $0 == " " || $0 == "\t" })
-        let body = line.dropFirst(leadingWhitespace.count)
+private struct IMLXChatHeadingStyle: StructuredText.HeadingStyle {
+    private static let fontScales: [CGFloat] = [1.28, 1.18, 1.1, 1.0, 0.95, 0.92]
 
-        if body.hasPrefix("* ") || body.hasPrefix("- ") || body.hasPrefix("+ ") {
-            return "\(leadingWhitespace)•  \(body.dropFirst(2))"
+    func makeBody(configuration: Configuration) -> some View {
+        let headingLevel = min(configuration.headingLevel, Self.fontScales.count)
+
+        configuration.label
+            .textual.fontScale(Self.fontScales[headingLevel - 1])
+            .textual.lineSpacing(.fontScaled(0.15))
+            .textual.blockSpacing(.init(top: headingLevel <= 2 ? 14 : 10, bottom: 6))
+            .fontWeight(.semibold)
+    }
+}
+
+private struct IMLXChatParagraphStyle: StructuredText.ParagraphStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .textual.lineSpacing(.fontScaled(0.22))
+            .textual.blockSpacing(.init(top: 0, bottom: 10))
+    }
+}
+
+private struct IMLXChatCodeBlockStyle: StructuredText.CodeBlockStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Overflow {
+            configuration.label
+                .textual.lineSpacing(.fontScaled(0.2))
+                .textual.fontScale(0.86)
+                .monospaced()
+                .padding(12)
+                .fixedSize(horizontal: false, vertical: true)
         }
-
-        var digits = ""
-        var index = body.startIndex
-        while index < body.endIndex, body[index].isNumber {
-            digits.append(body[index])
-            index = body.index(after: index)
+        .background(BrandPalette.accent.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(BrandPalette.accent.opacity(0.16), lineWidth: 0.8)
         }
-        if !digits.isEmpty,
-           index < body.endIndex,
-           body[index] == ".",
-           body.index(after: index) < body.endIndex,
-           body[body.index(after: index)] == " " {
-            let rest = body[body.index(index, offsetBy: 2)...]
-            return "\(leadingWhitespace)\(digits).  \(rest)"
-        }
-
-        return line
+        .textual.blockSpacing(.init(top: 2, bottom: 12))
     }
 }
 

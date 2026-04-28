@@ -122,7 +122,12 @@ private struct MessageImageAttachmentStrip: View {
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(attachedImages) { image in
-                    AttachmentImageThumbnailView(imageData: image.data, size: imageSize, cornerRadius: 14)
+                    AttachmentImageThumbnailView(
+                        imageId: image.id,
+                        imageData: image.data,
+                        size: imageSize,
+                        cornerRadius: 14
+                    )
                         .accessibilityLabel("Attached image")
                 }
             }
@@ -199,6 +204,7 @@ struct AttachmentDocumentCard: View {
 /// to the previous implementation in `MessageBubbleView.swift` but moved here
 /// so attachment-related code lives in one file.
 struct AttachmentImageThumbnailView: View {
+    let imageId: UUID
     let imageData: Data
     let size: CGFloat
     let cornerRadius: CGFloat
@@ -210,7 +216,7 @@ struct AttachmentImageThumbnailView: View {
     }
 
     private var cacheKey: String {
-        AttachmentImageThumbnailCache.cacheKey(for: imageData, maxPixelSize: maxPixelSize)
+        AttachmentImageThumbnailCache.cacheKey(for: imageId, maxPixelSize: maxPixelSize)
     }
 
     var body: some View {
@@ -230,6 +236,7 @@ struct AttachmentImageThumbnailView: View {
             image = nil
             image = await AttachmentImageThumbnailCache.shared.image(
                 for: imageData,
+                cacheKey: cacheKey,
                 maxPixelSize: maxPixelSize
             )
         }
@@ -240,12 +247,20 @@ nonisolated final class AttachmentImageThumbnailCache {
     static let shared = AttachmentImageThumbnailCache()
     private let cache = NSCache<NSString, UIImage>()
 
-    static func cacheKey(for data: Data, maxPixelSize: CGFloat) -> String {
-        "\(data.count)-\(data.hashValue)-\(Int(maxPixelSize.rounded(.up)))"
+    private init() {
+        cache.countLimit = 96
+        cache.totalCostLimit = 48 * 1024 * 1024
     }
 
-    func image(for data: Data, maxPixelSize: CGFloat) async -> UIImage? {
-        let key = Self.cacheKey(for: data, maxPixelSize: maxPixelSize) as NSString
+    static func cacheKey(for id: UUID, maxPixelSize: CGFloat) -> String {
+        "\(id.uuidString)-\(Int(maxPixelSize.rounded(.up)))"
+    }
+
+    func image(for data: Data, cacheKey: String, maxPixelSize: CGFloat) async -> UIImage? {
+        await image(for: data, cacheKey: cacheKey as NSString, maxPixelSize: maxPixelSize)
+    }
+
+    private func image(for data: Data, cacheKey key: NSString, maxPixelSize: CGFloat) async -> UIImage? {
         if let cached = cache.object(forKey: key) {
             return cached
         }
@@ -255,7 +270,8 @@ nonisolated final class AttachmentImageThumbnailCache {
         }.value
 
         if let decoded {
-            cache.setObject(decoded, forKey: key)
+            let cost = decoded.cgImage.map { $0.bytesPerRow * $0.height } ?? data.count
+            cache.setObject(decoded, forKey: key, cost: cost)
         }
 
         return decoded

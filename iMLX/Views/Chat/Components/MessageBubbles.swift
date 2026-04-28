@@ -14,7 +14,7 @@ struct UserMessageBubble: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
             if !text.isEmpty {
-                MessageMarkdownText(text: text, isStreaming: false, linkTint: BrandPalette.accent)
+                UserMessageInlineMarkdownText(text: text, linkTint: BrandPalette.accent)
                     .font(.body)
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
@@ -152,6 +152,24 @@ struct AssistantMessageText: View {
     }
 }
 
+private struct UserMessageInlineMarkdownText: View {
+    let text: String
+    let linkTint: Color
+
+    var body: some View {
+        let sanitized = MarkdownSanitizer.removingRemoteImages(from: text)
+        if let attributed = try? AttributedString(
+            markdown: sanitized,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            Text(attributed)
+                .tint(linkTint)
+        } else {
+            Text(sanitized)
+        }
+    }
+}
+
 #Preview("User bubble — sent") {
     UserMessageBubble(text: "Summarize the document", deliveryState: .sent, onRetry: nil)
         .padding()
@@ -165,4 +183,37 @@ struct AssistantMessageText: View {
 #Preview("User bubble — failed") {
     UserMessageBubble(text: "Summarize the document", deliveryState: .failed) {}
         .padding()
+}
+
+#Preview("Assistant markdown") {
+    ScrollView {
+        AssistantMessageText(
+            text: """
+            ## Study Plan
+
+            - Review the parser
+              - Confirm fallback behavior
+              - Keep streaming cheap
+            1. Build the app
+            2. Run the tests
+
+            > Sources can explain the answer without taking over the layout.
+
+            ```swift
+            struct Renderer {
+                let streamsPlainText: Bool = true
+            }
+            ```
+
+            | Case | Expected |
+            | --- | --- |
+            | Final answer | Textual |
+            | Streaming | Plain Text |
+
+            See [Textual](https://github.com/gonzalezreal/textual).
+            """,
+            isStreaming: false
+        )
+        .padding()
+    }
 }

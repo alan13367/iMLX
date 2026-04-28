@@ -130,7 +130,7 @@ nonisolated struct ParsedAssistantContent: Equatable {
     }
 
     private static func parseChannelDelimitedThinking(_ rawContent: String) -> (thinking: String, response: String)? {
-        let pattern = #"<\|channel(?:\|[^>]*)?>"#
+        let pattern = #"<(?:\|channel(?:\|[^>]*)?|channel\|)>"#
         let range = NSRange(rawContent.startIndex..<rawContent.endIndex, in: rawContent)
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
               let match = regex.firstMatch(in: rawContent, range: range),

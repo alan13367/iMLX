@@ -17,6 +17,7 @@
 		E74248D52F7D2670003ECA6B /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P008 /* ZIPFoundation */; };
 		E74248D62F7D2670003ECA6B /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P009 /* GRDB */; };
 		E74248D72F7D2670003ECA6B /* MLXLMTokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P010 /* MLXLMTokenizers */; };
+		E74248D82F7D2670003ECA6B /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P011 /* Textual */; };
 		E7C100012F9000010061F6D5 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E7C100032F9000010061F6D5 /* XCTest.framework */; };
 /* End PBXBuildFile section */
 
@@ -57,6 +58,7 @@
 				E74248D62F7D2670003ECA6B /* GRDB in Frameworks */,
 				E74248D52F7D2670003ECA6B /* ZIPFoundation in Frameworks */,
 				E74248D42F7D2670003ECA6B /* MLXFFT in Frameworks */,
+				E74248D82F7D2670003ECA6B /* Textual in Frameworks */,
 				E74248D72F7D2670003ECA6B /* MLXLMTokenizers in Frameworks */,
 				E74248D32F7D2670003ECA6B /* MLXVLM in Frameworks */,
 				E74248D22F7D2670003ECA6B /* MLXLLM in Frameworks */,
@@ -135,6 +137,7 @@
 				E7B001012F7D30000001P008 /* ZIPFoundation */,
 				E7B001012F7D30000001P009 /* GRDB */,
 				E7B001012F7D30000001P010 /* MLXLMTokenizers */,
+				E7B001012F7D30000001P011 /* Textual */,
 			);
 			productName = iMLX;
 			productReference = E7306A002F7D21010061F6D5 /* iMLX.app */;
@@ -199,6 +202,7 @@
 				E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				E7B002002F7D30000002P004 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				E7B002002F7D30000002P005 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */,
+				E7B002002F7D30000002P006 /* XCRemoteSwiftPackageReference "textual" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E7306A012F7D21010061F6D5 /* Products */;
@@ -578,6 +582,14 @@
 				minimumVersion = 0.2.0;
 			};
 		};
+		E7B002002F7D30000002P006 /* XCRemoteSwiftPackageReference "textual" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/textual";
+			requirement = {
+				kind = exactVersion;
+				version = 0.3.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -630,6 +642,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E7B002002F7D30000002P005 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */;
 			productName = MLXLMTokenizers;
+		};
+		E7B001012F7D30000001P011 /* Textual */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E7B002002F7D30000002P006 /* XCRemoteSwiftPackageReference "textual" */;
+			productName = Textual;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -40,15 +40,17 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
     }
 
     init(
+        id: UUID = UUID(),
         role: Role,
         content: String,
         attachedImages: [ChatAttachmentImage]? = nil,
         attachedDocuments: [ConversationDocumentReference]? = nil,
         retrievedSources: [MessageSource]? = nil,
         toolTrace: ToolCallTrace? = nil,
-        generationStats: GenerationStats? = nil
+        generationStats: GenerationStats? = nil,
+        timestamp: Date = Date()
     ) {
-        self.id = UUID()
+        self.id = id
         self.role = role
         self.content = content
         self.attachedImages = attachedImages
@@ -56,7 +58,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         self.retrievedSources = retrievedSources
         self.toolTrace = toolTrace
         self.generationStats = generationStats
-        self.timestamp = Date()
+        self.timestamp = timestamp
     }
 
     init(from decoder: any Swift.Decoder) throws {

@@ -13,8 +13,17 @@ private enum ChatUtilitySheet: String, Identifiable {
 }
 
 private struct ChatScrollState: Equatable {
-    let contentOverflows: Bool
+    let canScrollToBottom: Bool
     let isPinnedToBottom: Bool
+}
+
+private enum ConversationHistorySwipe {
+    static let minimumDistance: CGFloat = 32
+    static let primeHorizontalDistance: CGFloat = 90
+    static let primePredictedDistance: CGFloat = 150
+    static let commitHorizontalDistance: CGFloat = 140
+    static let commitPredictedDistance: CGFloat = 190
+    static let horizontalDominance: CGFloat = 2.2
 }
 
 private struct WebSearchPillSwitch: View {
@@ -140,6 +149,7 @@ struct ChatView: View {
     @State private var toast: ChatToastModel?
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var downloadedModels: [ModelInfo] = []
+    @State private var conversationHistorySwipePrimed = false
     let appState: AppState
     let conversationId: UUID
 
@@ -366,23 +376,50 @@ struct ChatView: View {
     }
 
     private var openConversationHistoryGesture: some Gesture {
-        DragGesture(minimumDistance: 24, coordinateSpace: .local)
+        DragGesture(minimumDistance: ConversationHistorySwipe.minimumDistance, coordinateSpace: .local)
+            .onChanged { value in
+                guard !conversationHistorySwipePrimed else { return }
+                guard shouldPrimeConversationHistorySwipe(from: value) else { return }
+                conversationHistorySwipePrimed = true
+                Haptics.selectionChanged()
+            }
             .onEnded { value in
+                defer { conversationHistorySwipePrimed = false }
                 guard shouldOpenConversationHistory(from: value) else { return }
                 isInputFocused = false
                 utilitySheet = .conversations
+                Haptics.impactMedium()
             }
     }
 
+    private func shouldPrimeConversationHistorySwipe(from value: DragGesture.Value) -> Bool {
+        shouldRecognizeConversationHistorySwipe(
+            from: value,
+            horizontalThreshold: ConversationHistorySwipe.primeHorizontalDistance,
+            predictedThreshold: ConversationHistorySwipe.primePredictedDistance
+        )
+    }
+
     private func shouldOpenConversationHistory(from value: DragGesture.Value) -> Bool {
+        shouldRecognizeConversationHistorySwipe(
+            from: value,
+            horizontalThreshold: ConversationHistorySwipe.commitHorizontalDistance,
+            predictedThreshold: ConversationHistorySwipe.commitPredictedDistance
+        )
+    }
+
+    private func shouldRecognizeConversationHistorySwipe(
+        from value: DragGesture.Value,
+        horizontalThreshold: CGFloat,
+        predictedThreshold: CGFloat
+    ) -> Bool {
         guard utilitySheet == nil else { return false }
-        guard value.startLocation.x <= 56 else { return false }
 
         let horizontalDistance = value.translation.width
         let verticalDistance = abs(value.translation.height)
-        guard horizontalDistance > 90 else { return false }
-        guard horizontalDistance > verticalDistance * 1.6 else { return false }
-        return value.predictedEndTranslation.width > 120
+        guard horizontalDistance > horizontalThreshold else { return false }
+        guard horizontalDistance > verticalDistance * ConversationHistorySwipe.horizontalDominance else { return false }
+        return value.predictedEndTranslation.width > predictedThreshold
     }
 
     @ViewBuilder
@@ -830,13 +867,13 @@ private struct ChatMessageListSection: View {
 
     @State private var streamingScrollTask: Task<Void, Never>?
     @State private var streamingAutoscrollEnabled = true
-    @State private var contentOverflows = false
+    @State private var canScrollToBottom = false
     @State private var scrollPinnedToBottom = true
-    @State private var contentHeight: CGFloat = 0
     @State private var finalizationStickToBottomTask: Task<Void, Never>?
     @State private var shouldStickToBottomDuringFinalization = false
-    @State private var scrollViewResetKey = UUID()
     @State private var isStreamingThinkingExpanded = true
+    @State private var streamingMessageId = UUID()
+    @State private var streamingMessageTimestamp = Date()
 
     private var deliveryContext: MessageDeliveryContext {
         MessageDeliveryContext(
@@ -914,29 +951,31 @@ private struct ChatMessageListSection: View {
                     .padding(.horizontal)
                     .padding(.vertical, 12)
                 }
-                .id(scrollViewResetKey)
                 .simultaneousGesture(
                     TapGesture().onEnded(onTranscriptTap)
                 )
                 .onScrollGeometryChange(for: ChatScrollState.self, of: { geometry in
                     let contentHeight = geometry.contentSize.height
-                    let visibleHeight = geometry.visibleRect.height
-                    let overflows = contentHeight > visibleHeight + 32
-                    let pinned = !overflows || geometry.visibleRect.maxY >= contentHeight - 32
-                    return ChatScrollState(contentOverflows: overflows, isPinnedToBottom: pinned)
+                    let remainingBelowViewport = max(0, contentHeight - geometry.visibleRect.maxY)
+                    let canScrollToBottom = remainingBelowViewport > 56
+                    let pinned = remainingBelowViewport <= 32
+                    return ChatScrollState(canScrollToBottom: canScrollToBottom, isPinnedToBottom: pinned)
                 }, action: { _, state in
-                    contentOverflows = state.contentOverflows
-                    scrollPinnedToBottom = state.isPinnedToBottom
-                })
-                .onScrollGeometryChange(for: CGFloat.self, of: { geometry in
-                    geometry.contentSize.height
-                }, action: { _, height in
-                    contentHeight = height
-                    guard shouldStickToBottomDuringFinalization else { return }
-                    guard streamingAutoscrollEnabled else { return }
-                    scrollToBottom(using: proxy, animated: false)
+                    if canScrollToBottom != state.canScrollToBottom {
+                        canScrollToBottom = state.canScrollToBottom
+                    }
+                    if scrollPinnedToBottom != state.isPinnedToBottom {
+                        scrollPinnedToBottom = state.isPinnedToBottom
+                    }
+                    guard shouldResumeAutoscrollWhenPinned(state) else { return }
+                    resumeAutoscroll(using: proxy, animated: false)
                 })
                 .onScrollPhaseChange { _, newPhase in
+                    if newPhase == .idle {
+                        guard shouldResumeAutoscrollWhenPinned() else { return }
+                        resumeAutoscroll(using: proxy, animated: false)
+                        return
+                    }
                     guard newPhase == .tracking || newPhase == .interacting else { return }
                     guard isGenerating else { return }
                     guard streamingAutoscrollEnabled else { return }
@@ -946,6 +985,8 @@ private struct ChatMessageListSection: View {
                 }
                 .task(id: conversationResetKey) {
                     streamingAutoscrollEnabled = true
+                    canScrollToBottom = false
+                    scrollPinnedToBottom = true
                 }
                 .task(id: messages.count) {
                     guard streamingAutoscrollEnabled else { return }
@@ -960,23 +1001,20 @@ private struct ChatMessageListSection: View {
                 .task(id: isGenerating) {
                     if isGenerating {
                         isStreamingThinkingExpanded = true
+                        streamingMessageId = UUID()
+                        streamingMessageTimestamp = Date()
                         return
                     }
                     guard streamingAutoscrollEnabled else { return }
                     guard !messages.isEmpty else { return }
                     stickToBottomDuringFinalization(using: proxy)
                 }
-                .task(id: contentHeight) {
-                    guard shouldStickToBottomDuringFinalization else { return }
-                    guard streamingAutoscrollEnabled else { return }
-                    scrollToBottom(using: proxy, animated: false)
-                }
                 .onDisappear {
                     streamingScrollTask?.cancel()
                     finalizationStickToBottomTask?.cancel()
                 }
 
-                if contentOverflows && (!scrollPinnedToBottom || !streamingAutoscrollEnabled) {
+                if canScrollToBottom && (!scrollPinnedToBottom || !streamingAutoscrollEnabled) {
                     HStack {
                         Spacer(minLength: 0)
                         Button {
@@ -1013,8 +1051,10 @@ private struct ChatMessageListSection: View {
     private var streamingMessageBubble: some View {
         MessageRow(
             message: ChatMessage(
+                id: streamingMessageId,
                 role: .assistant,
-                content: currentResponse
+                content: currentResponse,
+                timestamp: streamingMessageTimestamp
             ),
             isStreaming: true,
             parsedAssistantContent: parsedResponse,
@@ -1041,10 +1081,21 @@ private struct ChatMessageListSection: View {
     }
 
     private func resumeAutoscroll(using proxy: ScrollViewProxy) {
+        resumeAutoscroll(using: proxy, animated: true)
+    }
+
+    private func resumeAutoscroll(using proxy: ScrollViewProxy, animated: Bool) {
         streamingScrollTask?.cancel()
-        scrollToBottom(using: proxy)
         streamingAutoscrollEnabled = true
+        scrollToBottom(using: proxy, animated: animated)
         scheduleAutoscroll(using: proxy)
+    }
+
+    private func shouldResumeAutoscrollWhenPinned(_ state: ChatScrollState? = nil) -> Bool {
+        guard isGenerating else { return false }
+        guard !currentResponse.isEmpty else { return false }
+        guard !streamingAutoscrollEnabled else { return false }
+        return state?.isPinnedToBottom ?? scrollPinnedToBottom
     }
 
     private func scheduleAutoscroll(using proxy: ScrollViewProxy, repeatAfterLayoutChange: Bool = false) {
@@ -1078,7 +1129,6 @@ private struct ChatMessageListSection: View {
     private func stickToBottomDuringFinalization(using proxy: ScrollViewProxy) {
         finalizationStickToBottomTask?.cancel()
         shouldStickToBottomDuringFinalization = true
-        scrollViewResetKey = UUID()
         scheduleAutoscroll(using: proxy, repeatAfterLayoutChange: true)
         finalizationStickToBottomTask = Task { @MainActor in
             defer {
@@ -1086,6 +1136,9 @@ private struct ChatMessageListSection: View {
                 finalizationStickToBottomTask = nil
             }
             try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            scrollToBottom(using: proxy, animated: false)
+            try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
             scrollToBottom(using: proxy, animated: false)
             try? await Task.sleep(for: .milliseconds(500))
@@ -1461,7 +1514,12 @@ private struct ChatPendingImageStrip: View {
             HStack(spacing: 8) {
                 ForEach(pendingImages) { image in
                     ZStack(alignment: .topTrailing) {
-                        AttachmentImageThumbnailView(imageData: image.data, size: 60, cornerRadius: 8)
+                        AttachmentImageThumbnailView(
+                            imageId: image.id,
+                            imageData: image.data,
+                            size: 60,
+                            cornerRadius: 8
+                        )
 
                         Button {
                             onRemoveImage(image.id)

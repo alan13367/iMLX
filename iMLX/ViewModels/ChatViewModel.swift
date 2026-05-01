@@ -298,21 +298,42 @@ final class ChatViewModel {
             )
             if !tools.isEmpty {
                 Self.debugToolLog("tool stage enabled: registeredTools=\(tools.map(\.name).joined(separator: ","))")
-                toolActivityStatus = .planning
-                let plannedDecision = try await appState.toolCallingService.plan(
-                    userMessage: text,
-                    history: history,
-                    tools: tools,
-                    context: toolContext,
-                    using: inferenceService
-                )
-                let decision = appState.toolCallingService.resolvedDecision(
-                    plannedDecision: plannedDecision,
+
+                // Run the synchronous preflight first. For high-confidence
+                // turns (pasted URL, calendar/doc/OCR/live-data phrases) and
+                // for clearly tool-irrelevant turns (greetings, math, casual
+                // questions) this returns a final decision without paying for
+                // a planner inference round-trip — the dominant source of
+                // perceived "thinking" lag on simple prompts.
+                let preflight = appState.toolCallingService.preflightDecision(
                     userMessage: text,
                     context: toolContext,
-                    tools: tools,
-                    preferThinkingFallback: loadedModel?.supportsThinking == true
+                    tools: tools
                 )
+
+                let decision: ToolDecision
+                switch preflight {
+                case .skip(let resolved):
+                    Self.debugToolLog("planner stage skipped via preflight decision=\(Self.describeDecision(resolved))")
+                    decision = resolved
+
+                case .deliberate:
+                    toolActivityStatus = .planning
+                    let plannedDecision = try await appState.toolCallingService.plan(
+                        userMessage: text,
+                        history: history,
+                        tools: tools,
+                        context: toolContext,
+                        using: inferenceService
+                    )
+                    decision = appState.toolCallingService.resolvedDecision(
+                        plannedDecision: plannedDecision,
+                        userMessage: text,
+                        context: toolContext,
+                        tools: tools,
+                        preferThinkingFallback: loadedModel?.supportsThinking == true
+                    )
+                }
 
                 switch decision {
                 case .none:
@@ -966,6 +987,15 @@ final class ChatViewModel {
             return compact
         }
         return String(compact.prefix(limit)) + "..."
+    }
+
+    private static func describeDecision(_ decision: ToolDecision) -> String {
+        switch decision {
+        case .none:
+            return "none"
+        case .call(let request):
+            return "call(\(request.toolName))"
+        }
     }
 
     private static func describeToolTrace(_ trace: ToolCallTrace) -> String {

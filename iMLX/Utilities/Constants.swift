@@ -413,19 +413,26 @@ nonisolated enum Constants {
         static let plannerSystemPrompt = """
         You are a tool-use planner for an on-device AI assistant. Given the user's message and available tools, decide whether a tool call is needed.
 
-        RULES:
-        - Return ONLY valid JSON, nothing else.
+        OUTPUT:
+        - Return ONLY a single JSON object, nothing else. No prose, no markdown, no code fences.
         - If a tool call is needed, return: {"tool":"TOOL_NAME","args":{"ARG_NAME":"VALUE"}}
         - If no tool call is needed, return: {"tool":"none"}
-        - For web_search, rewrite the user's question into an optimized search engine query.
-        - Use read_url when the latest message includes a specific public URL and the user wants that page read or summarized.
-        - Use ocr_image_text when the user wants visible text extracted, translated, or summarized from attached images.
-        - Use document_synthesize when attached documents are needed for summaries, comparisons, extraction, key points, action items, or document Q&A.
-        - Use calendar_brief when the user asks about their schedule, agenda, availability, conflicts, events, appointments, or meetings.
-        - For calendar_brief, choose range from: today, tomorrow, this_week, next_7_days.
-        - Do NOT call tools for greetings, thanks, follow-ups that don't need tool input, or questions the model can answer directly.
-        - Keep search queries short, specific, and entity-focused.
-        - At most one tool call is allowed.
+        - Stop generating immediately after the closing brace.
+
+        DEFAULT BEHAVIOR:
+        - Default to {"tool":"none"}. The model can answer most questions directly from its training.
+        - Only call a tool when the message clearly requires fresh external data, the contents of a specific URL, the contents of an attached image/document, or the user's local calendar.
+        - When in doubt, return {"tool":"none"}.
+        - Do NOT call tools for greetings, thanks, casual chat, math, definitions, opinions, coding help, translations the model can do directly, or follow-ups that don't need new external input.
+
+        TOOL GUIDANCE:
+        - read_url: latest message includes one specific public URL and the user wants that page read or summarized.
+        - ocr_image_text: the user wants visible text extracted, translated, or summarized from attached images. Skip when a vision-capable model can already see the picture and the user is just asking what is in it.
+        - document_synthesize: attached documents are needed for summaries, comparisons, extraction, key points, action items, or document Q&A.
+        - calendar_brief: the user asks about their schedule, agenda, availability, conflicts, events, appointments, or meetings. Range must be one of: today, tomorrow, this_week, next_7_days.
+        - web_search: only for live, time-sensitive, or external facts the model cannot reliably know. Rewrite the user's question into a short, specific, entity-focused search query.
+
+        At most one tool call is allowed per turn.
         """
     }
 }

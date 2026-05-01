@@ -43,6 +43,15 @@ protocol ToolExecutor: Sendable {
     func execute(arguments: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult
 }
 
+/// Result of the synchronous preflight that decides whether a turn even needs the
+/// LLM-backed planner. `skip` carries a final decision (either a confident tool
+/// call or `.none`); `deliberate` means the planner should run because the turn
+/// is ambiguous enough that an LLM round-trip might add value.
+nonisolated enum ToolPreflight: Equatable, Sendable {
+    case skip(ToolDecision)
+    case deliberate
+}
+
 actor ToolCallingService {
     private enum ToolExecutionError: Error {
         case timedOut
@@ -271,6 +280,160 @@ actor ToolCallingService {
         return .none
     }
 
+    /// Decides whether the LLM-backed planner needs to run this turn.
+    ///
+    /// Runs deterministic arbitration first (pasted URL, document/OCR/calendar/
+    /// live-data heuristics) and short-circuits to a final `ToolDecision` when
+    /// the answer is unambiguous. Returns `.deliberate` only when the turn has
+    /// genuinely ambiguous context that an LLM might disambiguate (attached
+    /// docs/images without a clear request, multiple URLs, web-search-leaning
+    /// language without a strong heuristic match).
+    ///
+    /// This keeps short, simple questions ("hi", "what's 2+2") from paying for
+    /// a full planner inference round-trip just to be told `.none`.
+    nonisolated func preflightDecision(
+        userMessage: String,
+        context: ToolInputContext,
+        tools: [ToolDefinition]
+    ) -> ToolPreflight {
+        guard !tools.isEmpty else {
+            Self.debugLog("preflight skip: no enabled tools (decision=none)")
+            return .skip(.none)
+        }
+
+        let toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
+
+        // 1. Pasted single public URL → high-confidence read_url.
+        if let directURL = context.singleDetectedPublicURL,
+           let readURLTool = toolsByName["read_url"],
+           case .success(let arguments) = validatedArguments(
+                ["url": directURL.absoluteString],
+                for: readURLTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected read_url for pasted URL (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: readURLTool.name, arguments: arguments)))
+        }
+
+        // 2. Newly-attached documents or explicit document language.
+        if let documentTool = toolsByName["document_synthesize"],
+           shouldForceDocumentSynthesis(for: userMessage, context: context),
+           case .success(let arguments) = validatedArguments(
+                ["query": userMessage],
+                for: documentTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected document_synthesize (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: documentTool.name, arguments: arguments)))
+        }
+
+        // 3. Text-focused image request with attached images.
+        if let ocrTool = toolsByName["ocr_image_text"],
+           shouldForceOCR(for: userMessage, context: context),
+           case .success(let arguments) = validatedArguments(
+                [:],
+                for: ocrTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected ocr_image_text (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments)))
+        }
+
+        // 4. Calendar-shaped request.
+        if let calendarTool = toolsByName["calendar_brief"],
+           let range = heuristicCalendarRange(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                ["range": range.rawValue],
+                for: calendarTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected calendar_brief range=\(range.rawValue) (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments)))
+        }
+
+        // 5. Strong live-data web_search phrase, but only when no attachments
+        //    might reframe the request as document/image-grounded.
+        if let webSearchTool = toolsByName["web_search"],
+           context.attachedDocuments.isEmpty,
+           context.attachedImages.isEmpty,
+           shouldForceWebSearch(for: userMessage),
+           let query = heuristicWebSearchQuery(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                ["query": query],
+                for: webSearchTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected web_search via live-data heuristic (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: webSearchTool.name, arguments: arguments)))
+        }
+
+        // 6. Quick reject: nothing in the turn could plausibly need a tool.
+        //    Skip the planner entirely and let the model answer directly.
+        if !mightBenefitFromPlanner(
+            userMessage: userMessage,
+            context: context,
+            toolsByName: toolsByName
+        ) {
+            Self.debugLog("preflight skip: no actionable context or heuristic match (decision=none)")
+            return .skip(.none)
+        }
+
+        return .deliberate
+    }
+
+    private nonisolated func mightBenefitFromPlanner(
+        userMessage: String,
+        context: ToolInputContext,
+        toolsByName: [String: ToolDefinition]
+    ) -> Bool {
+        // Attached docs/images without a clear forcing phrase → planner can route.
+        if !context.attachedDocuments.isEmpty,
+           toolsByName["document_synthesize"] != nil {
+            return true
+        }
+        if !context.attachedImages.isEmpty,
+           toolsByName["ocr_image_text"] != nil {
+            return true
+        }
+        // Multiple URLs → planner picks one or returns none (read_url v1
+        // requires exactly one public URL, and we won't guess for the user).
+        if context.detectedPublicURLs.count > 1,
+           toolsByName["read_url"] != nil {
+            return true
+        }
+        // Web-search-leaning language that didn't satisfy the strong force.
+        if toolsByName["web_search"] != nil,
+           messageLooksWebSearchAdjacent(userMessage) {
+            return true
+        }
+        return false
+    }
+
+    private nonisolated func messageLooksWebSearchAdjacent(_ userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+
+        let webHints = [
+            "search ",
+            "look up",
+            "look it up",
+            "find online",
+            "online for",
+            "google ",
+            "any news",
+            "recent news",
+            "the latest",
+            "right now",
+            "today's",
+            "as of today",
+            "current price",
+            "current weather",
+            "live score",
+            "live update"
+        ]
+        return webHints.contains(where: { normalized.contains($0) })
+    }
+
     func plan(
         userMessage: String,
         history: [ChatMessage],
@@ -301,11 +464,24 @@ actor ToolCallingService {
         )
 
         var rawOutput = ""
+        var sawCompleteToolDecisionJSON = false
 
         do {
             for try await token in stream {
                 try Task.checkCancellation()
                 rawOutput += token
+                // Early stop: the planner is asked for ONE JSON object. As soon
+                // as we see a balanced object containing a "tool" key we can
+                // break out of the stream — the inference task is cancelled
+                // through the AsyncThrowingStream `onTermination` hook in
+                // InferenceService.generate, saving the rest of the maxTokens
+                // budget. Particularly valuable on memory-pressured big models
+                // where each unused planner token is 30–100 ms of GPU time.
+                if !sawCompleteToolDecisionJSON,
+                   containsCompleteToolDecisionJSON(rawOutput) {
+                    sawCompleteToolDecisionJSON = true
+                    break
+                }
             }
             let decision = parsePlannerDecision(
                 from: rawOutput,
@@ -315,7 +491,7 @@ actor ToolCallingService {
             )
             Self.debugLog(
                 "planner output: raw=\(Self.sanitizedSnippet(rawOutput, limit: 280)) " +
-                "decision=\(Self.describe(decision))"
+                "earlyStop=\(sawCompleteToolDecisionJSON) decision=\(Self.describe(decision))"
             )
             return decision
         } catch is CancellationError {
@@ -325,6 +501,23 @@ actor ToolCallingService {
             Self.debugLog("planner failed with error: \(String(describing: error))")
             return .none
         }
+    }
+
+    private nonisolated func containsCompleteToolDecisionJSON(_ rawOutput: String) -> Bool {
+        // Cheap pre-reject: no closing brace yet → cannot have a complete object.
+        guard rawOutput.contains("}") else { return false }
+
+        for payload in balancedJSONFragments(in: rawOutput) {
+            guard let data = payload.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+                  let dictionary = object as? [String: Any] else {
+                continue
+            }
+            if dictionary["tool"] is String {
+                return true
+            }
+        }
+        return false
     }
 
     func execute(

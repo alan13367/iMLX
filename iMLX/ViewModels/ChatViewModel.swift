@@ -262,10 +262,24 @@ final class ChatViewModel {
 
         @MainActor
         func flushResponseToUI(force: Bool = false) {
+            // Token-level fast reject: most tokens don't need to consult the wall clock.
+            // Skipping Date() construction on ~3 out of 4 tokens removes a measurable
+            // amount of @MainActor work during long generations on big models.
+            if !force, !tokenCount.isMultiple(of: Constants.UI.streamingFlushTokenGate) {
+                return
+            }
+            let isLongResponse = accumulatedResponse.count >= Constants.UI.streamingLongResponseCharacterThreshold
+            let flushInterval: TimeInterval
+            if thinkingEnabled && latestParsedResponse.response.isEmpty {
+                flushInterval = isLongResponse
+                    ? Constants.UI.streamingThinkingLongFlushInterval
+                    : Constants.UI.streamingThinkingFlushInterval
+            } else {
+                flushInterval = isLongResponse
+                    ? Constants.UI.streamingResponseLongFlushInterval
+                    : Constants.UI.streamingResponseFlushInterval
+            }
             let now = Date()
-            let flushInterval = thinkingEnabled && latestParsedResponse.response.isEmpty
-                ? Constants.UI.streamingThinkingFlushInterval
-                : Constants.UI.streamingResponseFlushInterval
             guard force || now.timeIntervalSince(lastResponseFlush) >= flushInterval else { return }
             refreshParsedResponse()
             self.currentResponse = accumulatedResponse

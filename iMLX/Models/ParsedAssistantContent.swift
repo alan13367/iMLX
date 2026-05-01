@@ -149,6 +149,7 @@ nonisolated struct ParsedAssistantContent: Equatable {
     private static func parseInferredThinking(_ rawContent: String, isStreaming: Bool) -> (thinking: String, response: String)? {
         let trimmed = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        guard mightTriggerInferredThinking(trimmed) else { return nil }
 
         let allLines = trimmed.components(separatedBy: .newlines)
         if let answerLineIndex = firstExplicitAnswerLineIndex(in: allLines), answerLineIndex > 0 {
@@ -309,11 +310,73 @@ nonisolated struct ParsedAssistantContent: Equatable {
     private static func isAnswerSectionStart(_ candidate: String) -> Bool {
         let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        // Cheap reject before regex: every answer-heading regex requires the
+        // word "answer" or "response" somewhere in the line.
+        guard trimmed.range(of: "answer", options: .caseInsensitive) != nil
+            || trimmed.range(of: "response", options: .caseInsensitive) != nil else {
+            return false
+        }
 
         let fullRange = NSRange(location: 0, length: (trimmed as NSString).length)
         return answerHeadingRegexes.contains { regex in
             regex.firstMatch(in: trimmed, options: [], range: fullRange) != nil
         }
+    }
+
+    private static let inferredThinkingTriggers: [String] = [
+        "answer",
+        "response",
+        "thinking process",
+        "reasoning process",
+        "analyze the request",
+        "identify key information",
+        "the user is asking",
+        "the user wants",
+        "the question is",
+        "the prompt is asking",
+        "let me think",
+        "let me structure",
+        "let me break",
+        "i need to think",
+        "i need to reason",
+        "i need to analyze",
+        "wait, i need to",
+        "the most important thing is to",
+        "provide an accurate answer",
+        "intent:",
+        "constraints:",
+        "need to satisfy",
+        "plan:",
+        "approach:"
+    ]
+
+    private static let inferredThinkingStructuredHeads: [String] = [
+        "\n- ",
+        "\n* ",
+        "\n1.",
+        "\n2.",
+        "\n3.",
+        "\nfirst,",
+        "\nsecond,",
+        "\nfinally,"
+    ]
+
+    /// Cheap reject for the heavy `parseInferredThinking` path.
+    ///
+    /// `parseInferredThinking` can only succeed if either an answer-section heading appears,
+    /// the first paragraph contains a reasoning cue, or enough lines start with structured
+    /// list markers. All three checks operate on a bounded prefix, so we probe with one
+    /// lowercased scan and skip the expensive line/paragraph allocation otherwise.
+    private static func mightTriggerInferredThinking(_ trimmed: String) -> Bool {
+        let scanLength = min(trimmed.count, 1024)
+        let prefix: String
+        if scanLength == trimmed.count {
+            prefix = trimmed.lowercased()
+        } else {
+            prefix = String(trimmed.prefix(scanLength)).lowercased()
+        }
+        if inferredThinkingTriggers.contains(where: prefix.contains) { return true }
+        return inferredThinkingStructuredHeads.contains(where: prefix.contains)
     }
 
     private static func stripAnswerHeading(_ text: String) -> String {

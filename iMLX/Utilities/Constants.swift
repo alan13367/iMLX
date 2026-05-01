@@ -373,8 +373,19 @@ nonisolated enum Constants {
 
     enum UI {
         static let streamingResponseFlushInterval: TimeInterval = 1.0 / 30.0
+        /// Slower flush cadence used once an in-progress response is long enough that
+        /// 30 Hz redraws are visually indistinguishable but keep the main actor busy.
+        static let streamingResponseLongFlushInterval: TimeInterval = 1.0 / 12.0
         static let streamingThinkingFlushInterval: TimeInterval = 1.0 / 8.0
+        static let streamingThinkingLongFlushInterval: TimeInterval = 1.0 / 4.0
+        /// Character count past which streaming switches to the slower flush cadence
+        /// and longer autoscroll stride. Tuned to roughly match a couple of paragraphs.
+        static let streamingLongResponseCharacterThreshold = 2_400
         static let streamingAutoscrollCharacterStride = 96
+        static let streamingAutoscrollLongCharacterStride = 240
+        /// Process at most one out of every N tokens through the per-token flush gate.
+        /// Reduces per-token Date()/interval work on the @MainActor token loop.
+        static let streamingFlushTokenGate = 4
     }
 
     enum WebSearch {

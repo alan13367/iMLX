@@ -1016,30 +1016,10 @@ private struct ChatMessageListSection: View {
                     finalizationStickToBottomTask?.cancel()
                 }
 
-                if canScrollToBottom && (!scrollPinnedToBottom || !streamingAutoscrollEnabled) {
-                    HStack {
-                        Spacer(minLength: 0)
-                        Button {
-                            resumeAutoscroll(using: proxy)
-                        } label: {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.title2)
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.primary)
-                                .frame(width: 44, height: 44)
-                                .liquidGlassSurface(
-                                    tint: BrandPalette.accent.opacity(0.28),
-                                    in: Circle(),
-                                    fallback: AnyShapeStyle(BrandPalette.primaryGradient),
-                                    interactive: true
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Scroll to bottom")
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.bottom, 12)
-                }
+                scrollToBottomOverlay(using: proxy)
+                    .opacity(isScrollToBottomVisible ? 1 : 0)
+                    .allowsHitTesting(isScrollToBottomVisible)
+                    .animation(.easeInOut(duration: 0.18), value: isScrollToBottomVisible)
             }
         }
     }
@@ -1079,7 +1059,56 @@ private struct ChatMessageListSection: View {
         let visibleCharacterCount = parsedResponse.response.isEmpty
             ? currentResponse.count
             : parsedResponse.response.count
-        return 1 + visibleCharacterCount / Constants.UI.streamingAutoscrollCharacterStride
+        let stride = visibleCharacterCount >= Constants.UI.streamingLongResponseCharacterThreshold
+            ? Constants.UI.streamingAutoscrollLongCharacterStride
+            : Constants.UI.streamingAutoscrollCharacterStride
+        return 1 + visibleCharacterCount / stride
+    }
+
+    private var isScrollToBottomVisible: Bool {
+        canScrollToBottom && (!scrollPinnedToBottom || !streamingAutoscrollEnabled)
+    }
+
+    @ViewBuilder
+    private func scrollToBottomOverlay(using proxy: ScrollViewProxy) -> some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Button {
+                jumpToBottomFromButton(using: proxy)
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .frame(width: 36, height: 36)
+                    .liquidGlassSurface(
+                        in: Circle(),
+                        fallback: AnyShapeStyle(.ultraThinMaterial),
+                        fallbackStroke: Color.primary.opacity(0.08),
+                        interactive: true
+                    )
+                    .overlay {
+                        Circle()
+                            .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                    }
+                    .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 2)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Scroll to bottom")
+        }
+        .padding(.trailing, 14)
+        .padding(.bottom, 10)
+    }
+
+    private func jumpToBottomFromButton(using proxy: ScrollViewProxy) {
+        Haptics.selectionChanged()
+        streamingScrollTask?.cancel()
+        streamingScrollTask = nil
+        finalizationStickToBottomTask?.cancel()
+        finalizationStickToBottomTask = nil
+        streamingAutoscrollEnabled = true
+        scrollToBottom(using: proxy, animated: true)
     }
 
     private func resumeAutoscroll(using proxy: ScrollViewProxy) {

@@ -37,6 +37,11 @@ private enum ChatGenerationAbort: LocalizedError {
 
 @Observable
 final class ChatViewModel {
+    private enum ReplyMode {
+        case standard
+        case liveVoice
+    }
+
     private struct GenerationBudget {
         let streamMaxTokens: Int
         let hiddenThinkingMaxTokens: Int?
@@ -133,17 +138,18 @@ final class ChatViewModel {
         guard let normalizedText else { return }
         shouldDiscardCancelledGeneration = false
         generationTask = Task<ChatMessage?, Never> { @MainActor [self] in
-            return await self.performSendMessage(normalizedText, allowPostReplyTasks: true)
+            return await self.performSendMessage(normalizedText, allowPostReplyTasks: true, replyMode: .standard)
         }
     }
 
     @MainActor
-    func sendMessageAndWait(_ text: String, allowPostReplyTasks: Bool = true) async -> ChatMessage? {
+    func sendMessageAndWait(_ text: String, allowPostReplyTasks: Bool = true, isLiveVoiceReply: Bool = false) async -> ChatMessage? {
         let normalizedText = prepareToSendMessage(text)
         guard let normalizedText else { return nil }
         shouldDiscardCancelledGeneration = false
+        let replyMode: ReplyMode = isLiveVoiceReply ? .liveVoice : .standard
         let task = Task<ChatMessage?, Never> { @MainActor [self] in
-            return await self.performSendMessage(normalizedText, allowPostReplyTasks: allowPostReplyTasks)
+            return await self.performSendMessage(normalizedText, allowPostReplyTasks: allowPostReplyTasks, replyMode: replyMode)
         }
         generationTask = task
         return await task.value
@@ -185,7 +191,7 @@ final class ChatViewModel {
     }
 
     @MainActor
-    private func performSendMessage(_ text: String, allowPostReplyTasks: Bool) async -> ChatMessage? {
+    private func performSendMessage(_ text: String, allowPostReplyTasks: Bool, replyMode: ReplyMode) async -> ChatMessage? {
         let loadedModel = resolvedCurrentModel()
         let history = promptHistory(from: messages, for: loadedModel)
         Self.debugToolLog(
@@ -364,7 +370,8 @@ final class ChatViewModel {
                 base: systemPrompt,
                 memoryContext: memoryContext,
                 toolContext: "",
-                thinkingEnabled: thinkingEnabled
+                thinkingEnabled: thinkingEnabled,
+                replyMode: replyMode
             )
 
             let stream = await self.inferenceService.generate(
@@ -411,7 +418,8 @@ final class ChatViewModel {
                     systemPrompt: self.finalAnswerSystemPrompt(
                         base: systemPrompt,
                         memoryContext: memoryContext,
-                        toolContext: ""
+                        toolContext: "",
+                        replyMode: replyMode
                     ),
                     maxTokens: generationBudget.finalAnswerMaxTokens,
                     temperature: temperature,
@@ -1332,7 +1340,7 @@ final class ChatViewModel {
         max(1.0, min(requested, 2.0))
     }
 
-    private func mergedSystemPrompt(base: String, memoryContext: String, toolContext: String, thinkingEnabled: Bool) -> String {
+    private func mergedSystemPrompt(base: String, memoryContext: String, toolContext: String, thinkingEnabled: Bool, replyMode: ReplyMode) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
@@ -1349,10 +1357,13 @@ final class ChatViewModel {
         if thinkingEnabled {
             parts.append(Constants.Generation.conciseThinkingInstruction)
         }
+        if replyMode == .liveVoice {
+            parts.append(Constants.Generation.liveVoiceConciseInstruction)
+        }
         return parts.joined(separator: "\n\n")
     }
 
-    private func finalAnswerSystemPrompt(base: String, memoryContext: String, toolContext: String) -> String {
+    private func finalAnswerSystemPrompt(base: String, memoryContext: String, toolContext: String, replyMode: ReplyMode) -> String {
         var parts: [String] = []
         let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedBase.isEmpty {
@@ -1365,6 +1376,9 @@ final class ChatViewModel {
         let trimmedToolContext = toolContext.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedToolContext.isEmpty {
             parts.append(trimmedToolContext)
+        }
+        if replyMode == .liveVoice {
+            parts.append(Constants.Generation.liveVoiceConciseInstruction)
         }
         parts.append(Constants.Generation.finalAnswerOnlyInstruction)
         return parts.joined(separator: "\n\n")

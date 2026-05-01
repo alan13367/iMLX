@@ -331,6 +331,9 @@ nonisolated enum Constants {
         static let conciseThinkingInstruction = """
         When thinking is enabled, keep the hidden reasoning brief and efficient. Use a short plan only, avoid repeated self-corrections, do not repeat the same outline or numbered list, and move to the final answer quickly.
         """
+        static let liveVoiceConciseInstruction = """
+        Be concise.
+        """
         static let finalAnswerOnlyInstruction = """
         Provide only the final answer to the user's last request. Do not include reasoning, planning, hidden thoughts, or meta commentary.
         """

@@ -18,6 +18,7 @@ private struct ChatScrollState: Equatable {
 }
 
 private enum ConversationHistorySwipe {
+    static let edgeActivationWidth: CGFloat = 24
     static let minimumDistance: CGFloat = 32
     static let primeHorizontalDistance: CGFloat = 90
     static let primePredictedDistance: CGFloat = 150
@@ -414,6 +415,7 @@ struct ChatView: View {
         predictedThreshold: CGFloat
     ) -> Bool {
         guard utilitySheet == nil else { return false }
+        guard value.startLocation.x <= ConversationHistorySwipe.edgeActivationWidth else { return false }
 
         let horizontalDistance = value.translation.width
         let verticalDistance = abs(value.translation.height)

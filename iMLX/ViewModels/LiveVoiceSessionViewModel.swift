@@ -215,7 +215,8 @@ final class LiveVoiceSessionViewModel {
 
         guard let assistantMessage = await chatViewModel.sendMessageAndWait(
             trimmed,
-            allowPostReplyTasks: false
+            allowPostReplyTasks: false,
+            isLiveVoiceReply: true
         ) else {
             isGeneratingReply = false
             guard isSessionActive, !Task.isCancelled else { return }

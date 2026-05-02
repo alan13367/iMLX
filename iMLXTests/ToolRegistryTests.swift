@@ -10,7 +10,10 @@ final class ToolRegistryTests: XCTestCase {
             context: emptyContext
         )
 
-        XCTAssertEqual(tools.map(\.name), ["web_search", "calendar_brief"])
+        XCTAssertEqual(
+            tools.map(\.name),
+            webEnabledToolNames
+        )
     }
 
     func testNoToolsAreAvailableWhenToggleIsOff() async {
@@ -21,7 +24,10 @@ final class ToolRegistryTests: XCTestCase {
             context: emptyContext
         )
 
-        XCTAssertEqual(tools.map(\.name), ["calendar_brief"])
+        XCTAssertEqual(
+            tools.map(\.name),
+            localToolNames
+        )
     }
 
     func testExecutorRegistryContainsWebSearchExecutor() async {
@@ -32,6 +38,12 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertNotNil(executors["web_search"])
         XCTAssertNotNil(executors["document_synthesize"])
         XCTAssertNotNil(executors["calendar_brief"])
+        XCTAssertNotNil(executors["calendar_create"])
+        XCTAssertNotNil(executors["current_datetime"])
+        XCTAssertNotNil(executors["reminders_brief"])
+        XCTAssertNotNil(executors["reminders_create"])
+        XCTAssertNotNil(executors["timer_create"])
+        XCTAssertNotNil(executors["contacts_lookup"])
     }
 
     func testReadURLToolIsAvailableWhenSingleURLIsPresent() async {
@@ -47,7 +59,12 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertEqual(tools.map(\.name), ["read_url", "web_search", "calendar_brief"])
+        XCTAssertEqual(
+            tools.map(\.name),
+            [
+                "read_url",
+            ] + webEnabledToolNames
+        )
     }
 
     func testReadURLToolIsUnavailableWhenToggleIsOff() async {
@@ -63,7 +80,10 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertEqual(tools.map(\.name), ["calendar_brief"])
+        XCTAssertEqual(
+            tools.map(\.name),
+            localToolNames
+        )
     }
 
     func testReadURLToolIsUnavailableWhenMultipleURLsArePresent() async {
@@ -82,7 +102,10 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertEqual(tools.map(\.name), ["web_search", "calendar_brief"])
+        XCTAssertEqual(
+            tools.map(\.name),
+            webEnabledToolNames
+        )
     }
 
     func testOCRToolIsAvailableWhenImagesAreAttached() async {
@@ -98,7 +121,10 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertEqual(tools.map(\.name), ["ocr_image_text", "calendar_brief"])
+        XCTAssertEqual(
+            tools.map(\.name),
+            ["ocr_image_text"] + localToolNames
+        )
     }
 
     func testDocumentToolIsAvailableWhenDocumentsAreAttached() async {
@@ -116,7 +142,53 @@ final class ToolRegistryTests: XCTestCase {
             context: context
         )
 
-        XCTAssertEqual(tools.map(\.name), ["document_synthesize", "calendar_brief"])
+        XCTAssertEqual(
+            tools.map(\.name),
+            ["document_synthesize"] + localToolNames
+        )
+    }
+
+    func testCurrentDateTimeIsAlwaysAvailable() async {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let tools = await service.enabledTools(
+            webSearchEnabled: false,
+            context: emptyContext
+        )
+
+        XCTAssertTrue(tools.map(\.name).contains("current_datetime"))
+    }
+
+    func testRemindersToolsAreAvailable() async {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let tools = await service.enabledTools(
+            webSearchEnabled: false,
+            context: emptyContext
+        )
+
+        let names = tools.map(\.name)
+        XCTAssertTrue(names.contains("reminders_brief"))
+        XCTAssertTrue(names.contains("reminders_create"))
+        XCTAssertTrue(names.contains("calendar_create"))
+        XCTAssertTrue(names.contains("timer_create"))
+        XCTAssertTrue(names.contains("contacts_lookup"))
+    }
+
+    private var localToolNames: [String] {
+        [
+            "calendar_brief",
+            "calendar_create",
+            "current_datetime",
+            "reminders_brief",
+            "reminders_create",
+            "timer_create",
+            "contacts_lookup"
+        ]
+    }
+
+    private var webEnabledToolNames: [String] {
+        ["web_search"] + localToolNames
     }
 
     private var emptyContext: ToolInputContext {

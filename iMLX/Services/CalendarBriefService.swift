@@ -101,6 +101,76 @@ actor CalendarBriefService {
         return MessageGroundingResult(contextBlock: contextBlock, sources: sources)
     }
 
+    func createEvent(
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        location: String?,
+        notes: String?,
+        alertMinutesBefore: Int?
+    ) async throws -> MessageGroundingResult {
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ToolExecutionFailure.invalidArguments("A calendar event title is required.")
+        }
+        guard endDate > startDate else {
+            throw ToolExecutionFailure.invalidArguments("Calendar event end time must be after the start time.")
+        }
+        guard try await ensureCalendarAccess() else {
+            throw ToolExecutionFailure.permissionDenied("Calendar access is required to create events.")
+        }
+        guard let targetCalendar = eventStore.defaultCalendarForNewEvents else {
+            throw ToolExecutionFailure.unavailable("No writable default calendar is available.")
+        }
+
+        let event = EKEvent(eventStore: eventStore)
+        event.calendar = targetCalendar
+        event.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        event.startDate = startDate
+        event.endDate = endDate
+
+        let cleanedLocation = location?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleanedLocation?.isEmpty == false {
+            event.location = cleanedLocation
+        }
+
+        let cleanedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleanedNotes?.isEmpty == false {
+            event.notes = cleanedNotes
+        }
+
+        if let alertMinutesBefore {
+            event.addAlarm(EKAlarm(relativeOffset: TimeInterval(-alertMinutesBefore * 60)))
+        }
+
+        try eventStore.save(event, span: .thisEvent, commit: true)
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = calendar.timeZone
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+
+        let timeDescription = "\(formatter.string(from: startDate)) - \(formatter.string(from: endDate))"
+        let contextBlock = """
+        Calendar event created:
+        - Title: \(event.title ?? title)
+        - Time: \(timeDescription)
+        - Calendar: \(targetCalendar.title)
+        """
+
+        let source = MessageSource(
+            id: event.eventIdentifier ?? "\(title)-\(startDate.timeIntervalSince1970)",
+            kind: .calendar,
+            title: event.title ?? title,
+            excerpt: timeDescription,
+            location: targetCalendar.title,
+            url: nil,
+            score: nil
+        )
+
+        return MessageGroundingResult(contextBlock: contextBlock, sources: [source])
+    }
+
     private func ensureCalendarAccess() async throws -> Bool {
         switch EKEventStore.authorizationStatus(for: .event) {
         case .fullAccess:

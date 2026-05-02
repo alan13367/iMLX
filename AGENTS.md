@@ -88,7 +88,7 @@ xcodebuild -downloadComponent MetalToolchain
 3. SwiftPM CLI alone cannot compile the Metal pieces; use Xcode/Xcodebuild.
 4. iOS Simulator cannot run MLX inference. Simulator builds are for UI/build verification only.
 5. Inference is foreground-only. Do not design around background GPU execution.
-6. Deployment target is iOS 18+.
+6. Deployment target is iOS 26+.
 7. The project currently uses `main` for `mlx-swift`, pins `mlx-swift-lm` to `3.31.3`, and links `swift-tokenizers-mlx` for local tokenizer loading with MLX Swift LM 3.x.
 8. The Xcode target defaults actor isolation to `MainActor`, so pure helpers that run off the main actor may need explicit `nonisolated` annotations.
 9. Memory extraction must only persist facts grounded in the user message. Do not turn assistant answers, recommendations, prices, or unquoted generated details into memories.
@@ -162,13 +162,29 @@ High-value files:
 - `ToolCallingService` owns tool registry, planner prompt construction, planner-output parsing, deterministic arbitration, timeout handling, and executor dispatch.
 - The planner uses the currently loaded MLX model with a short deterministic generation budget. It is not a second model or a cloud fallback.
 - Current registered tools:
-- `read_url`: reads one pasted public URL directly and is gated by the Web Search toggle because it requires network access
+  - `read_url`: reads one pasted public URL directly and is gated by the Web Search toggle because it requires network access
   - `ocr_image_text`: extracts text from images attached on the latest user message
   - `web_search`: live web retrieval, still gated by the conversation’s Web Search toggle
+  - `document_synthesize`: retrieves excerpts from attached conversation documents
+  - `calendar_brief`: reads local Calendar events for bounded private schedule briefs
+  - `calendar_create`: creates one basic event in the default Calendar when title, concrete start, and concrete end/duration are present (EventKit; mutating)
+  - `current_datetime`: reads local date, time, and timezone from the device clock (no permissions)
+  - `reminders_brief`: reads incomplete local reminders for bounded private briefs
+  - `reminders_create`: creates one reminder in the default Reminders list (EventKit; mutating)
+  - `timer_create`: starts one native iOS 26 AlarmKit timer for an explicit duration (mutating)
+  - `contacts_lookup`: reads matching local Contacts names plus phone/email handles only
 - Deterministic arbitration currently prefers:
   1. `read_url` when the latest message contains exactly one supported public URL
-  2. `ocr_image_text` for text-focused image requests when the planner returns `.none`
-  3. `web_search` heuristics for obvious live-data requests when planner output fails on some thinking-oriented models
+  2. `document_synthesize` when attached documents and the message imply document Q&A or summary
+  3. `ocr_image_text` for text-focused image requests when the planner returns `.none`
+  4. `calendar_brief` for schedule-shaped requests when the planner returns `.none`
+  5. `timer_create` for explicit “set/start a timer …” phrasing with a parseable duration
+  6. `calendar_create` for explicit event creation when all required fields are parseable
+  7. `contacts_lookup` for explicit local contact/phone/email lookups
+  8. `reminders_create` for explicit “remind me to …” / “add a reminder …” phrasing (before `reminders_brief`)
+  9. `current_datetime` for explicit current time/date questions
+  7. `reminders_brief` for todo/reminder list requests
+  8. `web_search` heuristics for obvious live-data requests when planner output fails on some thinking-oriented models
 - Persisted tool traces are stored on assistant `ChatMessage`s. Backward compatibility matters because older conversation JSON may still decode `rewrittenQuery` instead of `displayInput`.
 
 ## TTS Checkpoints

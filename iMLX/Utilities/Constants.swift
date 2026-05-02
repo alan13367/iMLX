@@ -408,6 +408,13 @@ nonisolated enum Constants {
         static let plannerTopP: Float = 1.0
         static let maxToolCallsPerTurn = 1
         static let maxQueryLength = 120
+        static let maxReminderTitleLength = 200
+        static let maxReminderNotesLength = 500
+        static let maxCalendarTitleLength = 200
+        static let maxCalendarLocationLength = 200
+        static let maxCalendarNotesLength = 1_000
+        static let maxTimerTitleLength = 120
+        static let maxContactQueryLength = 80
         static let maxToolResultContextCharacters = 6_000
         static let toolExecutionTimeoutSeconds: TimeInterval = 30
         static let plannerSystemPrompt = """
@@ -421,7 +428,7 @@ nonisolated enum Constants {
 
         DEFAULT BEHAVIOR:
         - Default to {"tool":"none"}. The model can answer most questions directly from its training.
-        - Only call a tool when the message clearly requires fresh external data, the contents of a specific URL, the contents of an attached image/document, or the user's local calendar.
+        - Only call a tool when the message clearly requires fresh external data, the contents of a specific URL, the contents of an attached image/document, the user's local calendar or reminders, or the device's current date and time.
         - When in doubt, return {"tool":"none"}.
         - Do NOT call tools for greetings, thanks, casual chat, math, definitions, opinions, coding help, translations the model can do directly, or follow-ups that don't need new external input.
 
@@ -430,6 +437,12 @@ nonisolated enum Constants {
         - ocr_image_text: the user wants visible text extracted, translated, or summarized from attached images. Skip when a vision-capable model can already see the picture and the user is just asking what is in it.
         - document_synthesize: attached documents are needed for summaries, comparisons, extraction, key points, action items, or document Q&A.
         - calendar_brief: the user asks about their schedule, agenda, availability, conflicts, events, appointments, or meetings. Range must be one of: today, tomorrow, this_week, next_7_days.
+        - calendar_create: the user explicitly asks to create/schedule/add one calendar event, and title, start datetime, and end time or duration are explicit. Args: title (required), start (required: ISO datetime, yyyy-MM-dd HH:mm, today HH:mm, or tomorrow HH:mm), end_or_duration (required: explicit end datetime or duration), location (optional), notes (optional), alert_minutes_before (optional integer). Skip if any required field is vague or missing.
+        - reminders_brief: the user asks about todos, tasks, or reminders (not calendar events). Range must be one of: today, tomorrow, this_week, next_7_days, overdue.
+        - reminders_create: the user explicitly asks to create or add a reminder or todo (e.g. "remind me to …"). Args: title (required), due (optional: today, tomorrow, tonight, ISO date/datetime, or "in N hours/minutes/days"), notes (optional).
+        - timer_create: the user explicitly asks to set/start/create one timer and gives a concrete duration. Args: duration (required: e.g. "10 minutes", "1 hour 30 minutes", "05:00", seconds), title (optional). Skip alarms, reminders, and calendar events.
+        - contacts_lookup: the user asks to look up a person/contact's phone number or email address from local Contacts. Args: query (required name). Return none if the request needs postal addresses, birthdays, notes, photos, or full contact cards.
+        - current_datetime: when the user asks for the current time, date, day of week, or timezone on this device. Skip otherwise — the model knows historical dates and eras from training.
         - web_search: only for live, time-sensitive, or external facts the model cannot reliably know. Rewrite the user's question into a short, specific, entity-focused search query.
 
         At most one tool call is allowed per turn.

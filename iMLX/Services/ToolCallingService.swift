@@ -52,6 +52,297 @@ nonisolated enum ToolPreflight: Equatable, Sendable {
     case deliberate
 }
 
+private enum ToolDueDateParser {
+    private static let isoDateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        return f
+    }()
+
+    static func parse(_ raw: String, referenceDate: Date, calendar: Calendar) -> Result<Date, ToolExecutionFailure> {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .failure(.invalidArguments("Argument `due` must not be empty when provided."))
+        }
+        let lower = trimmed.lowercased()
+
+        if lower == "today" {
+            let start = calendar.startOfDay(for: referenceDate)
+            var endComps = DateComponents()
+            endComps.day = 1
+            endComps.second = -1
+            let endOfDay = calendar.date(byAdding: endComps, to: start) ?? start.addingTimeInterval(86_400 - 1)
+            return .success(endOfDay)
+        }
+        if lower == "tomorrow" {
+            guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: referenceDate) else {
+                return .failure(.invalidArguments("Could not resolve tomorrow for `due`."))
+            }
+            let start = calendar.startOfDay(for: tomorrow)
+            var endComps = DateComponents()
+            endComps.day = 1
+            endComps.second = -1
+            let endOfDay = calendar.date(byAdding: endComps, to: start) ?? start.addingTimeInterval(86_400 - 1)
+            return .success(endOfDay)
+        }
+        if lower == "tonight" {
+            var comps = calendar.dateComponents([.year, .month, .day], from: referenceDate)
+            comps.hour = 22
+            comps.minute = 0
+            comps.second = 0
+            guard let date = calendar.date(from: comps) else {
+                return .failure(.invalidArguments("Could not resolve tonight for `due`."))
+            }
+            return .success(date)
+        }
+
+        if let n = matchIntGroup(pattern: #"^in\s+(\d+)\s+minutes?$"#, in: lower),
+           n >= 0, n <= 10_080,
+           let date = calendar.date(byAdding: .minute, value: n, to: referenceDate) {
+            return .success(date)
+        }
+        if let n = matchIntGroup(pattern: #"^in\s+(\d+)\s+hours?$"#, in: lower),
+           n >= 0, n <= 8760,
+           let date = calendar.date(byAdding: .hour, value: n, to: referenceDate) {
+            return .success(date)
+        }
+        if let n = matchIntGroup(pattern: #"^in\s+(\d+)\s+days?$"#, in: lower),
+           n >= 0, n <= 365,
+           let date = calendar.date(byAdding: .day, value: n, to: referenceDate) {
+            return .success(date)
+        }
+
+        let compactDate = trimmed.replacingOccurrences(of: " ", with: "")
+        if let date = isoDateFormatter.date(from: compactDate) {
+            return .success(date)
+        }
+
+        let dt = ISO8601DateFormatter()
+        dt.formatOptions = [.withInternetDateTime]
+        if let date = dt.date(from: compactDate) {
+            return .success(date)
+        }
+
+        let df = DateFormatter()
+        df.calendar = calendar
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = calendar.timeZone
+        df.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        if let date = df.date(from: compactDate) {
+            return .success(date)
+        }
+
+        return .failure(.invalidArguments("Argument `due` must be today, tomorrow, tonight, ISO date/datetime, or in N hours/minutes/days."))
+    }
+
+    static func iso8601DueString(from date: Date, timeZone: TimeZone = .current) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = timeZone
+        return formatter.string(from: date)
+    }
+
+    private static func matchIntGroup(pattern: String, in text: String) -> Int? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return Int(text[captureRange])
+    }
+}
+
+private nonisolated enum ToolDateTimeParser {
+    static func parse(_ raw: String, referenceDate: Date = Date(), calendar: Calendar = .current) -> Result<Date, ToolExecutionFailure> {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .failure(.invalidArguments("Date/time arguments must not be empty."))
+        }
+
+        let compact = trimmed.replacingOccurrences(of: " ", with: "")
+        let internet = ISO8601DateFormatter()
+        internet.formatOptions = [.withInternetDateTime]
+        if let date = internet.date(from: compact) {
+            return .success(date)
+        }
+
+        let formats = [
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm"
+        ]
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.calendar = calendar
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = calendar.timeZone
+            formatter.dateFormat = format
+            if let date = formatter.date(from: trimmed) {
+                return .success(date)
+            }
+        }
+
+        if let relative = parseRelativeDayTime(trimmed, referenceDate: referenceDate, calendar: calendar) {
+            return .success(relative)
+        }
+
+        return .failure(.invalidArguments("Date/time arguments must be ISO datetime or an explicit today/tomorrow time."))
+    }
+
+    static func iso8601String(from date: Date, timeZone: TimeZone = .current) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = timeZone
+        return formatter.string(from: date)
+    }
+
+    private static func parseRelativeDayTime(_ raw: String, referenceDate: Date, calendar: Calendar) -> Date? {
+        let lower = raw.lowercased()
+        guard let regex = try? NSRegularExpression(
+            pattern: #"^(today|tomorrow)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$"#,
+            options: []
+        ) else {
+            return nil
+        }
+        let range = NSRange(lower.startIndex..., in: lower)
+        guard let match = regex.firstMatch(in: lower, options: [], range: range),
+              match.numberOfRanges >= 3,
+              let dayRange = Range(match.range(at: 1), in: lower),
+              let hourRange = Range(match.range(at: 2), in: lower) else {
+            return nil
+        }
+
+        var hour = Int(lower[hourRange]) ?? -1
+        let minute: Int
+        if match.range(at: 3).location != NSNotFound,
+           let minuteRange = Range(match.range(at: 3), in: lower) {
+            minute = Int(lower[minuteRange]) ?? -1
+        } else {
+            minute = 0
+        }
+
+        if match.range(at: 4).location != NSNotFound,
+           let meridiemRange = Range(match.range(at: 4), in: lower) {
+            let meridiem = String(lower[meridiemRange])
+            if meridiem == "pm", hour < 12 { hour += 12 }
+            if meridiem == "am", hour == 12 { hour = 0 }
+        }
+
+        guard (0...23).contains(hour), (0...59).contains(minute) else {
+            return nil
+        }
+
+        let day = String(lower[dayRange])
+        let base = day == "tomorrow"
+            ? (calendar.date(byAdding: .day, value: 1, to: referenceDate) ?? referenceDate.addingTimeInterval(86_400))
+            : referenceDate
+        var components = calendar.dateComponents([.year, .month, .day], from: base)
+        components.hour = hour
+        components.minute = minute
+        components.second = 0
+        return calendar.date(from: components)
+    }
+}
+
+private nonisolated enum ToolDurationParser {
+    static func parseSeconds(_ raw: String) -> Result<Int, ToolExecutionFailure> {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .failure(.invalidArguments("Duration must not be empty."))
+        }
+        let lower = trimmed.lowercased()
+
+        if let seconds = Int(lower), (1...86_400).contains(seconds) {
+            return .success(seconds)
+        }
+
+        if let hms = parseColonDuration(lower), (1...86_400).contains(hms) {
+            return .success(hms)
+        }
+
+        let patterns: [(String, Int)] = [
+            (#"^(?:for\s+)?(\d+)\s*(?:seconds?|secs?|sec|s)$"#, 1),
+            (#"^(?:for\s+)?(\d+)\s*(?:minutes?|mins?|min|m)$"#, 60),
+            (#"^(?:for\s+)?(\d+)\s*(?:hours?|hrs?|hr|h)$"#, 3600)
+        ]
+        for (pattern, multiplier) in patterns {
+            if let value = firstInt(pattern: pattern, in: lower) {
+                let seconds = value * multiplier
+                guard (1...86_400).contains(seconds) else {
+                    return .failure(.invalidArguments("Duration must be between 1 second and 24 hours."))
+                }
+                return .success(seconds)
+            }
+        }
+
+        if let total = parseCompoundDuration(lower), (1...86_400).contains(total) {
+            return .success(total)
+        }
+
+        return .failure(.invalidArguments("Duration must be seconds, minutes, hours, MM:SS, HH:MM:SS, or a simple compound duration."))
+    }
+
+    static func durationDescription(seconds: Int) -> String {
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        let seconds = seconds % 60
+        var parts: [String] = []
+        if hours > 0 { parts.append("\(hours)h") }
+        if minutes > 0 { parts.append("\(minutes)m") }
+        if seconds > 0 || parts.isEmpty { parts.append("\(seconds)s") }
+        return parts.joined(separator: " ")
+    }
+
+    private static func parseColonDuration(_ text: String) -> Int? {
+        let pieces = text.split(separator: ":").compactMap { Int($0) }
+        guard pieces.count == 2 || pieces.count == 3 else { return nil }
+        if pieces.count == 2 {
+            guard (0...59).contains(pieces[1]) else { return nil }
+            return pieces[0] * 60 + pieces[1]
+        }
+        guard (0...59).contains(pieces[1]), (0...59).contains(pieces[2]) else { return nil }
+        return pieces[0] * 3600 + pieces[1] * 60 + pieces[2]
+    }
+
+    private static func parseCompoundDuration(_ text: String) -> Int? {
+        guard let regex = try? NSRegularExpression(pattern: #"(\d+)\s*(hours?|hrs?|hr|h|minutes?|mins?|min|m|seconds?|secs?|sec|s)"#) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, options: [], range: range)
+        guard !matches.isEmpty else { return nil }
+
+        var total = 0
+        for match in matches {
+            guard match.numberOfRanges == 3,
+                  let valueRange = Range(match.range(at: 1), in: text),
+                  let unitRange = Range(match.range(at: 2), in: text),
+                  let value = Int(text[valueRange]) else {
+                return nil
+            }
+            let unit = String(text[unitRange])
+            if unit.hasPrefix("h") { total += value * 3600 }
+            else if unit.hasPrefix("m") { total += value * 60 }
+            else { total += value }
+        }
+        return total
+    }
+
+    private static func firstInt(pattern: String, in text: String) -> Int? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              match.numberOfRanges > 1,
+              let valueRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return Int(text[valueRange])
+    }
+}
+
 actor ToolCallingService {
     private enum ToolExecutionError: Error {
         case timedOut
@@ -66,6 +357,11 @@ actor ToolCallingService {
         imageOCRService: ImageOCRService = ImageOCRService(),
         documentLibraryService: DocumentLibraryService = DocumentLibraryService(),
         calendarBriefService: CalendarBriefService = CalendarBriefService(),
+        remindersService: RemindersService = RemindersService(),
+        timerService: TimerService = TimerService(),
+        contactsService: ContactsService = ContactsService(),
+        currentDateTimeNow: @escaping @Sendable () -> Date = { Date() },
+        currentDateTimeTimeZone: TimeZone = .current,
         toolExecutionTimeoutSeconds: TimeInterval = Constants.ToolCalling.toolExecutionTimeoutSeconds
     ) {
         let readURLTool = ToolDefinition(
@@ -139,21 +435,167 @@ actor ToolCallingService {
             ],
             metadata: ToolMetadata(executionClass: .local)
         )
+        let calendarCreateTool = ToolDefinition(
+            name: "calendar_create",
+            description: "Creates one basic event in the user's default Calendar when title, start, and end or duration are explicit.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "title",
+                    type: "string",
+                    required: true,
+                    description: "Short event title."
+                ),
+                ToolArgument(
+                    name: "start",
+                    type: "string",
+                    required: true,
+                    description: "Explicit start datetime: ISO datetime, yyyy-MM-dd HH:mm, today HH:mm, or tomorrow HH:mm."
+                ),
+                ToolArgument(
+                    name: "end_or_duration",
+                    type: "string",
+                    required: true,
+                    description: "Explicit end datetime or duration such as 30 minutes or 1 hour."
+                ),
+                ToolArgument(
+                    name: "location",
+                    type: "string",
+                    required: false,
+                    description: "Optional event location."
+                ),
+                ToolArgument(
+                    name: "notes",
+                    type: "string",
+                    required: false,
+                    description: "Optional event notes."
+                ),
+                ToolArgument(
+                    name: "alert_minutes_before",
+                    type: "string",
+                    required: false,
+                    description: "Optional alert offset in minutes before the event."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+        let currentDateTimeTool = ToolDefinition(
+            name: "current_datetime",
+            description: "Returns the device's current local date, time, weekday, and timezone using the system clock.",
+            argumentSchema: [],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+        let remindersBriefTool = ToolDefinition(
+            name: "reminders_brief",
+            description: "Reads incomplete local reminders for a bounded due-date range and returns a private brief.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "range",
+                    type: "string",
+                    required: true,
+                    description: "One of: today, tomorrow, this_week, next_7_days, overdue."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+        let remindersCreateTool = ToolDefinition(
+            name: "reminders_create",
+            description: "Creates one reminder in the user's default Reminders list with an optional due date and notes.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "title",
+                    type: "string",
+                    required: true,
+                    description: "Short reminder title."
+                ),
+                ToolArgument(
+                    name: "due",
+                    type: "string",
+                    required: false,
+                    description: "Optional due: today, tomorrow, tonight, ISO date/datetime, or in N hours/minutes/days."
+                ),
+                ToolArgument(
+                    name: "notes",
+                    type: "string",
+                    required: false,
+                    description: "Optional notes."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+        let timerCreateTool = ToolDefinition(
+            name: "timer_create",
+            description: "Creates and starts one native timer for an explicit duration between 1 second and 24 hours.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "duration",
+                    type: "string",
+                    required: true,
+                    description: "Explicit duration such as 10 minutes, 1 hour 30 minutes, MM:SS, HH:MM:SS, or seconds."
+                ),
+                ToolArgument(
+                    name: "title",
+                    type: "string",
+                    required: false,
+                    description: "Optional short timer title."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+        let contactsLookupTool = ToolDefinition(
+            name: "contacts_lookup",
+            description: "Looks up matching local Contacts and returns names plus phone numbers and email addresses only.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "query",
+                    type: "string",
+                    required: true,
+                    description: "The person's or organization's name to look up."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
 
         let readURLExecutor = ReadURLToolExecutor(webSearchService: webSearchService)
         let ocrExecutor = OCRImageTextToolExecutor(imageOCRService: imageOCRService)
         let webSearchExecutor = WebSearchToolExecutor(webSearchService: webSearchService)
         let documentExecutor = DocumentSynthesizeToolExecutor(documentLibraryService: documentLibraryService)
         let calendarExecutor = CalendarBriefToolExecutor(calendarBriefService: calendarBriefService)
+        let calendarCreateExecutor = CalendarCreateToolExecutor(calendarBriefService: calendarBriefService)
+        let currentDateTimeExecutor = CurrentDateTimeToolExecutor(
+            now: currentDateTimeNow,
+            timeZone: currentDateTimeTimeZone
+        )
+        let remindersBriefExecutor = RemindersBriefToolExecutor(remindersService: remindersService)
+        let remindersCreateExecutor = RemindersCreateToolExecutor(remindersService: remindersService)
+        let timerCreateExecutor = TimerCreateToolExecutor(timerService: timerService)
+        let contactsLookupExecutor = ContactsLookupToolExecutor(contactsService: contactsService)
 
         self.toolExecutionTimeoutSeconds = toolExecutionTimeoutSeconds
-        self.registeredTools = [readURLTool, ocrTool, webSearchTool, documentTool, calendarTool]
+        self.registeredTools = [
+            readURLTool,
+            ocrTool,
+            webSearchTool,
+            documentTool,
+            calendarTool,
+            calendarCreateTool,
+            currentDateTimeTool,
+            remindersBriefTool,
+            remindersCreateTool,
+            timerCreateTool,
+            contactsLookupTool
+        ]
         self.registeredExecutors = [
             readURLExecutor.toolName: readURLExecutor,
             ocrExecutor.toolName: ocrExecutor,
             webSearchExecutor.toolName: webSearchExecutor,
             documentExecutor.toolName: documentExecutor,
-            calendarExecutor.toolName: calendarExecutor
+            calendarExecutor.toolName: calendarExecutor,
+            calendarCreateExecutor.toolName: calendarCreateExecutor,
+            currentDateTimeExecutor.toolName: currentDateTimeExecutor,
+            remindersBriefExecutor.toolName: remindersBriefExecutor,
+            remindersCreateExecutor.toolName: remindersCreateExecutor,
+            timerCreateExecutor.toolName: timerCreateExecutor,
+            contactsLookupExecutor.toolName: contactsLookupExecutor
         ]
     }
 
@@ -261,6 +703,39 @@ actor ToolCallingService {
             return .call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments))
         }
 
+        if let timerCreateTool = toolsByName["timer_create"],
+           let raw = heuristicTimerCreateRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: timerCreateTool,
+                context: context
+           ) {
+            Self.debugLog("heuristic fallback selected timer_create for explicit timer request")
+            return .call(ToolCallRequest(toolName: timerCreateTool.name, arguments: arguments))
+        }
+
+        if let calendarCreateTool = toolsByName["calendar_create"],
+           let raw = heuristicCalendarCreateRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: calendarCreateTool,
+                context: context
+           ) {
+            Self.debugLog("heuristic fallback selected calendar_create for explicit event request")
+            return .call(ToolCallRequest(toolName: calendarCreateTool.name, arguments: arguments))
+        }
+
+        if let contactsLookupTool = toolsByName["contacts_lookup"],
+           let raw = heuristicContactsLookupRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: contactsLookupTool,
+                context: context
+           ) {
+            Self.debugLog("heuristic fallback selected contacts_lookup for contact request")
+            return .call(ToolCallRequest(toolName: contactsLookupTool.name, arguments: arguments))
+        }
+
         if let calendarTool = toolsByName["calendar_brief"],
            let range = heuristicCalendarRange(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -270,6 +745,35 @@ actor ToolCallingService {
            ) {
             Self.debugLog("heuristic fallback selected calendar_brief for schedule request")
             return .call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments))
+        }
+
+        if let remindersCreateTool = toolsByName["reminders_create"],
+           let raw = heuristicRemindersCreateRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: remindersCreateTool,
+                context: context
+           ) {
+            Self.debugLog("heuristic fallback selected reminders_create for explicit reminder request")
+            return .call(ToolCallRequest(toolName: remindersCreateTool.name, arguments: arguments))
+        }
+
+        if let dateTimeTool = toolsByName["current_datetime"],
+           shouldForceCurrentDateTime(for: userMessage),
+           case .success(let arguments) = validatedArguments([:], for: dateTimeTool, context: context) {
+            Self.debugLog("heuristic fallback selected current_datetime for time/date question")
+            return .call(ToolCallRequest(toolName: dateTimeTool.name, arguments: arguments))
+        }
+
+        if let remindersBriefTool = toolsByName["reminders_brief"],
+           let range = heuristicReminderRange(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                ["range": range.rawValue],
+                for: remindersBriefTool,
+                context: context
+           ) {
+            Self.debugLog("heuristic fallback selected reminders_brief for todo/reminder request")
+            return .call(ToolCallRequest(toolName: remindersBriefTool.name, arguments: arguments))
         }
 
         if preferThinkingFallback,
@@ -339,7 +843,43 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments)))
         }
 
-        // 4. Calendar-shaped request.
+        // 4. Explicit timer create request.
+        if let timerCreateTool = toolsByName["timer_create"],
+           let raw = heuristicTimerCreateRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: timerCreateTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected timer_create (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: timerCreateTool.name, arguments: arguments)))
+        }
+
+        // 4a. Explicit calendar event create request when all required fields are parseable.
+        if let calendarCreateTool = toolsByName["calendar_create"],
+           let raw = heuristicCalendarCreateRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: calendarCreateTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected calendar_create (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: calendarCreateTool.name, arguments: arguments)))
+        }
+
+        // 4b. Contact lookup request.
+        if let contactsLookupTool = toolsByName["contacts_lookup"],
+           let raw = heuristicContactsLookupRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: contactsLookupTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected contacts_lookup (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: contactsLookupTool.name, arguments: arguments)))
+        }
+
+        // 4c. Calendar-shaped request.
         if let calendarTool = toolsByName["calendar_brief"],
            let range = heuristicCalendarRange(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -349,6 +889,42 @@ actor ToolCallingService {
            ) {
             Self.debugLog("preflight selected calendar_brief range=\(range.rawValue) (planner skipped)")
             return .skip(.call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments)))
+        }
+
+        // 4d. Explicit create-reminder request (before brief so "remind me to …" does not read the list).
+        if let remindersCreateTool = toolsByName["reminders_create"],
+           let raw = heuristicRemindersCreateRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: remindersCreateTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected reminders_create (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: remindersCreateTool.name, arguments: arguments)))
+        }
+
+        // 4e. Device date/time from the system clock.
+        if let dateTimeTool = toolsByName["current_datetime"],
+           shouldForceCurrentDateTime(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                [:],
+                for: dateTimeTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected current_datetime (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: dateTimeTool.name, arguments: arguments)))
+        }
+
+        // 4f. Reminders list / todo brief for a bounded range.
+        if let remindersBriefTool = toolsByName["reminders_brief"],
+           let range = heuristicReminderRange(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                ["range": range.rawValue],
+                for: remindersBriefTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected reminders_brief range=\(range.rawValue) (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: remindersBriefTool.name, arguments: arguments)))
         }
 
         // 5. Strong live-data web_search phrase, but only when no attachments
@@ -406,6 +982,22 @@ actor ToolCallingService {
            messageLooksWebSearchAdjacent(userMessage) {
             return true
         }
+        if toolsByName["current_datetime"] != nil,
+           messageLooksDateTimeAdjacent(userMessage) {
+            return true
+        }
+        if toolsByName["calendar_create"] != nil,
+           messageLooksCalendarCreateAdjacent(userMessage) {
+            return true
+        }
+        if toolsByName["timer_create"] != nil,
+           messageLooksTimerCreateAdjacent(userMessage) {
+            return true
+        }
+        if toolsByName["contacts_lookup"] != nil,
+           messageLooksContactsLookupAdjacent(userMessage) {
+            return true
+        }
         return false
     }
 
@@ -432,6 +1024,55 @@ actor ToolCallingService {
             "live update"
         ]
         return webHints.contains(where: { normalized.contains($0) })
+    }
+
+    private nonisolated func messageLooksDateTimeAdjacent(_ userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+
+        let hints = [
+            "timezone",
+            "time zone",
+            "what time",
+            "what date",
+            "what day",
+            "current date",
+            "current time"
+        ]
+        return hints.contains(where: { normalized.contains($0) })
+    }
+
+    private nonisolated func messageLooksCalendarCreateAdjacent(_ userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+        let createHints = ["create", "add", "schedule", "put"]
+        let calendarHints = ["calendar", "event", "meeting", "appointment"]
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        return !tokens.intersection(createHints).isEmpty
+            && (!tokens.intersection(calendarHints).isEmpty || normalized.contains("on my calendar"))
+    }
+
+    private nonisolated func messageLooksTimerCreateAdjacent(_ userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+        let createHints = ["set", "start", "create", "put", "add"]
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        return normalized.contains("timer")
+            && !tokens.intersection(createHints).isEmpty
+    }
+
+    private nonisolated func messageLooksContactsLookupAdjacent(_ userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+        let hints = [
+            "contact",
+            "contacts",
+            "phone number",
+            "email address",
+            "email for",
+            "number for"
+        ]
+        return hints.contains(where: { normalized.contains($0) })
     }
 
     func plan(
@@ -536,6 +1177,7 @@ actor ToolCallingService {
             )
         }
 
+        let normalizedArguments: [String: String]
         switch validatedArguments(
             Dictionary(uniqueKeysWithValues: call.arguments.map { ($0.key, $0.value as Any) }),
             for: toolDefinition,
@@ -552,8 +1194,8 @@ actor ToolCallingService {
                 message: failure.message,
                 durationSeconds: Date().timeIntervalSince(startTime)
             )
-        case .success:
-            break
+        case .success(let arguments):
+            normalizedArguments = arguments
         }
 
         guard let executor = tools[call.toolName] else {
@@ -567,9 +1209,9 @@ actor ToolCallingService {
         }
 
         do {
-            Self.debugLog("execution start: tool=\(call.toolName) args=\(Self.formatted(arguments: call.arguments))")
+            Self.debugLog("execution start: tool=\(call.toolName) args=\(Self.formatted(arguments: normalizedArguments))")
             let result = try await withTimeout(seconds: toolExecutionTimeoutSeconds) {
-                try await executor.execute(arguments: call.arguments, context: context)
+                try await executor.execute(arguments: normalizedArguments, context: context)
             }
             try Task.checkCancellation()
 
@@ -703,7 +1345,7 @@ actor ToolCallingService {
 
         for argument in toolDefinition.argumentSchema {
             let rawValue = rawArguments[argument.name]
-            switch normalizedArgumentValue(argument, rawValue: rawValue, context: context) {
+            switch normalizedArgumentValue(argument, rawValue: rawValue, context: context, toolDefinition: toolDefinition) {
             case .success(let normalized):
                 if let normalized, !normalized.isEmpty {
                     validated[argument.name] = normalized
@@ -711,6 +1353,17 @@ actor ToolCallingService {
             case .failure(let failure):
                 return .failure(failure)
             }
+        }
+
+        switch toolDefinition.name {
+        case "calendar_create":
+            return normalizedCalendarCreateArguments(validated)
+        case "timer_create":
+            return normalizedTimerCreateArguments(validated)
+        case "contacts_lookup":
+            return normalizedContactsLookupArguments(validated)
+        default:
+            break
         }
 
         if toolDefinition.metadata.requiresSinglePublicURL,
@@ -724,6 +1377,101 @@ actor ToolCallingService {
         }
 
         return .success(validated)
+    }
+
+    private nonisolated func normalizedCalendarCreateArguments(
+        _ arguments: [String: String]
+    ) -> Result<[String: String], ToolExecutionFailure> {
+        guard let title = arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            return .failure(.invalidArguments("Argument `title` is required."))
+        }
+        guard let startRaw = arguments["start"] else {
+            return .failure(.invalidArguments("Argument `start` is required."))
+        }
+        guard let endRaw = arguments["end_or_duration"] else {
+            return .failure(.invalidArguments("Argument `end_or_duration` is required."))
+        }
+
+        let calendar = Calendar.current
+        let startDate: Date
+        switch ToolDateTimeParser.parse(startRaw, calendar: calendar) {
+        case .success(let date):
+            startDate = date
+        case .failure(let failure):
+            return .failure(failure)
+        }
+
+        let endDate: Date
+        switch ToolDurationParser.parseSeconds(endRaw) {
+        case .success(let seconds):
+            endDate = startDate.addingTimeInterval(TimeInterval(seconds))
+        case .failure:
+            switch ToolDateTimeParser.parse(endRaw, calendar: calendar) {
+            case .success(let date):
+                endDate = date
+            case .failure:
+                return .failure(.invalidArguments("Argument `end_or_duration` must be an explicit end datetime or duration."))
+            }
+        }
+
+        guard endDate > startDate else {
+            return .failure(.invalidArguments("Argument `end_or_duration` must resolve after `start`."))
+        }
+
+        var normalized: [String: String] = [
+            "title": String(title.prefix(Constants.ToolCalling.maxCalendarTitleLength)),
+            "start": ToolDateTimeParser.iso8601String(from: startDate),
+            "end_or_duration": ToolDateTimeParser.iso8601String(from: endDate)
+        ]
+
+        if let location = arguments["location"]?.trimmingCharacters(in: .whitespacesAndNewlines), !location.isEmpty {
+            normalized["location"] = String(location.prefix(Constants.ToolCalling.maxCalendarLocationLength))
+        }
+        if let notes = arguments["notes"]?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+            normalized["notes"] = String(notes.prefix(Constants.ToolCalling.maxCalendarNotesLength))
+        }
+        if let alert = arguments["alert_minutes_before"]?.trimmingCharacters(in: .whitespacesAndNewlines), !alert.isEmpty {
+            guard let minutes = Int(alert), (0...10_080).contains(minutes) else {
+                return .failure(.invalidArguments("Argument `alert_minutes_before` must be an integer from 0 to 10080."))
+            }
+            normalized["alert_minutes_before"] = String(minutes)
+        }
+
+        return .success(normalized)
+    }
+
+    private nonisolated func normalizedTimerCreateArguments(
+        _ arguments: [String: String]
+    ) -> Result<[String: String], ToolExecutionFailure> {
+        guard let durationRaw = arguments["duration"] else {
+            return .failure(.invalidArguments("Argument `duration` is required."))
+        }
+        let seconds: Int
+        switch ToolDurationParser.parseSeconds(durationRaw) {
+        case .success(let value):
+            seconds = value
+        case .failure(let failure):
+            return .failure(failure)
+        }
+
+        var normalized = ["duration": String(seconds)]
+        if let title = arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            normalized["title"] = String(title.prefix(Constants.ToolCalling.maxTimerTitleLength))
+        }
+        return .success(normalized)
+    }
+
+    private nonisolated func normalizedContactsLookupArguments(
+        _ arguments: [String: String]
+    ) -> Result<[String: String], ToolExecutionFailure> {
+        guard let query = arguments["query"]?
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !query.isEmpty else {
+            return .failure(.invalidArguments("Argument `query` is required."))
+        }
+        return .success(["query": String(query.prefix(Constants.ToolCalling.maxContactQueryLength))])
     }
 
     private nonisolated func normalizedRequest(
@@ -847,8 +1595,60 @@ actor ToolCallingService {
     private nonisolated func normalizedArgumentValue(
         _ argument: ToolArgument,
         rawValue: Any?,
-        context: ToolInputContext?
+        context: ToolInputContext?,
+        toolDefinition: ToolDefinition
     ) -> Result<String?, ToolExecutionFailure> {
+        if toolDefinition.name == "reminders_create" {
+            switch argument.name {
+            case "title":
+                guard let rawValue else {
+                    return .failure(.invalidArguments("Argument `title` is required."))
+                }
+                guard let raw = normalizedStringValue(from: rawValue) else {
+                    return .failure(.invalidArguments("Argument `title` must be a string."))
+                }
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    return .failure(.invalidArguments("Argument `title` must not be empty."))
+                }
+                let clamped = String(trimmed.prefix(Constants.ToolCalling.maxReminderTitleLength))
+                return .success(clamped)
+
+            case "due":
+                guard let rawValue else {
+                    return .success(nil)
+                }
+                guard let dueRaw = normalizedStringValue(from: rawValue)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                      !dueRaw.isEmpty else {
+                    return .success(nil)
+                }
+                switch ToolDueDateParser.parse(dueRaw, referenceDate: Date(), calendar: Calendar.current) {
+                case .success(let date):
+                    return .success(ToolDueDateParser.iso8601DueString(from: date))
+                case .failure(let failure):
+                    return .failure(failure)
+                }
+
+            case "notes":
+                guard let rawValue else {
+                    return .success(nil)
+                }
+                guard let raw = normalizedStringValue(from: rawValue) else {
+                    return .failure(.invalidArguments("Argument `notes` must be a string."))
+                }
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    return .success(nil)
+                }
+                let clamped = String(trimmed.prefix(Constants.ToolCalling.maxReminderNotesLength))
+                return .success(clamped)
+
+            default:
+                break
+            }
+        }
+
         switch argument.name {
         case "query":
             guard let rawValue else {
@@ -891,11 +1691,24 @@ actor ToolCallingService {
             }
             guard let range = normalizedStringValue(from: rawValue)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased(),
-                  CalendarBriefRange(rawValue: range) != nil else {
-                return .failure(.invalidArguments("Argument `range` must be one of: today, tomorrow, this_week, next_7_days."))
+                .lowercased() else {
+                return .failure(.invalidArguments("Argument `range` must be a string."))
             }
-            return .success(range)
+
+            switch toolDefinition.name {
+            case "calendar_brief":
+                guard CalendarBriefRange(rawValue: range) != nil else {
+                    return .failure(.invalidArguments("Argument `range` must be one of: today, tomorrow, this_week, next_7_days."))
+                }
+                return .success(range)
+            case "reminders_brief":
+                guard RemindersRange(rawValue: range) != nil else {
+                    return .failure(.invalidArguments("Argument `range` must be one of: today, tomorrow, this_week, next_7_days, overdue."))
+                }
+                return .success(range)
+            default:
+                return .failure(.invalidArguments("Unexpected `range` argument for tool `\(toolDefinition.name)`."))
+            }
 
         default:
             return normalizedPrimitiveValue(for: argument, rawValue: rawValue)
@@ -1139,6 +1952,81 @@ actor ToolCallingService {
                 Self.debugLog("planner recovered prose decision for \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
+            case "calendar_create":
+                let source = userMessage ?? context.latestUserMessage
+                guard let raw = heuristicCalendarCreateRawArguments(for: source),
+                      case .success(let arguments) = validatedArguments(
+                        Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                        for: toolDefinition,
+                        context: context
+                      ) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
+            case "current_datetime":
+                guard case .success(let arguments) = validatedArguments(
+                    [:],
+                    for: toolDefinition,
+                    context: context
+                ) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
+            case "reminders_brief":
+                guard let range = heuristicReminderRange(for: userMessage ?? context.latestUserMessage),
+                      case .success(let arguments) = validatedArguments(
+                        ["range": range.rawValue],
+                        for: toolDefinition,
+                        context: context
+                      ) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
+            case "reminders_create":
+                let source = userMessage ?? context.latestUserMessage
+                guard let raw = heuristicRemindersCreateRawArguments(for: source),
+                      case .success(let arguments) = validatedArguments(
+                        Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                        for: toolDefinition,
+                        context: context
+                      ) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
+            case "timer_create":
+                let source = userMessage ?? context.latestUserMessage
+                guard let raw = heuristicTimerCreateRawArguments(for: source),
+                      case .success(let arguments) = validatedArguments(
+                        Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                        for: toolDefinition,
+                        context: context
+                      ) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
+            case "contacts_lookup":
+                let source = userMessage ?? context.latestUserMessage
+                guard let raw = heuristicContactsLookupRawArguments(for: source),
+                      case .success(let arguments) = validatedArguments(
+                        Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                        for: toolDefinition,
+                        context: context
+                      ) else {
+                    continue
+                }
+                Self.debugLog("planner recovered prose decision for \(toolName)")
+                return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
+
             default:
                 continue
             }
@@ -1222,10 +2110,8 @@ actor ToolCallingService {
         let liveDataPhrases = [
             "latest news",
             "breaking news",
-            "news in",
             "weather today",
             "weather tomorrow",
-            "weather in",
             "current weather",
             "stock price",
             "share price",
@@ -1234,7 +2120,6 @@ actor ToolCallingService {
             "next match",
             "live score",
             "score today",
-            "price of",
             "price today"
         ]
 
@@ -1359,6 +2244,221 @@ actor ToolCallingService {
             return nil
         }
 
+        if normalized.contains("tomorrow") {
+            return .tomorrow
+        }
+        if normalized.contains("this week") || normalized.contains("week") {
+            return .thisWeek
+        }
+        if normalized.contains("next 7 days")
+            || normalized.contains("next seven days")
+            || normalized.contains("coming 7 days")
+            || normalized.contains("upcoming") {
+            return .next7Days
+        }
+        return .today
+    }
+
+    private nonisolated func heuristicCalendarCreateRawArguments(for userMessage: String) -> [String: String]? {
+        let compact = userMessage
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = normalizeForHeuristicMatching(compact)
+        guard messageLooksCalendarCreateAdjacent(normalized) else { return nil }
+
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?i)\b(?:create|add|schedule|put)\b(?:\s+(?:a|an))?(?:\s+(?:calendar\s+)?(?:event|meeting|appointment))?\s+(.+?)\s+(?:at|on)\s+((?:\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(?::\d{2})?)|(?:today|tomorrow)\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(?:for|lasting)\s+(.+)$"#
+        ) else {
+            return nil
+        }
+
+        let range = NSRange(compact.startIndex..., in: compact)
+        guard let match = regex.firstMatch(in: compact, options: [], range: range),
+              match.numberOfRanges == 4,
+              let titleRange = Range(match.range(at: 1), in: compact),
+              let startRange = Range(match.range(at: 2), in: compact),
+              let durationRange = Range(match.range(at: 3), in: compact) else {
+            return nil
+        }
+
+        let title = sanitizeRecoveredQuery(String(compact[titleRange]))
+        let start = sanitizeRecoveredQuery(String(compact[startRange]))
+        let duration = sanitizeRecoveredQuery(String(compact[durationRange]))
+        guard !title.isEmpty, !start.isEmpty, !duration.isEmpty else { return nil }
+        return [
+            "title": title,
+            "start": start,
+            "end_or_duration": duration
+        ]
+    }
+
+    private nonisolated func heuristicTimerCreateRawArguments(for userMessage: String) -> [String: String]? {
+        let compact = normalizeForHeuristicMatching(userMessage)
+        guard messageLooksTimerCreateAdjacent(compact) else { return nil }
+
+        let durationPatterns = [
+            #"(?i)\b(?:set|start|create|put|add)\s+(?:a\s+)?timer\s+(?:for\s+)?(.+)$"#,
+            #"(?i)\b(?:set|start|create|put|add)\s+(?:a\s+)?(.+?)\s+timer$"#,
+            #"(?i)\btimer\s+(?:for\s+)(.+)$"#
+        ]
+        for pattern in durationPatterns {
+            guard let duration = firstRegexCapture(pattern: pattern, in: compact) else { continue }
+            let sanitized = sanitizeRecoveredQuery(duration)
+            guard !sanitized.isEmpty else { continue }
+            return ["duration": sanitized]
+        }
+        return nil
+    }
+
+    private nonisolated func heuristicContactsLookupRawArguments(for userMessage: String) -> [String: String]? {
+        let compact = userMessage
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let patterns = [
+            #"(?i)\b(?:look up|find|search for)\s+(.+?)\s+(?:in\s+)?(?:my\s+)?contacts?\b"#,
+            #"(?i)\b(?:contact info|contact details)\s+(?:for\s+)?(.+?)(?:[.?]|$)"#,
+            #"(?i)\bwhat(?:'s| is)?\s+(.+?)\s+(?:contact|contact info|contact details)(?:[.?]|$)"#,
+            #"(?i)\b(?:phone number|email address|email|number)\s+(?:for|of)\s+(.+?)(?:[.?]|$)"#,
+            #"(?i)\bwhat(?:'s| is)?\s+(.+?)'s\s+(?:phone number|email address|email|number)(?:[.?]|$)"#
+        ]
+        for pattern in patterns {
+            guard let capture = firstRegexCapture(pattern: pattern, in: compact) else { continue }
+            let query = sanitizeRecoveredQuery(capture)
+            guard !query.isEmpty else { continue }
+            return ["query": query]
+        }
+        return nil
+    }
+
+    private nonisolated func heuristicRemindersCreateRawArguments(for userMessage: String) -> [String: String]? {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return nil }
+
+        let orderedPrefixes = [
+            "set a reminder to ",
+            "add a reminder to ",
+            "create a reminder to ",
+            "remind me to "
+        ]
+        for prefix in orderedPrefixes {
+            if let range = normalized.range(of: prefix) {
+                let title = String(normalized[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if let arguments = reminderCreateArguments(fromTitleTail: title) { return arguments }
+                return nil
+            }
+        }
+
+        if normalized.hasPrefix("set a reminder") {
+            var tail = String(normalized.dropFirst("set a reminder".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if tail.hasPrefix("to ") {
+                tail = String(tail.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let arguments = reminderCreateArguments(fromTitleTail: tail) { return arguments }
+            return nil
+        }
+
+        if let range = normalized.range(of: "add to my reminders") {
+            let title = String(normalized[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let arguments = reminderCreateArguments(fromTitleTail: title) { return arguments }
+            return nil
+        }
+
+        if let range = normalized.range(of: "add this to reminders") {
+            let title = String(normalized[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let arguments = reminderCreateArguments(fromTitleTail: title) { return arguments }
+            return nil
+        }
+
+        return nil
+    }
+
+    private nonisolated func reminderCreateArguments(fromTitleTail titleTail: String) -> [String: String]? {
+        var title = titleTail.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+
+        var arguments: [String: String] = [:]
+        let duePatterns = [
+            #"(?i)\s+(today|tomorrow|tonight)$"#,
+            #"(?i)\s+(in\s+\d+\s+(?:minutes?|hours?|days?))$"#,
+            #"(?i)\s+(\d{4}-\d{2}-\d{2}(?:t\d{2}:\d{2}(?::\d{2})?(?:z|[+-]\d{2}:\d{2})?)?)$"#
+        ]
+
+        for pattern in duePatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(title.startIndex..., in: title)
+            guard let match = regex.firstMatch(in: title, options: [], range: range),
+                  match.numberOfRanges > 1,
+                  let fullRange = Range(match.range(at: 0), in: title),
+                  let dueRange = Range(match.range(at: 1), in: title) else {
+                continue
+            }
+            arguments["due"] = String(title[dueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            title.removeSubrange(fullRange)
+            title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            break
+        }
+
+        guard !title.isEmpty else { return nil }
+        arguments["title"] = title
+        return arguments
+    }
+
+    private nonisolated func shouldForceCurrentDateTime(for userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+
+        let phrases = [
+            "what time is it",
+            "current time",
+            "what s the time",
+            "what day is it",
+            "what s the date",
+            "today s date",
+            "current date",
+            "what year is it",
+            "what s the day",
+            "what s today",
+            "what timezone",
+            "which timezone",
+            "my timezone",
+            "what time zone",
+            "which time zone",
+            "my time zone"
+        ]
+        if phrases.contains(where: { normalized.contains($0) }) {
+            return true
+        }
+
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let temporal = Set(["time", "date", "day", "weekday", "year", "timezone"])
+        let anchor = Set(["current", "now", "today"])
+        return !tokens.intersection(temporal).isEmpty && !tokens.intersection(anchor).isEmpty
+    }
+
+    private nonisolated func heuristicReminderRange(for userMessage: String) -> RemindersRange? {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return nil }
+
+        let markers = [
+            "reminder",
+            "reminders",
+            "todo",
+            "to do",
+            "to-do",
+            "todos",
+            "task",
+            "tasks",
+            "overdue",
+            "what do i have to do",
+            "what i need to do"
+        ]
+        guard markers.contains(where: { normalized.contains($0) }) else {
+            return nil
+        }
+
+        if normalized.contains("overdue") {
+            return .overdue
+        }
         if normalized.contains("tomorrow") {
             return .tomorrow
         }
@@ -1616,6 +2716,169 @@ private struct DocumentSynthesizeToolExecutor: ToolExecutor {
     }
 }
 
+private struct CurrentDateTimeToolExecutor: ToolExecutor {
+    let toolName = "current_datetime"
+    let now: @Sendable () -> Date
+    let timeZone: TimeZone
+
+    func execute(arguments _: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
+        let startTime = Date()
+        let date = now()
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withTimeZone]
+        isoFormatter.timeZone = timeZone
+        let iso = isoFormatter.string(from: date)
+
+        let readable = DateFormatter()
+        readable.locale = Locale.current
+        readable.timeZone = timeZone
+        readable.dateStyle = .full
+        readable.timeStyle = .short
+        let readableString = readable.string(from: date)
+
+        let offsetFormatter = DateFormatter()
+        offsetFormatter.locale = Locale(identifier: "en_US_POSIX")
+        offsetFormatter.dateFormat = "XXXXX"
+        offsetFormatter.timeZone = timeZone
+        let offsetLabel = offsetFormatter.string(from: date)
+
+        let contextBlock = """
+        Current local date/time:
+        - ISO 8601: \(iso)
+        - Readable: \(readableString)
+        - Timezone: \(timeZone.identifier) (\(offsetLabel))
+        """
+
+        return ToolExecutionResult(
+            toolName: toolName,
+            status: .success,
+            message: nil,
+            contextBlock: contextBlock,
+            sources: [],
+            durationSeconds: Date().timeIntervalSince(startTime)
+        )
+    }
+}
+
+private struct RemindersBriefToolExecutor: ToolExecutor {
+    let toolName = "reminders_brief"
+    let remindersService: RemindersService
+
+    func execute(arguments: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
+        guard let rawRange = arguments["range"],
+              let range = RemindersRange(rawValue: rawRange) else {
+            throw ToolExecutionFailure.invalidArguments("A supported reminders range is required.")
+        }
+
+        let startTime = Date()
+        let result = try await remindersService.retrieveContext(for: range)
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("No reminders were found.")
+        }
+
+        return ToolExecutionResult(
+            toolName: toolName,
+            status: .success,
+            message: nil,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            durationSeconds: Date().timeIntervalSince(startTime)
+        )
+    }
+}
+
+private struct RemindersCreateToolExecutor: ToolExecutor {
+    let toolName = "reminders_create"
+    let remindersService: RemindersService
+
+    func execute(arguments: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
+        guard let title = arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            throw ToolExecutionFailure.invalidArguments("A reminder title is required.")
+        }
+
+        let dueDate: Date?
+        if let due = arguments["due"]?.trimmingCharacters(in: .whitespacesAndNewlines), !due.isEmpty {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            formatter.timeZone = .current
+            dueDate = formatter.date(from: due)
+        } else {
+            dueDate = nil
+        }
+
+        let rawNotes = arguments["notes"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = (rawNotes?.isEmpty == false) ? rawNotes : nil
+
+        let startTime = Date()
+        let result = try await remindersService.createReminder(title: title, dueDate: dueDate, notes: notes)
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("Reminder was created but returned no confirmation text.")
+        }
+
+        return ToolExecutionResult(
+            toolName: toolName,
+            status: .success,
+            message: nil,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            durationSeconds: Date().timeIntervalSince(startTime)
+        )
+    }
+}
+
+private struct CalendarCreateToolExecutor: ToolExecutor {
+    let toolName = "calendar_create"
+    let calendarBriefService: CalendarBriefService
+
+    func execute(arguments: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
+        guard let title = arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            throw ToolExecutionFailure.invalidArguments("A calendar event title is required.")
+        }
+        guard let startRaw = arguments["start"],
+              let endRaw = arguments["end_or_duration"] else {
+            throw ToolExecutionFailure.invalidArguments("Calendar event start and end are required.")
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = .current
+        guard let startDate = formatter.date(from: startRaw),
+              let endDate = formatter.date(from: endRaw),
+              endDate > startDate else {
+            throw ToolExecutionFailure.invalidArguments("Calendar event start and end must be valid ISO datetimes.")
+        }
+
+        let location = arguments["location"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = arguments["notes"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alertMinutesBefore = arguments["alert_minutes_before"].flatMap(Int.init)
+
+        let startTime = Date()
+        let result = try await calendarBriefService.createEvent(
+            title: title,
+            startDate: startDate,
+            endDate: endDate,
+            location: location?.isEmpty == false ? location : nil,
+            notes: notes?.isEmpty == false ? notes : nil,
+            alertMinutesBefore: alertMinutesBefore
+        )
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("Calendar event was created but returned no confirmation text.")
+        }
+
+        return ToolExecutionResult(
+            toolName: toolName,
+            status: .success,
+            message: nil,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            durationSeconds: Date().timeIntervalSince(startTime)
+        )
+    }
+}
+
 private struct CalendarBriefToolExecutor: ToolExecutor {
     let toolName = "calendar_brief"
     let calendarBriefService: CalendarBriefService
@@ -1630,6 +2893,66 @@ private struct CalendarBriefToolExecutor: ToolExecutor {
         let result = try await calendarBriefService.retrieveContext(for: range)
         guard !result.contextBlock.isEmpty else {
             throw ToolExecutionFailure.noContent("No calendar events were found.")
+        }
+
+        return ToolExecutionResult(
+            toolName: toolName,
+            status: .success,
+            message: nil,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            durationSeconds: Date().timeIntervalSince(startTime)
+        )
+    }
+}
+
+private struct TimerCreateToolExecutor: ToolExecutor {
+    let toolName = "timer_create"
+    let timerService: TimerService
+
+    func execute(arguments: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
+        guard let rawDuration = arguments["duration"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let durationSeconds = TimeInterval(rawDuration),
+              durationSeconds >= 1,
+              durationSeconds <= 86_400 else {
+            throw ToolExecutionFailure.invalidArguments("A timer duration from 1 second to 24 hours is required.")
+        }
+
+        let title = arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let startTime = Date()
+        let result = try await timerService.createTimer(
+            durationSeconds: durationSeconds,
+            title: title?.isEmpty == false ? title : nil
+        )
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("Timer was created but returned no confirmation text.")
+        }
+
+        return ToolExecutionResult(
+            toolName: toolName,
+            status: .success,
+            message: nil,
+            contextBlock: result.contextBlock,
+            sources: result.sources,
+            durationSeconds: Date().timeIntervalSince(startTime)
+        )
+    }
+}
+
+private struct ContactsLookupToolExecutor: ToolExecutor {
+    let toolName = "contacts_lookup"
+    let contactsService: ContactsService
+
+    func execute(arguments: [String: String], context _: ToolInputContext) async throws -> ToolExecutionResult {
+        guard let query = arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !query.isEmpty else {
+            throw ToolExecutionFailure.invalidArguments("A contact lookup query is required.")
+        }
+
+        let startTime = Date()
+        let result = try await contactsService.retrieveContext(for: query)
+        guard !result.contextBlock.isEmpty else {
+            throw ToolExecutionFailure.noContent("No matching contacts were found.")
         }
 
         return ToolExecutionResult(

@@ -274,52 +274,6 @@
         }
       }
     },
-    "chat.model_menu.manage" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Manage Models…"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Administrar modelos…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "管理模型…"
-          }
-        }
-      }
-    },
-    "chat.model_menu.no_downloads" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No downloaded models"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No hay modelos descargados"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂无已下载的模型"
-          }
-        }
-      }
-    },
     "chat.loading_model_title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -362,6 +316,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "消息…"
+          }
+        }
+      }
+    },
+    "chat.model_menu.manage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage Models…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Administrar modelos…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理模型…"
+          }
+        }
+      }
+    },
+    "chat.model_menu.no_downloads" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No downloaded models"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No hay modelos descargados"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无已下载的模型"
           }
         }
       }
@@ -4833,6 +4833,9 @@
         }
       }
     },
+    "Stop" : {
+
+    },
     "Stop generating" : {
 
     },
@@ -5066,6 +5069,121 @@
         }
       }
     },
+    "tool.activity.calendar_create" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating calendar event"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creando evento de calendario"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在创建日历事件"
+          }
+        }
+      }
+    },
+    "tool.activity.calendar_create_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating calendar event: %1$@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creando evento de calendario: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在创建日历事件：%1$@"
+          }
+        }
+      }
+    },
+    "tool.activity.contacts_lookup" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Looking up contact"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buscando contacto"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查找联系人"
+          }
+        }
+      }
+    },
+    "tool.activity.contacts_lookup_query" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Looking up contact: %1$@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buscando contacto: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查找联系人：%1$@"
+          }
+        }
+      }
+    },
+    "tool.activity.current_datetime" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking current date and time"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consultando fecha y hora actuales"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看当前日期和时间"
+          }
+        }
+      }
+    },
     "tool.activity.document_synthesize" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5181,6 +5299,98 @@
         }
       }
     },
+    "tool.activity.reminders_brief" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking reminders"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Revisando recordatorios"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看提醒事项"
+          }
+        }
+      }
+    },
+    "tool.activity.reminders_brief_range" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking reminders: %1$@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Revisando recordatorios: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看提醒事项：%1$@"
+          }
+        }
+      }
+    },
+    "tool.activity.reminders_create" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating reminder"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creando recordatorio"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在创建提醒事项"
+          }
+        }
+      }
+    },
+    "tool.activity.reminders_create_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating reminder: %1$@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creando recordatorio: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在创建提醒事项：%1$@"
+          }
+        }
+      }
+    },
     "tool.activity.searching" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5204,6 +5414,52 @@
         }
       }
     },
+    "tool.activity.timer_create" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting timer"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Iniciando temporizador"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动计时器"
+          }
+        }
+      }
+    },
+    "tool.activity.timer_create_duration" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting timer: %1$@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Iniciando temporizador: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动计时器：%1$@"
+          }
+        }
+      }
+    },
     "tool.notice.calendar_failed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5222,6 +5478,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No calendar events were found for that range. Answered locally instead."
+          }
+        }
+      }
+    },
+    "tool.notice.contacts_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts access was unavailable. Answered locally instead."
+          }
+        }
+      }
+    },
+    "tool.notice.contacts_no_content" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No matching contacts were found. Answered locally instead."
+          }
+        }
+      }
+    },
+    "tool.notice.datetime_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The current date and time could not be read. Answered locally instead."
           }
         }
       }
@@ -5340,6 +5629,28 @@
         }
       }
     },
+    "tool.notice.reminders_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reminders access was unavailable or the reminder could not be saved. Answered locally instead."
+          }
+        }
+      }
+    },
+    "tool.notice.reminders_no_content" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No reminders were found for that range. Answered locally instead."
+          }
+        }
+      }
+    },
     "tool.notice.search_failed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5409,6 +5720,17 @@
         }
       }
     },
+    "tool.notice.timer_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer access was unavailable or the timer could not be created. Answered locally instead."
+          }
+        }
+      }
+    },
     "tool.trace.calendar_brief" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5451,6 +5773,144 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "日历摘要失败"
+          }
+        }
+      }
+    },
+    "tool.trace.calendar_create" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calendar Event"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Evento de calendario"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日历事件"
+          }
+        }
+      }
+    },
+    "tool.trace.calendar_create_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calendar Event Failed"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Evento de calendario fallido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日历事件失败"
+          }
+        }
+      }
+    },
+    "tool.trace.contacts_lookup" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact Lookup"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Búsqueda de contacto"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "联系人查找"
+          }
+        }
+      }
+    },
+    "tool.trace.contacts_lookup_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact Lookup Failed"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Búsqueda de contacto fallida"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "联系人查找失败"
+          }
+        }
+      }
+    },
+    "tool.trace.current_datetime" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current Date and Time"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fecha y hora actuales"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前日期和时间"
+          }
+        }
+      }
+    },
+    "tool.trace.current_datetime_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current Date and Time Failed"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fecha y hora actuales fallida"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前日期和时间失败"
           }
         }
       }
@@ -5593,6 +6053,98 @@
         }
       }
     },
+    "tool.trace.reminders_brief" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reminders Brief"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resumen de recordatorios"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提醒事项摘要"
+          }
+        }
+      }
+    },
+    "tool.trace.reminders_brief_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reminders Brief Failed"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resumen de recordatorios fallido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提醒事项摘要失败"
+          }
+        }
+      }
+    },
+    "tool.trace.reminders_create" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create Reminder"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crear recordatorio"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建提醒事项"
+          }
+        }
+      }
+    },
+    "tool.trace.reminders_create_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create Reminder Failed"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crear recordatorio fallido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建提醒事项失败"
+          }
+        }
+      }
+    },
     "tool.trace.sources_found" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5612,6 +6164,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "找到 %lld 个来源"
+          }
+        }
+      }
+    },
+    "tool.trace.timer_create" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temporizador"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "计时器"
+          }
+        }
+      }
+    },
+    "tool.trace.timer_create_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer Failed"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temporizador fallido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "计时器失败"
           }
         }
       }

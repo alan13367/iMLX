@@ -123,6 +123,8 @@ private struct SourceRowView: View {
         case .document: "doc.text"
         case .image: "photo"
         case .calendar: "calendar"
+        case .reminder: "checklist"
+        case .contact: "person.crop.circle"
         }
     }
 }

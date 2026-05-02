@@ -422,6 +422,258 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertEqual(request.arguments["query"]?.count, Constants.ToolCalling.maxQueryLength)
     }
 
+    func testParsesCurrentDateTimeDecisionWithEmptyArgs() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"current_datetime","args":{}}"#,
+            tools: [currentDateTimeTool],
+            context: emptyContext
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(ToolCallRequest(toolName: "current_datetime", arguments: [:]))
+        )
+    }
+
+    func testParsesRemindersBriefDecision() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"reminders_brief","args":{"range":"tomorrow"}}"#,
+            tools: [remindersBriefTool],
+            context: emptyContext
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(ToolCallRequest(toolName: "reminders_brief", arguments: ["range": "tomorrow"]))
+        )
+    }
+
+    func testParsesRemindersCreateDecisionWithTitleAndDue() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"reminders_create","args":{"title":"Buy milk","due":"tomorrow"}}"#,
+            tools: [remindersCreateTool],
+            context: emptyContext
+        )
+
+        guard case .call(let request) = decision else {
+            return XCTFail("Expected a tool call decision")
+        }
+
+        XCTAssertEqual(request.toolName, "reminders_create")
+        XCTAssertEqual(request.arguments["title"], "Buy milk")
+        XCTAssertNotNil(request.arguments["due"])
+        XCTAssertTrue(request.arguments["due"]!.contains("T"))
+    }
+
+    func testResolvedDecisionRecoversRemindersBriefForOverdueRequest() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .none,
+            userMessage: "Show me my overdue reminders",
+            context: emptyContext,
+            tools: [remindersBriefTool],
+            preferThinkingFallback: false
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(ToolCallRequest(toolName: "reminders_brief", arguments: ["range": "overdue"]))
+        )
+    }
+
+    func testResolvedDecisionDoesNotConfuseRemindMeToWithMemory() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.resolvedDecision(
+            plannedDecision: .none,
+            userMessage: "Please remind me of our trip to Paris",
+            context: emptyContext,
+            tools: [remindersCreateTool],
+            preferThinkingFallback: false
+        )
+
+        XCTAssertEqual(decision, .none)
+    }
+
+    func testPreflightReminderCreateExtractsDueDateFromTail() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Remind me to call mom tomorrow",
+            context: emptyContext,
+            tools: [remindersCreateTool]
+        )
+
+        guard case .skip(.call(let request)) = decision else {
+            return XCTFail("Expected preflight to create a reminder")
+        }
+
+        XCTAssertEqual(request.toolName, "reminders_create")
+        XCTAssertEqual(request.arguments["title"], "call mom")
+        XCTAssertNotNil(request.arguments["due"])
+        XCTAssertTrue(request.arguments["due"]?.contains("T") == true)
+    }
+
+    func testPreflightReminderCreateExtractsRelativeDueDateFromTail() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Remind me to check the oven in 20 minutes",
+            context: emptyContext,
+            tools: [remindersCreateTool]
+        )
+
+        guard case .skip(.call(let request)) = decision else {
+            return XCTFail("Expected preflight to create a reminder")
+        }
+
+        XCTAssertEqual(request.toolName, "reminders_create")
+        XCTAssertEqual(request.arguments["title"], "check the oven")
+        XCTAssertNotNil(request.arguments["due"])
+        XCTAssertTrue(request.arguments["due"]?.contains("T") == true)
+    }
+
+    func testPreflightTimezoneRequestUsesCurrentDateTime() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What timezone am I in?",
+            context: emptyContext,
+            tools: [currentDateTimeTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "current_datetime", arguments: [:])))
+        )
+    }
+
+    func testParsesCalendarCreateDecisionWithDuration() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"calendar_create","args":{"title":"Project review","start":"2026-05-03T10:00","end_or_duration":"30 minutes","location":"Office"}}"#,
+            tools: [calendarCreateTool],
+            context: emptyContext
+        )
+
+        guard case .call(let request) = decision else {
+            return XCTFail("Expected a calendar_create call")
+        }
+
+        XCTAssertEqual(request.toolName, "calendar_create")
+        XCTAssertEqual(request.arguments["title"], "Project review")
+        XCTAssertEqual(request.arguments["location"], "Office")
+        XCTAssertTrue(request.arguments["start"]?.contains("T") == true)
+        XCTAssertTrue(request.arguments["end_or_duration"]?.contains("T") == true)
+    }
+
+    func testInvalidCalendarCreateMissingConcreteTimeFailsClosed() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"calendar_create","args":{"title":"Lunch","start":"tomorrow","end_or_duration":"1 hour"}}"#,
+            tools: [calendarCreateTool],
+            context: emptyContext
+        )
+
+        XCTAssertEqual(decision, .none)
+    }
+
+    func testPreflightTimerCreateNormalizesDuration() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Set a timer for 10 minutes",
+            context: emptyContext,
+            tools: [timerCreateTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "timer_create", arguments: ["duration": "600"])))
+        )
+    }
+
+    func testPreflightTimerCreateAcceptsDurationBeforeTimer() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Put a 5 minute timer",
+            context: emptyContext,
+            tools: [timerCreateTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "timer_create", arguments: ["duration": "300"])))
+        )
+    }
+
+    func testParsesContactsLookupDecision() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"contacts_lookup","args":{"query":"Alice Appleseed"}}"#,
+            tools: [contactsLookupTool],
+            context: emptyContext
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(ToolCallRequest(toolName: "contacts_lookup", arguments: ["query": "Alice Appleseed"]))
+        )
+    }
+
+    func testPreflightContactsLookupExtractsQuery() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Look up Alice Appleseed in my contacts",
+            context: emptyContext,
+            tools: [contactsLookupTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "contacts_lookup", arguments: ["query": "Alice Appleseed"])))
+        )
+    }
+
+    func testPreflightContactsLookupExtractsWhatIsContactQuery() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What is Mami contact",
+            context: emptyContext,
+            tools: [contactsLookupTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "contacts_lookup", arguments: ["query": "Mami"])))
+        )
+    }
+
+    func testInvalidDueArgumentFailsClosedForRemindersCreate() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"reminders_create","args":{"title":"Buy milk","due":"someday maybe"}}"#,
+            tools: [remindersCreateTool],
+            context: emptyContext
+        )
+
+        XCTAssertEqual(decision, .none)
+    }
+
     private var webSearchTool: ToolDefinition {
         ToolDefinition(
             name: "web_search",
@@ -503,6 +755,98 @@ final class ToolPlannerParsingTests: XCTestCase {
                     required: true,
                     description: "One of today, tomorrow, this_week, next_7_days."
                 )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+    }
+
+    private var currentDateTimeTool: ToolDefinition {
+        ToolDefinition(
+            name: "current_datetime",
+            description: "Returns the device's current local date and time.",
+            argumentSchema: [],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+    }
+
+    private var calendarCreateTool: ToolDefinition {
+        ToolDefinition(
+            name: "calendar_create",
+            description: "Creates one calendar event.",
+            argumentSchema: [
+                ToolArgument(name: "title", type: "string", required: true, description: "Event title."),
+                ToolArgument(name: "start", type: "string", required: true, description: "Start datetime."),
+                ToolArgument(name: "end_or_duration", type: "string", required: true, description: "End datetime or duration."),
+                ToolArgument(name: "location", type: "string", required: false, description: "Location."),
+                ToolArgument(name: "notes", type: "string", required: false, description: "Notes."),
+                ToolArgument(name: "alert_minutes_before", type: "string", required: false, description: "Alert offset.")
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+    }
+
+    private var remindersBriefTool: ToolDefinition {
+        ToolDefinition(
+            name: "reminders_brief",
+            description: "Reads incomplete reminders for a bounded range.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "range",
+                    type: "string",
+                    required: true,
+                    description: "One of today, tomorrow, this_week, next_7_days, overdue."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+    }
+
+    private var remindersCreateTool: ToolDefinition {
+        ToolDefinition(
+            name: "reminders_create",
+            description: "Creates a reminder with optional due date and notes.",
+            argumentSchema: [
+                ToolArgument(
+                    name: "title",
+                    type: "string",
+                    required: true,
+                    description: "Reminder title."
+                ),
+                ToolArgument(
+                    name: "due",
+                    type: "string",
+                    required: false,
+                    description: "Optional due date expression."
+                ),
+                ToolArgument(
+                    name: "notes",
+                    type: "string",
+                    required: false,
+                    description: "Optional notes."
+                )
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+    }
+
+    private var timerCreateTool: ToolDefinition {
+        ToolDefinition(
+            name: "timer_create",
+            description: "Creates a timer.",
+            argumentSchema: [
+                ToolArgument(name: "duration", type: "string", required: true, description: "Duration."),
+                ToolArgument(name: "title", type: "string", required: false, description: "Timer title.")
+            ],
+            metadata: ToolMetadata(executionClass: .local)
+        )
+    }
+
+    private var contactsLookupTool: ToolDefinition {
+        ToolDefinition(
+            name: "contacts_lookup",
+            description: "Looks up local contacts.",
+            argumentSchema: [
+                ToolArgument(name: "query", type: "string", required: true, description: "Contact name.")
             ],
             metadata: ToolMetadata(executionClass: .local)
         )

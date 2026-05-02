@@ -911,6 +911,26 @@ final class ChatViewModel {
             return request.arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         case "calendar_brief":
             return request.arguments["range"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "calendar_create":
+            return request.arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "reminders_brief":
+            return request.arguments["range"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "reminders_create":
+            return request.arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "timer_create":
+            if let title = request.arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !title.isEmpty {
+                return title
+            }
+            if let duration = request.arguments["duration"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               let seconds = Int(duration) {
+                return "\(seconds)s"
+            }
+            return request.arguments["duration"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "contacts_lookup":
+            return request.arguments["query"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "current_datetime":
+            return nil
         default:
             return nil
         }
@@ -928,8 +948,16 @@ final class ChatViewModel {
                 return String.appLocalized("tool.notice.search_failed")
             case "document_synthesize":
                 return String.appLocalized("tool.notice.document_failed")
-            case "calendar_brief":
+            case "calendar_brief", "calendar_create":
                 return String.appLocalized("tool.notice.calendar_failed")
+            case "reminders_brief", "reminders_create":
+                return String.appLocalized("tool.notice.reminders_failed")
+            case "timer_create":
+                return String.appLocalized("tool.notice.timer_failed")
+            case "contacts_lookup":
+                return String.appLocalized("tool.notice.contacts_failed")
+            case "current_datetime":
+                return String.appLocalized("tool.notice.datetime_failed")
             default:
                 return String.appLocalized("tool.notice.search_failed")
             }
@@ -948,6 +976,18 @@ final class ChatViewModel {
                 return String.appLocalized("tool.notice.document_no_content")
             case "calendar_brief":
                 return String.appLocalized("tool.notice.calendar_no_content")
+            case "calendar_create":
+                return String.appLocalized("tool.notice.calendar_failed")
+            case "reminders_brief":
+                return String.appLocalized("tool.notice.reminders_no_content")
+            case "reminders_create":
+                return String.appLocalized("tool.notice.reminders_failed")
+            case "timer_create":
+                return String.appLocalized("tool.notice.timer_failed")
+            case "contacts_lookup":
+                return String.appLocalized("tool.notice.contacts_no_content")
+            case "current_datetime":
+                return String.appLocalized("tool.notice.datetime_failed")
             default:
                 return String.appLocalized("tool.notice.search_failed")
             }
@@ -962,8 +1002,16 @@ final class ChatViewModel {
                 return String.appLocalized("tool.notice.search_failed")
             case "document_synthesize":
                 return String.appLocalized("tool.notice.document_failed")
-            case "calendar_brief":
+            case "calendar_brief", "calendar_create":
                 return String.appLocalized("tool.notice.calendar_failed")
+            case "reminders_brief", "reminders_create":
+                return String.appLocalized("tool.notice.reminders_failed")
+            case "timer_create":
+                return String.appLocalized("tool.notice.timer_failed")
+            case "contacts_lookup":
+                return String.appLocalized("tool.notice.contacts_failed")
+            case "current_datetime":
+                return String.appLocalized("tool.notice.datetime_failed")
             default:
                 return String.appLocalized("tool.notice.search_failed")
             }
@@ -1003,6 +1051,9 @@ final class ChatViewModel {
         "sources=\(trace.sourceCount), duration=\(trace.durationSeconds.map { String(format: "%.2f", $0) } ?? "nil")s"
     }
 
+    /// Explicit memory commands use "remember …" / "forget …". Reminder creation is routed separately via
+    /// ToolCallingService using phrases like "remind me to …" (requires `to`), which avoids colliding with
+    /// "remind me of …" style memory prompts.
     @MainActor
     private func handleExplicitMemoryCommands(in text: String, userMessage: ChatMessage) -> Bool {
         var handledCommand = false

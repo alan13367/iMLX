@@ -5,6 +5,8 @@ nonisolated enum MessageSourceKind: String, Codable, Hashable {
     case image
     case web
     case calendar
+    case reminder
+    case contact
 }
 
 nonisolated struct MessageSource: Identifiable, Codable, Hashable {

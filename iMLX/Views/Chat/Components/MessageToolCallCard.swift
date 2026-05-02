@@ -247,6 +247,48 @@ enum MessageToolPresentation {
                 "calendar",
                 String(format: String.appLocalized("tool.activity.calendar_brief_range"), displayInput)
             )
+        case "calendar_create":
+            guard let displayInput, !displayInput.isEmpty else {
+                return ("calendar.badge.plus", String.appLocalized("tool.activity.calendar_create"))
+            }
+            return (
+                "calendar.badge.plus",
+                String(format: String.appLocalized("tool.activity.calendar_create_title"), displayInput)
+            )
+        case "current_datetime":
+            return ("clock", String.appLocalized("tool.activity.current_datetime"))
+        case "reminders_brief":
+            guard let displayInput, !displayInput.isEmpty else {
+                return ("checklist", String.appLocalized("tool.activity.reminders_brief"))
+            }
+            return (
+                "checklist",
+                String(format: String.appLocalized("tool.activity.reminders_brief_range"), displayInput)
+            )
+        case "reminders_create":
+            guard let displayInput, !displayInput.isEmpty else {
+                return ("checklist.checked", String.appLocalized("tool.activity.reminders_create"))
+            }
+            return (
+                "checklist.checked",
+                String(format: String.appLocalized("tool.activity.reminders_create_title"), displayInput)
+            )
+        case "timer_create":
+            guard let displayInput, !displayInput.isEmpty else {
+                return ("timer", String.appLocalized("tool.activity.timer_create"))
+            }
+            return (
+                "timer",
+                String(format: String.appLocalized("tool.activity.timer_create_duration"), displayInput)
+            )
+        case "contacts_lookup":
+            guard let displayInput, !displayInput.isEmpty else {
+                return ("person.crop.circle.badge.questionmark", String.appLocalized("tool.activity.contacts_lookup"))
+            }
+            return (
+                "person.crop.circle.badge.questionmark",
+                String(format: String.appLocalized("tool.activity.contacts_lookup_query"), displayInput)
+            )
         default:
             return nil
         }
@@ -274,6 +316,30 @@ enum MessageToolPresentation {
             return String.appLocalized("tool.trace.calendar_brief")
         case ("calendar_brief", false):
             return String.appLocalized("tool.trace.calendar_brief_failed")
+        case ("calendar_create", true):
+            return String.appLocalized("tool.trace.calendar_create")
+        case ("calendar_create", false):
+            return String.appLocalized("tool.trace.calendar_create_failed")
+        case ("current_datetime", true):
+            return String.appLocalized("tool.trace.current_datetime")
+        case ("current_datetime", false):
+            return String.appLocalized("tool.trace.current_datetime_failed")
+        case ("reminders_brief", true):
+            return String.appLocalized("tool.trace.reminders_brief")
+        case ("reminders_brief", false):
+            return String.appLocalized("tool.trace.reminders_brief_failed")
+        case ("reminders_create", true):
+            return String.appLocalized("tool.trace.reminders_create")
+        case ("reminders_create", false):
+            return String.appLocalized("tool.trace.reminders_create_failed")
+        case ("timer_create", true):
+            return String.appLocalized("tool.trace.timer_create")
+        case ("timer_create", false):
+            return String.appLocalized("tool.trace.timer_create_failed")
+        case ("contacts_lookup", true):
+            return String.appLocalized("tool.trace.contacts_lookup")
+        case ("contacts_lookup", false):
+            return String.appLocalized("tool.trace.contacts_lookup_failed")
         default:
             return success ? toolName : "\(toolName) Failed"
         }
@@ -286,6 +352,12 @@ enum MessageToolPresentation {
         case "web_search": "globe"
         case "document_synthesize": "doc.text.magnifyingglass"
         case "calendar_brief": "calendar"
+        case "calendar_create": "calendar.badge.plus"
+        case "current_datetime": "clock"
+        case "reminders_brief": "checklist"
+        case "reminders_create": "checklist.checked"
+        case "timer_create": "timer"
+        case "contacts_lookup": "person.crop.circle.badge.questionmark"
         default: "wand.and.stars"
         }
     }

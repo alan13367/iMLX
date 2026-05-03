@@ -23,15 +23,19 @@ actor WebSearchService {
 
     private let session: URLSession
 
-    init() {
-        let configuration = URLSessionConfiguration.ephemeral
-        // Web search should fail fast when the device is offline so chat can
-        // continue locally instead of appearing stalled while URLSession waits
-        // for connectivity to come back.
-        configuration.waitsForConnectivity = false
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 45
-        session = URLSession(configuration: configuration)
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            // Web search should fail fast when the device is offline so chat can
+            // continue locally instead of appearing stalled while URLSession waits
+            // for connectivity to come back.
+            configuration.waitsForConnectivity = false
+            configuration.timeoutIntervalForRequest = 30
+            configuration.timeoutIntervalForResource = 45
+            self.session = URLSession(configuration: configuration)
+        }
     }
 
     func retrieveContext(for query: String) async throws -> MessageGroundingResult {
@@ -49,8 +53,16 @@ actor WebSearchService {
         let queryVector = embedding(for: trimmedQuery, languageCode: detectLanguageCode(in: trimmedQuery))
 
         for result in searchResults.prefix(Constants.WebSearch.maxResults) {
-            guard let page = try await fetchReadablePage(for: result.url),
-                  !page.bodyText.isEmpty else { continue }
+            let page: ReadablePage?
+            do {
+                page = try await fetchReadablePage(for: result.url)
+            } catch {
+                if error.isAppTransportSecurityFailure {
+                    continue
+                }
+                throw error
+            }
+            guard let page, !page.bodyText.isEmpty else { continue }
             let chunks = chunkedText(page.bodyText)
             for chunk in chunks.prefix(Constants.WebSearch.maxChunksScoredPerPage) {
                 let lexicalScore = lexicalSimilarity(query: trimmedQuery, text: chunk)
@@ -256,13 +268,25 @@ actor WebSearchService {
     }
 
     private func resolvedSearchURL(from href: String) -> URL? {
+        let url: URL?
         if let components = URLComponents(string: href),
            let target = components.queryItems?.first(where: { $0.name == "uddg" })?.value,
            let decoded = target.removingPercentEncoding,
-           let url = URL(string: decoded) {
-            return url
+           let decodedURL = URL(string: decoded) {
+            url = decodedURL
+        } else {
+            url = URL(string: href)
         }
-        return URL(string: href)
+
+        guard let url else { return nil }
+
+        // Upgrade http to https to comply with ATS policy
+        if url.scheme?.lowercased() == "http" {
+            let httpsString = url.absoluteString.replacingOccurrences(of: "http://", with: "https://", options: .caseInsensitive)
+            return URL(string: httpsString) ?? url
+        }
+
+        return url
     }
 
     private func fetchReadablePage(for url: URL) async throws -> ReadablePage? {
@@ -437,5 +461,23 @@ actor WebSearchService {
             return nil
         }
         return normalizeWhitespace(String(html[titleRange]))
+    }
+}
+
+private extension Error {
+    nonisolated var isAppTransportSecurityFailure: Bool {
+        let urlError: URLError?
+        if let error = self as? URLError {
+            urlError = error
+        } else {
+            let nsError = self as NSError
+            if nsError.domain == NSURLErrorDomain {
+                urlError = URLError(.init(rawValue: nsError.code))
+            } else {
+                urlError = nil
+            }
+        }
+
+        return urlError?.code == .appTransportSecurityRequiresSecureConnection
     }
 }

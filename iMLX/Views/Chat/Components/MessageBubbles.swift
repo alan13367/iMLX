@@ -41,7 +41,6 @@ struct UserMessageBubble: View {
                             )
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .textSelection(.enabled)
             }
 
             MessageDeliveryStatusView(state: deliveryState, onRetry: onRetry)
@@ -147,7 +146,6 @@ struct AssistantMessageText: View {
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
         }
     }
 }

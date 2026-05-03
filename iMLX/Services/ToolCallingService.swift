@@ -199,6 +199,89 @@ private nonisolated enum ToolDateTimeParser {
         return formatter.string(from: date)
     }
 
+    static func explicitWeekdayStartDate(
+        in text: String,
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Date? {
+        let lower = text.lowercased()
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\b(?:on\s+)?(?:(next|this)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+with\s+.+?)?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b"#,
+            options: []
+        ) else {
+            return nil
+        }
+        let range = NSRange(lower.startIndex..., in: lower)
+        guard let match = regex.firstMatch(in: lower, options: [], range: range),
+              match.numberOfRanges >= 4,
+              let weekdayRange = Range(match.range(at: 2), in: lower),
+              let hourRange = Range(match.range(at: 3), in: lower) else {
+            return nil
+        }
+
+        let qualifier: String?
+        if match.range(at: 1).location != NSNotFound,
+           let qualifierRange = Range(match.range(at: 1), in: lower) {
+            qualifier = String(lower[qualifierRange])
+        } else {
+            qualifier = nil
+        }
+
+        let weekdayName = String(lower[weekdayRange])
+        let weekday: Int
+        switch weekdayName {
+        case "sunday": weekday = 1
+        case "monday": weekday = 2
+        case "tuesday": weekday = 3
+        case "wednesday": weekday = 4
+        case "thursday": weekday = 5
+        case "friday": weekday = 6
+        case "saturday": weekday = 7
+        default: return nil
+        }
+
+        var hour = Int(lower[hourRange]) ?? -1
+        let minute: Int
+        if match.range(at: 4).location != NSNotFound,
+           let minuteRange = Range(match.range(at: 4), in: lower) {
+            minute = Int(lower[minuteRange]) ?? -1
+        } else {
+            minute = 0
+        }
+
+        if match.range(at: 5).location != NSNotFound,
+           let meridiemRange = Range(match.range(at: 5), in: lower) {
+            let meridiem = String(lower[meridiemRange])
+            if meridiem == "pm", hour < 12 { hour += 12 }
+            if meridiem == "am", hour == 12 { hour = 0 }
+        }
+
+        guard (0...23).contains(hour), (0...59).contains(minute) else {
+            return nil
+        }
+
+        let startOfReferenceDay = calendar.startOfDay(for: referenceDate)
+        for dayOffset in 0...14 {
+            guard qualifier != "next" || dayOffset > 0,
+                  let day = calendar.date(byAdding: .day, value: dayOffset, to: startOfReferenceDay) else {
+                continue
+            }
+            guard calendar.component(.weekday, from: day) == weekday else {
+                continue
+            }
+            var components = calendar.dateComponents([.year, .month, .day], from: day)
+            components.hour = hour
+            components.minute = minute
+            components.second = 0
+            guard let date = calendar.date(from: components), date > referenceDate else {
+                continue
+            }
+            return date
+        }
+
+        return nil
+    }
+
     private static func parseRelativeDayTime(_ raw: String, referenceDate: Date, calendar: Calendar) -> Date? {
         let lower = raw.lowercased()
         guard let regex = try? NSRegularExpression(
@@ -1357,7 +1440,7 @@ actor ToolCallingService {
 
         switch toolDefinition.name {
         case "calendar_create":
-            return normalizedCalendarCreateArguments(validated)
+            return normalizedCalendarCreateArguments(validated, context: context)
         case "timer_create":
             return normalizedTimerCreateArguments(validated)
         case "contacts_lookup":
@@ -1380,7 +1463,8 @@ actor ToolCallingService {
     }
 
     private nonisolated func normalizedCalendarCreateArguments(
-        _ arguments: [String: String]
+        _ arguments: [String: String],
+        context: ToolInputContext?
     ) -> Result<[String: String], ToolExecutionFailure> {
         guard let title = arguments["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
               !title.isEmpty else {
@@ -1395,11 +1479,16 @@ actor ToolCallingService {
 
         let calendar = Calendar.current
         let startDate: Date
-        switch ToolDateTimeParser.parse(startRaw, calendar: calendar) {
-        case .success(let date):
-            startDate = date
-        case .failure(let failure):
-            return .failure(failure)
+        if let userMessage = context?.latestUserMessage,
+           let explicitWeekdayStart = ToolDateTimeParser.explicitWeekdayStartDate(in: userMessage, calendar: calendar) {
+            startDate = explicitWeekdayStart
+        } else {
+            switch ToolDateTimeParser.parse(startRaw, calendar: calendar) {
+            case .success(let date):
+                startDate = date
+            case .failure(let failure):
+                return .failure(failure)
+            }
         }
 
         let endDate: Date
@@ -1782,6 +1871,13 @@ actor ToolCallingService {
               url.host != nil else {
             return nil
         }
+
+        // Upgrade http to https to comply with ATS policy
+        if scheme == "http" {
+            let httpsString = url.absoluteString.replacingOccurrences(of: "http://", with: "https://", options: .caseInsensitive)
+            return URL(string: httpsString) ?? url
+        }
+
         return url
     }
 
@@ -2266,6 +2362,69 @@ actor ToolCallingService {
         let normalized = normalizeForHeuristicMatching(compact)
         guard messageLooksCalendarCreateAdjacent(normalized) else { return nil }
 
+        guard let weekdayWithParticipantRegex = try? NSRegularExpression(
+            pattern: #"(?i)\b(?:create|add|schedule|put)\b(?:\s+(?:a|an))?\s+(?:calendar\s+)?(event|meeting|appointment)\s+for\s+((?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\s+with\s+(.+?)\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$"#
+        ) else {
+            return nil
+        }
+        if let match = weekdayWithParticipantRegex.firstMatch(
+            in: compact,
+            options: [],
+            range: NSRange(compact.startIndex..., in: compact)
+        ),
+           match.numberOfRanges == 5,
+           let kindRange = Range(match.range(at: 1), in: compact),
+           let weekdayRange = Range(match.range(at: 2), in: compact),
+           let participantRange = Range(match.range(at: 3), in: compact),
+           let timeRange = Range(match.range(at: 4), in: compact) {
+            let kind = sanitizeRecoveredQuery(String(compact[kindRange])).capitalized
+            let weekday = sanitizeRecoveredQuery(String(compact[weekdayRange]))
+            let participant = sanitizeRecoveredQuery(String(compact[participantRange]))
+            let time = sanitizeRecoveredQuery(String(compact[timeRange]))
+            guard !kind.isEmpty, !weekday.isEmpty, !participant.isEmpty, !time.isEmpty else {
+                return nil
+            }
+            return [
+                "title": "\(kind) with \(participant)",
+                "start": "\(weekday) at \(time)",
+                "end_or_duration": "1 hour"
+            ]
+        }
+
+        let meetingPatterns = [
+            #"(?i)\b(?:create|add|schedule|put)\b(?:\s+(?:a|an))?\s+(?:calendar\s+)?(event|meeting|appointment)\s+for\s+((?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+with\s+(.+)$"#,
+            #"(?i)\b(?:create|add|schedule|put)\b(?:\s+(?:a|an))?\s+(?:calendar\s+)?(event|meeting|appointment)\s+with\s+(.+?)\s+for\s+((?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$"#
+        ]
+        for (index, pattern) in meetingPatterns.enumerated() {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(
+                    in: compact,
+                    options: [],
+                    range: NSRange(compact.startIndex..., in: compact)
+                  ),
+                  match.numberOfRanges == 4,
+                  let kindRange = Range(match.range(at: 1), in: compact) else {
+                continue
+            }
+
+            let startCaptureIndex = index == 0 ? 2 : 3
+            let participantCaptureIndex = index == 0 ? 3 : 2
+            guard let startRange = Range(match.range(at: startCaptureIndex), in: compact),
+                  let participantRange = Range(match.range(at: participantCaptureIndex), in: compact) else {
+                continue
+            }
+
+            let kind = sanitizeRecoveredQuery(String(compact[kindRange])).capitalized
+            let participant = sanitizeRecoveredQuery(String(compact[participantRange]))
+            let start = sanitizeRecoveredQuery(String(compact[startRange]))
+            guard !kind.isEmpty, !participant.isEmpty, !start.isEmpty else { continue }
+            return [
+                "title": "\(kind) with \(participant)",
+                "start": start,
+                "end_or_duration": "1 hour"
+            ]
+        }
+
         guard let regex = try? NSRegularExpression(
             pattern: #"(?i)\b(?:create|add|schedule|put)\b(?:\s+(?:a|an))?(?:\s+(?:calendar\s+)?(?:event|meeting|appointment))?\s+(.+?)\s+(?:at|on)\s+((?:\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(?::\d{2})?)|(?:today|tomorrow)\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(?:for|lasting)\s+(.+)$"#
         ) else {
@@ -2643,6 +2802,13 @@ private struct ReadURLToolExecutor: ToolExecutor {
               url.host != nil else {
             return nil
         }
+
+        // Upgrade http to https to comply with ATS policy
+        if scheme == "http" {
+            let httpsString = url.absoluteString.replacingOccurrences(of: "http://", with: "https://", options: .caseInsensitive)
+            return URL(string: httpsString) ?? url
+        }
+
         return url
     }
 }

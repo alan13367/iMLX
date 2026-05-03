@@ -575,6 +575,34 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertTrue(request.arguments["end_or_duration"]?.contains("T") == true)
     }
 
+    func testCalendarCreatePrefersExplicitWeekdayFromUserMessage() throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Create a meeting for next Thursday at 15:00 pm with Marc",
+            attachedImages: [],
+            detectedPublicURLs: []
+        )
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"calendar_create","args":{"title":"Meeting with Marc","start":"tomorrow 15:00","end_or_duration":"1 hour"}}"#,
+            tools: [calendarCreateTool],
+            context: context
+        )
+
+        guard case .call(let request) = decision,
+              let startRaw = request.arguments["start"],
+              let startDate = ISO8601DateFormatter().date(from: startRaw) else {
+            return XCTFail("Expected a calendar_create call with an ISO start")
+        }
+
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.weekday, .hour, .minute], from: startDate)
+        XCTAssertEqual(components.weekday, 5)
+        XCTAssertEqual(components.hour, 15)
+        XCTAssertEqual(components.minute, 0)
+        XCTAssertNotEqual(calendar.startOfDay(for: startDate), calendar.startOfDay(for: Date().addingTimeInterval(86_400)))
+    }
+
     func testInvalidCalendarCreateMissingConcreteTimeFailsClosed() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
@@ -585,6 +613,72 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
 
         XCTAssertEqual(decision, .none)
+    }
+
+    func testPreflightScheduleMeetingWithExplicitWeekdayCreatesEvent() throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let message = "Schedule a meeting for next Wednesday at 16:00 pm with Marc"
+        let context = ToolInputContext(
+            latestUserMessage: message,
+            attachedImages: [],
+            detectedPublicURLs: []
+        )
+
+        let decision = service.preflightDecision(
+            userMessage: message,
+            context: context,
+            tools: [calendarTool, calendarCreateTool]
+        )
+
+        guard case .skip(.call(let request)) = decision,
+              let startRaw = request.arguments["start"],
+              let endRaw = request.arguments["end_or_duration"],
+              let startDate = ISO8601DateFormatter().date(from: startRaw),
+              let endDate = ISO8601DateFormatter().date(from: endRaw) else {
+            return XCTFail("Expected preflight to create a calendar event with ISO dates")
+        }
+
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.weekday, .hour, .minute], from: startDate)
+        XCTAssertEqual(request.toolName, "calendar_create")
+        XCTAssertEqual(request.arguments["title"], "Meeting with Marc")
+        XCTAssertEqual(components.weekday, 4)
+        XCTAssertEqual(components.hour, 16)
+        XCTAssertEqual(components.minute, 0)
+        XCTAssertEqual(endDate.timeIntervalSince(startDate), 3_600)
+    }
+
+    func testPreflightScheduleMeetingWithParticipantBeforeTimeCreatesEvent() throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let message = "Schedule a meeting for next Friday with Alex at 18:00 pm"
+        let context = ToolInputContext(
+            latestUserMessage: message,
+            attachedImages: [],
+            detectedPublicURLs: []
+        )
+
+        let decision = service.preflightDecision(
+            userMessage: message,
+            context: context,
+            tools: [calendarTool, calendarCreateTool]
+        )
+
+        guard case .skip(.call(let request)) = decision,
+              let startRaw = request.arguments["start"],
+              let endRaw = request.arguments["end_or_duration"],
+              let startDate = ISO8601DateFormatter().date(from: startRaw),
+              let endDate = ISO8601DateFormatter().date(from: endRaw) else {
+            return XCTFail("Expected preflight to create a calendar event with ISO dates")
+        }
+
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.weekday, .hour, .minute], from: startDate)
+        XCTAssertEqual(request.toolName, "calendar_create")
+        XCTAssertEqual(request.arguments["title"], "Meeting with Alex")
+        XCTAssertEqual(components.weekday, 6)
+        XCTAssertEqual(components.hour, 18)
+        XCTAssertEqual(components.minute, 0)
+        XCTAssertEqual(endDate.timeIntervalSince(startDate), 3_600)
     }
 
     func testPreflightTimerCreateNormalizesDuration() {

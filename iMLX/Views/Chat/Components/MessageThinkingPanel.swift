@@ -107,7 +107,6 @@ struct MessageThinkingPanel: View {
         MessageMarkdownText(text: text, isStreaming: isStreaming, linkTint: BrandPalette.accent)
             .font(.callout)
             .foregroundStyle(.secondary)
-            .textSelection(.enabled)
             .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
@@ -144,7 +143,6 @@ struct MessageMarkdownText: View {
                 .textual.paragraphStyle(IMLXChatParagraphStyle())
                 .textual.codeBlockStyle(IMLXChatCodeBlockStyle())
                 .textual.overflowMode(.scroll)
-                .textual.textSelection(.enabled)
                 .tint(linkTint)
         }
     }

@@ -696,6 +696,7 @@ private struct ChatToolbarMenu: View {
         } label: {
             Image(systemName: "line.3.horizontal")
         }
+        .tint(.primary)
         .accessibilityLabel("Open app menu")
     }
 }
@@ -775,6 +776,7 @@ private struct ChatModelStatusMenu: View {
                 loadedModelDisplayName: loadedModelDisplayName
             )
         }
+        .tint(.primary)
         .menuOrder(.fixed)
         .accessibilityLabel(
             loadedModelDisplayName == nil
@@ -1395,6 +1397,7 @@ private struct ChatComposerSection: View {
                             interactive: true
                         )
                 }
+                .tint(.primary)
                 .frame(width: 44, height: 44)
                 .accessibilityLabel("Add attachment")
 

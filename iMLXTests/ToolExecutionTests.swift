@@ -298,6 +298,50 @@ final class ToolExecutionTests: XCTestCase {
         XCTAssertEqual(arguments["title"], "Pasta")
     }
 
+    func testWebSearchSkipsATSBlockedResultPages() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebSearchMockURLProtocol.self]
+        WebSearchMockURLProtocol.requestHandler = { request in
+            guard let url = request.url else {
+                throw URLError(.badURL)
+            }
+
+            if url.host == "html.duckduckgo.com" {
+                let html = """
+                <html><body>
+                <a class="result__a" href="/l/?uddg=https%3A%2F%2Fblocked.example%2Fgold">Blocked result</a>
+                <a class="result__a" href="/l/?uddg=https%3A%2F%2Fvalid.example%2Fgold">Gold price source</a>
+                </body></html>
+                """
+                return Self.htmlResponse(url: url, html: html)
+            }
+
+            if url.host == "blocked.example" {
+                throw URLError(.appTransportSecurityRequiresSecureConnection)
+            }
+
+            if url.host == "valid.example" {
+                let html = """
+                <html>
+                <head><title>Gold price source</title></head>
+                <body>Gold spot price today is listed per troy ounce with current precious metals market data.</body>
+                </html>
+                """
+                return Self.htmlResponse(url: url, html: html)
+            }
+
+            throw URLError(.badURL)
+        }
+        defer { WebSearchMockURLProtocol.requestHandler = nil }
+
+        let service = WebSearchService(session: URLSession(configuration: configuration))
+        let result = try await service.retrieveContext(for: "What is the price for gold today?")
+
+        XCTAssertFalse(result.contextBlock.isEmpty)
+        XCTAssertTrue(result.contextBlock.contains("Gold spot price today"))
+        XCTAssertEqual(result.sources.map { $0.url?.host }, ["valid.example"])
+    }
+
     func testExecuteContactsLookupPassesTrimmedQueryToExecutor() async throws {
         let service = ToolCallingService(webSearchService: WebSearchService())
         let recorder = ArgumentRecorder()
@@ -371,6 +415,46 @@ final class ToolExecutionTests: XCTestCase {
             detectedPublicURLs: []
         )
     }
+
+    private static func htmlResponse(url: URL, html: String) -> (HTTPURLResponse, Data) {
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "text/html; charset=utf-8"]
+        )!
+        return (response, Data(html.utf8))
+    }
+}
+
+private final class WebSearchMockURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let requestHandler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        do {
+            let (response, data) = try requestHandler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
 
 private struct ThrowingExecutor: ToolExecutor {

@@ -5792,19 +5792,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Calendar Event"
+            "value" : "Create Event"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Evento de calendario"
+            "value" : "Crear evento"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "日历事件"
+            "value" : "创建事件"
           }
         }
       }

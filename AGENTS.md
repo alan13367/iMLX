@@ -97,18 +97,22 @@ xcodebuild -downloadComponent MetalToolchain
 12. Do not treat enabling Web Search as permission to always search. Search is now a tool decision, not a side effect of the toggle.
 13. `read_url` and OCR are grounded only in the latest user turn in v1. Do not silently scrape older messages or attachments when planning/executing these tools.
 14. `read_url` v1 is for a single public `http/https` URL in the latest message. Multiple URLs should force clarification instead of arbitrary selection.
+15. AlarmKit (`timer_create`) requires three things to coexist or `AlarmManager.shared.requestAuthorization()` and `schedule(...)` will fail immediately with the opaque `com.apple.AlarmKit.Alarm` code 1 NSError: (a) `NSAlarmKitUsageDescription` actually present in the runtime `Info.plist`, (b) `NSSupportsLiveActivities = YES`, (c) an embedded Widget Extension that registers an `ActivityConfiguration(for: AlarmAttributes<IMLXTimerMetadata>.self)`. Do not assume a missing key in `Info.plist` would have shown a permission dialog — AlarmKit fails silently before the dialog is ever presented.
 
 ## Codebase Map
 
 ```text
 iMLX/
-├── App/          App entry and root navigation shell
-├── Models/       App state and persisted data models
-├── ViewModels/   Chat and model-management state
-├── Views/        SwiftUI screens and components
-├── Services/     Inference, downloads, persistence, memory, documents
-├── Utilities/    Constants, localization, styling, helpers
+├── App/                  App entry and root navigation shell
+├── Models/               App state and persisted data models
+├── ViewModels/           Chat and model-management state
+├── Views/                SwiftUI screens and components
+├── Services/             Inference, downloads, persistence, memory, documents
+├── Utilities/            Constants, localization, styling, helpers
 └── Assets.xcassets/
+iMLXAlarmWidget/          Widget Extension (Live Activity for AlarmKit timers)
+iMLXInfo.plist            Main app Info.plist (holds keys Xcode 26 won't auto-inject, e.g. NSAlarmKitUsageDescription)
+iMLXAlarmWidgetInfo.plist Widget Extension Info.plist (NSExtension WidgetKit point)
 ```
 
 High-value files:
@@ -132,6 +136,10 @@ High-value files:
 - `iMLX/Views/Chat/ChatView.swift`
 - `iMLX/Utilities/Constants.swift`
 - `iMLX/Localizable.xcstrings`
+- `iMLX/Services/TimerService.swift`
+- `iMLX/Services/IMLXTimerMetadata.swift` (shared with the widget extension target via a `PBXFileSystemSynchronizedBuildFileExceptionSet`)
+- `iMLXAlarmWidget/IMLXAlarmWidgetBundle.swift`
+- `iMLXAlarmWidget/IMLXAlarmLiveActivity.swift`
 - `iMLXTests/ToolPlannerParsingTests.swift`
 - `iMLXTests/ToolRegistryTests.swift`
 - `iMLXTests/ToolExecutionTests.swift`
@@ -186,6 +194,22 @@ High-value files:
   7. `reminders_brief` for todo/reminder list requests
   8. `web_search` heuristics for obvious live-data requests when planner output fails on some thinking-oriented models
 - Persisted tool traces are stored on assistant `ChatMessage`s. Backward compatibility matters because older conversation JSON may still decode `rewrittenQuery` instead of `displayInput`.
+
+## AlarmKit / Timer Tool
+
+`timer_create` runs through `TimerService` (`iMLX/Services/TimerService.swift`) and `AlarmManager.shared`. Getting it to work on iOS 26 required three things that are easy to overlook:
+
+1. **`NSAlarmKitUsageDescription` must actually be in the built `Info.plist`.** Xcode 26.4's `INFOPLIST_KEY_*` auto-injection has a hard-coded allowlist that does **not** include `NSAlarmKitUsageDescription`. Setting `INFOPLIST_KEY_NSAlarmKitUsageDescription = "..."` in build settings is silently dropped. The fix in this project is to ship an actual `iMLXInfo.plist` at the repo root and point `INFOPLIST_FILE = iMLXInfo.plist;` for both Debug and Release of the `iMLX` target. `GENERATE_INFOPLIST_FILE = YES` stays on, so the rest of the recognized `INFOPLIST_KEY_*` values still merge in. If you ever need to add another usage description that Xcode refuses to auto-inject, add it to `iMLXInfo.plist`, not to build settings.
+2. **A Widget Extension target (`iMLXAlarmWidgetExtension`) must be embedded in the app bundle**, registering `ActivityConfiguration(for: AlarmAttributes<IMLXTimerMetadata>.self)`. Without this, `schedule(...)` fails with the same opaque `com.apple.AlarmKit.Alarm` code 1 NSError. `IMLXTimerMetadata` lives in `iMLX/Services/IMLXTimerMetadata.swift` and is shared into the widget target via a `PBXFileSystemSynchronizedBuildFileExceptionSet` so both modules link against the same concrete `AlarmAttributes<IMLXTimerMetadata>` symbol.
+3. **Use `AlarmManager.AlarmConfiguration.timer(duration:attributes:)`**, not the generic `AlarmConfiguration(countdownDuration:attributes:)` initializer. The generic `countdownDuration:` shape (without a schedule, stop intent, and secondary intent) is interpreted as a malformed alarm and rejected as code 1.
+
+The project keeps the widget extension's `Info.plist` (`iMLXAlarmWidgetInfo.plist`) outside the synchronized `iMLXAlarmWidget/` folder so Xcode doesn't double-process it as both Info.plist and a bundled resource (which previously broke the build with "Multiple commands produce ... Info.plist").
+
+`AlarmManager.AlarmError` only exposes `.maximumLimitReached` on iOS 26.4 — there is no `.notAuthorized` case. Treat any other thrown error as a generic `NSError` and surface its `domain`, `code`, and `userInfo` instead of trying to map by `code == 1`. The `code == 1` value is a catch-all and has historically masked at least three different root causes.
+
+AlarmKit and Live Activities do not run on the iOS Simulator. The simulator is fine for verifying that the widget extension is being built, signed, and embedded under `iMLX.app/PlugIns/iMLXAlarmWidgetExtension.appex`, but you must run on a physical device to exercise `requestAuthorization()` or `schedule(...)`.
+
+When changing anything in the AlarmKit path, fully delete the app from the device (long-press → Remove App) before reinstalling. AlarmKit caches the previously-registered `AlarmAttributes<Metadata>` widget set at install time, and an incremental install can re-use the stale registration and keep failing for reasons unrelated to your change.
 
 ## TTS Checkpoints
 

@@ -2980,6 +2980,12 @@
     "Open Live Voice" : {
 
     },
+    "Pause" : {
+
+    },
+    "Paused" : {
+
+    },
     "persona.code-reviewer.goal" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3982,6 +3988,9 @@
 
     },
     "Replay onboarding" : {
+
+    },
+    "Resume" : {
 
     },
     "Retrieval diagnostics" : {

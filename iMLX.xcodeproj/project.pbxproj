@@ -19,6 +19,7 @@
 		E74248D72F7D2670003ECA6B /* MLXLMTokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P010 /* MLXLMTokenizers */; };
 		E74248D82F7D2670003ECA6B /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P011 /* Textual */; };
 		E7C100012F9000010061F6D5 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E7C100032F9000010061F6D5 /* XCTest.framework */; };
+		E7A1A10E2F9001000001A10E /* iMLXAlarmWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E7A1A1012F9001000001A101 /* iMLXAlarmWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -29,18 +30,58 @@
 			remoteGlobalIDString = E73069FF2F7D21010061F6D5;
 			remoteInfo = iMLX;
 		};
+		E7A1A10B2F9001000001A10B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E73069F82F7D21010061F6D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E7A1A1022F9001000001A102;
+			remoteInfo = iMLXAlarmWidgetExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		E7A1A10D2F9001000001A10D /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				E7A1A10E2F9001000001A10E /* iMLXAlarmWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		E7306A002F7D21010061F6D5 /* iMLX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iMLX.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E7C100022F9000010061F6D5 /* iMLXTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iMLXTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E7C100032F9000010061F6D5 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		E7A1A1012F9001000001A101 /* iMLXAlarmWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = iMLXAlarmWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		E7A1A10A2F9001000001A10A /* Exceptions for "iMLX" folder in "iMLXAlarmWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Services/IMLXTimerMetadata.swift,
+			);
+			target = E7A1A1022F9001000001A102 /* iMLXAlarmWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		E7306A022F7D21010061F6D5 /* iMLX */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				E7A1A10A2F9001000001A10A /* Exceptions for "iMLX" folder in "iMLXAlarmWidgetExtension" target */,
+			);
 			path = iMLX;
+			sourceTree = "<group>";
+		};
+		E7A1A1092F9001000001A109 /* iMLXAlarmWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = iMLXAlarmWidget;
 			sourceTree = "<group>";
 		};
 		E7C100042F9000010061F6D5 /* iMLXTests */ = {
@@ -77,6 +118,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E7A1A1042F9001000001A104 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -92,6 +140,7 @@
 			isa = PBXGroup;
 			children = (
 				E7306A022F7D21010061F6D5 /* iMLX */,
+				E7A1A1092F9001000001A109 /* iMLXAlarmWidget */,
 				E7C100042F9000010061F6D5 /* iMLXTests */,
 				E7306A012F7D21010061F6D5 /* Products */,
 				E70E10602F96CCC500CA643C /* Recovered References */,
@@ -103,6 +152,7 @@
 			children = (
 				E7306A002F7D21010061F6D5 /* iMLX.app */,
 				E7C100022F9000010061F6D5 /* iMLXTests.xctest */,
+				E7A1A1012F9001000001A101 /* iMLXAlarmWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -117,10 +167,12 @@
 				E73069FC2F7D21010061F6D5 /* Sources */,
 				E73069FD2F7D21010061F6D5 /* Frameworks */,
 				E73069FE2F7D21010061F6D5 /* Resources */,
+				E7A1A10D2F9001000001A10D /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				E7A1A10C2F9001000001A10C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				E7306A022F7D21010061F6D5 /* iMLX */,
@@ -166,6 +218,26 @@
 			productReference = E7C100022F9000010061F6D5 /* iMLXTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		E7A1A1022F9001000001A102 /* iMLXAlarmWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E7A1A1062F9001000001A106 /* Build configuration list for PBXNativeTarget "iMLXAlarmWidgetExtension" */;
+			buildPhases = (
+				E7A1A1032F9001000001A103 /* Sources */,
+				E7A1A1042F9001000001A104 /* Frameworks */,
+				E7A1A1052F9001000001A105 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E7A1A1092F9001000001A109 /* iMLXAlarmWidget */,
+			);
+			name = iMLXAlarmWidgetExtension;
+			productName = iMLXAlarmWidgetExtension;
+			productReference = E7A1A1012F9001000001A101 /* iMLXAlarmWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -177,6 +249,9 @@
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					E73069FF2F7D21010061F6D5 = {
+						CreatedOnToolsVersion = 26.4;
+					};
+					E7A1A1022F9001000001A102 = {
 						CreatedOnToolsVersion = 26.4;
 					};
 					E7C100062F9000010061F6D5 = {
@@ -210,6 +285,7 @@
 			projectRoot = "";
 			targets = (
 				E73069FF2F7D21010061F6D5 /* iMLX */,
+				E7A1A1022F9001000001A102 /* iMLXAlarmWidgetExtension */,
 				E7C100062F9000010061F6D5 /* iMLXTests */,
 			);
 		};
@@ -224,6 +300,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		E7C100082F9000010061F6D5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E7A1A1052F9001000001A105 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -247,6 +330,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E7A1A1032F9001000001A103 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -254,6 +344,11 @@
 			isa = PBXTargetDependency;
 			target = E73069FF2F7D21010061F6D5 /* iMLX */;
 			targetProxy = E7C100072F9000010061F6D5 /* PBXContainerItemProxy */;
+		};
+		E7A1A10C2F9001000001A10C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E7A1A1022F9001000001A102 /* iMLXAlarmWidgetExtension */;
+			targetProxy = E7A1A10B2F9001000001A10B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -388,7 +483,7 @@
 				DEVELOPMENT_TEAM = M77ZNJA6C8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSAlarmKitUsageDescription = "We need alarm access to start timers locally when you ask.";
+				INFOPLIST_FILE = iMLXInfo.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to capture photos for visual models.";
@@ -396,6 +491,7 @@
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access for live voice conversations.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "We need reminders access to brief and create your reminders locally when you ask.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "We need speech recognition to transcribe your voice locally for live conversations.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -429,7 +525,7 @@
 				DEVELOPMENT_TEAM = M77ZNJA6C8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSAlarmKitUsageDescription = "We need alarm access to start timers locally when you ask.";
+				INFOPLIST_FILE = iMLXInfo.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to capture photos for visual models.";
@@ -437,6 +533,7 @@
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access for live voice conversations.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "We need reminders access to brief and create your reminders locally when you ask.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "We need speech recognition to transcribe your voice locally for live conversations.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -515,6 +612,77 @@
 			};
 			name = Release;
 		};
+		E7A1A1072F9001000001A107 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = iMLXAlarmWidgetInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "iMLX Alarms";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX.AlarmWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E7A1A1082F9001000001A108 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = iMLXAlarmWidgetInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "iMLX Alarms";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX.AlarmWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -541,6 +709,15 @@
 			buildConfigurations = (
 				E7C1000B2F9000010061F6D5 /* Debug */,
 				E7C1000C2F9000010061F6D5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E7A1A1062F9001000001A106 /* Build configuration list for PBXNativeTarget "iMLXAlarmWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E7A1A1072F9001000001A107 /* Debug */,
+				E7A1A1082F9001000001A108 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

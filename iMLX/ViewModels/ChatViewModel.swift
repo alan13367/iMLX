@@ -923,8 +923,13 @@ final class ChatViewModel {
                 return title
             }
             if let duration = request.arguments["duration"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               let seconds = Int(duration) {
-                return "\(seconds)s"
+               let totalSeconds = Int(duration) {
+                let hours = totalSeconds / 3600
+                let minutes = (totalSeconds % 3600) / 60
+                let secs = totalSeconds % 60
+                if hours > 0 { return "\(hours)h \(minutes)m" }
+                if minutes > 0 { return "\(minutes)m \(secs)s" }
+                return "\(secs)s"
             }
             return request.arguments["duration"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         case "contacts_lookup":

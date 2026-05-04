@@ -133,8 +133,8 @@ actor MemoryStore {
                         id: memory.id,
                         canonicalText: memory.content,
                         status: memory.status,
-                        scopeType: memory.personaId == nil ? .global : .persona,
-                        personaId: memory.personaId,
+                        scopeType: .global,
+                        personaId: nil,
                         captureType: memory.captureType,
                         category: memory.category,
                         salience: memory.captureType == .explicit ? 0.92 : 0.74,
@@ -153,8 +153,8 @@ actor MemoryStore {
                         id: memory.id,
                         canonicalText: memory.content,
                         status: memory.status,
-                        scopeType: memory.personaId == nil ? .global : .persona,
-                        personaId: memory.personaId,
+                        scopeType: .global,
+                        personaId: nil,
                         captureType: memory.captureType,
                         category: memory.category,
                         salience: memory.captureType == .explicit ? 0.92 : 0.74,
@@ -364,8 +364,8 @@ actor MemoryStore {
             guard var item = try MemoryItemRecord.fetchOne(db, key: memory.id) else { return nil }
             item.canonicalText = memory.content
             item.status = memory.status
-            item.scopeType = memory.personaId == nil ? .global : .persona
-            item.personaId = memory.personaId
+            item.scopeType = .global
+            item.personaId = nil
             item.captureType = memory.captureType
             item.category = memory.category
             item.updatedAt = memory.updatedAt
@@ -401,7 +401,6 @@ actor MemoryStore {
     func candidateSummaries(
         for query: String,
         signature: MemoryFactSignature?,
-        personaId: String?,
         statuses: [UserMemoryStatus],
         mode: MemoryCandidateScopeMode,
         factLimit: Int = 48,
@@ -422,7 +421,6 @@ actor MemoryStore {
             append(try candidateFactIDs(
                 in: db,
                 signature: signature,
-                personaId: personaId,
                 statuses: statuses,
                 mode: mode,
                 limit: factLimit
@@ -430,14 +428,12 @@ actor MemoryStore {
             append(try candidateFTSIDs(
                 in: db,
                 query: query,
-                personaId: personaId,
                 statuses: statuses,
                 mode: mode,
                 limit: ftsLimit
             ))
             append(try recentCandidateIDs(
                 in: db,
-                personaId: personaId,
                 statuses: statuses,
                 mode: mode,
                 limit: recentLimit
@@ -642,13 +638,12 @@ actor MemoryStore {
     private func candidateFactIDs(
         in db: Database,
         signature: MemoryFactSignature?,
-        personaId: String?,
         statuses: [UserMemoryStatus],
         mode: MemoryCandidateScopeMode,
         limit: Int
     ) throws -> [UUID] {
         guard let signature else { return [] }
-        let (scopeSQL, scopeArgs) = scopeFilter(personaId: personaId, mode: mode)
+        let (scopeSQL, scopeArgs) = scopeFilter(mode: mode)
         let statusSQL = statusFilter(statuses: statuses)
 
         var sql = """
@@ -690,7 +685,6 @@ actor MemoryStore {
     private func candidateFTSIDs(
         in db: Database,
         query: String,
-        personaId: String?,
         statuses: [UserMemoryStatus],
         mode: MemoryCandidateScopeMode,
         limit: Int
@@ -700,7 +694,7 @@ actor MemoryStore {
         let match = tokens
             .map { "\"\($0.replacingOccurrences(of: "\"", with: ""))\"*" }
             .joined(separator: " OR ")
-        let (scopeSQL, scopeArgs) = scopeFilter(personaId: personaId, mode: mode)
+        let (scopeSQL, scopeArgs) = scopeFilter(mode: mode)
         let statusSQL = statusFilter(statuses: statuses)
         let sql = """
             SELECT mi.id
@@ -722,12 +716,11 @@ actor MemoryStore {
 
     private func recentCandidateIDs(
         in db: Database,
-        personaId: String?,
         statuses: [UserMemoryStatus],
         mode: MemoryCandidateScopeMode,
         limit: Int
     ) throws -> [UUID] {
-        let (scopeSQL, scopeArgs) = scopeFilter(personaId: personaId, mode: mode)
+        let (scopeSQL, scopeArgs) = scopeFilter(mode: mode)
         let statusSQL = statusFilter(statuses: statuses)
         let sql = """
             SELECT mi.id
@@ -920,17 +913,11 @@ actor MemoryStore {
         )
     }
 
-    private func scopeFilter(personaId: String?, mode: MemoryCandidateScopeMode) -> (String, [DatabaseValueConvertible?]) {
+    private func scopeFilter(mode: MemoryCandidateScopeMode) -> (String, [DatabaseValueConvertible?]) {
         switch mode {
         case .retrieval:
-            if let personaId {
-                return ("(mi.personaId IS NULL OR mi.personaId = ?)", [personaId])
-            }
-            return ("mi.personaId IS NULL", [])
+            return ("1 = 1", [])
         case .conflict:
-            if let personaId {
-                return ("(mi.personaId IS NULL OR mi.personaId = ?)", [personaId])
-            }
             return ("1 = 1", [])
         }
     }

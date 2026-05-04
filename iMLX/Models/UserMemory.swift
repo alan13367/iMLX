@@ -20,14 +20,11 @@ nonisolated enum UserMemoryStatus: String, Codable, CaseIterable, DatabaseValueC
 
 nonisolated enum MemoryScopeType: String, Codable, CaseIterable, DatabaseValueConvertible {
     case global
-    case persona
 
     var displayName: String {
         switch self {
         case .global:
             String.appLocalized("memory.scope.global")
-        case .persona:
-            String.appLocalized("memory.scope.persona")
         }
     }
 }
@@ -61,7 +58,6 @@ nonisolated enum MemoryEventKind: String, Codable, CaseIterable, DatabaseValueCo
 nonisolated enum MemoryRetrievalExplanationKind: String, Codable, CaseIterable {
     case matchedFact = "matched_fact"
     case matchedTopic = "matched_topic"
-    case samePersona = "same_persona"
     case recentRelevant = "recent_relevant"
     case sourceQuoteOverlap = "source_quote_overlap"
 }

@@ -20,7 +20,7 @@ iMLX is a native app for streaming, multi-turn chat with curated MLX models: dow
 |------|----------------|
 | **Inference** | On-device MLX, streaming tokens, inline generation metrics |
 | **Models** | Browser, downloads, device-aware picks, load/unload from Chat and Models |
-| **Personas** | Reusable roles (goal, tone, optional default model); editor under **Settings → Personas**; per-chat persona + picker; starters + custom personas |
+| **Assistant** | Global system prompt and temperature; edited under **Settings → Assistant** |
 | **Chat** | Saved conversations, history from the toolbar, chat-first launch |
 | **Memory** | Private on-device user memories, multilingual extraction, review queue, local retrieval for personalization |
 | **Thinking** | Per-model toggle where the model supports `enable_thinking` |
@@ -49,11 +49,10 @@ Retrieval stays local and synchronous. The app uses a bounded local pipeline: FT
 iMLX keeps the main assistant loop local:
 
 - `InferenceService` serializes MLX model work and streams tokens back to the chat UI.
-- `ChatViewModel` rebuilds prompt context from the visible conversation, selected persona, relevant memories, and retrieved documents.
+- `ChatViewModel` rebuilds prompt context from the visible conversation, relevant memories, and retrieved documents.
 - `MemorySystem` is the app-facing memory facade.
 - `MemoryStore` owns GRDB persistence, migrations, and transactional writes.
 - `MemoryRetrievalService` retrieves only the memories that look relevant to the next turn and records why they were chosen.
-- `PersonaService` seeds built-in assistants and saves custom personas.
 - `DocumentLibraryService` imports local files, chunks content, indexes it, and retrieves relevant snippets for chat context.
 
 The app is designed to degrade clearly when a feature cannot run, such as MLX inference on Simulator.
@@ -111,13 +110,13 @@ xcodebuild build \
 ```text
 iMLX/
 ├── App/
-├── Models/          # Persona, Conversation, ChatMessage, …
-├── Services/        # Inference, downloads, memory, documents, personas
+├── Models/          # Conversation, ChatMessage, UserMemory, …
+├── Services/        # Inference, downloads, memory, documents
 ├── Utilities/
 ├── ViewModels/
 └── Views/
-    ├── Chat/        # e.g. PersonaPickerSheet
-    └── Settings/    # e.g. PersonaLibraryView, PersonaEditorView
+    ├── Chat/        # ChatView, composer, message components
+    └── Settings/    # SettingsView, MemoryLibraryView, AssistantSettingsView
 ```
 
 ---

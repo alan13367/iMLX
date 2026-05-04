@@ -289,7 +289,6 @@ nonisolated enum Constants {
     enum Storage {
         static let modelsDirectory = "Models"
         static let conversationsDirectory = "Conversations"
-        static let personasDirectory = "Personas"
         static let memoriesDirectory = "Memories"
         static let memoriesFilename = "user_memories.json"
         static let documentsDirectory = "Documents"
@@ -304,6 +303,9 @@ nonisolated enum Constants {
 
     enum Generation {
         static let defaultTemperature: Float = 0.7
+        static let defaultSystemPrompt = """
+        You are iMLX, a helpful local AI assistant running on the user's device. Give clear, practical answers, point out uncertainty when needed, and keep responses grounded in the conversation and any provided context.
+        """
         static let defaultTopP: Float = 1.0
         static let defaultRepetitionPenalty: Float = 1.0
         static let standardMaxTokens = 4096
@@ -359,7 +361,6 @@ nonisolated enum Constants {
         static let coreIdentityRetrievalScore = 0.14
         static let duplicateScoreThreshold = 0.82
         static let forgetMatchThreshold = 0.35
-        static let personaMatchBoost = 0.12
         static let globalMemoryBoost = 0.04
         static let substringMatchBoost = 0.25
     }

@@ -5,7 +5,6 @@ nonisolated struct Conversation: Identifiable, Codable, Hashable {
     var title: String
     var messages: [ChatMessage]
     var modelId: String?
-    var personaId: String?
     var webSearchEnabled: Bool
     var documents: [ConversationDocumentReference]
     let createdAt: Date
@@ -16,7 +15,6 @@ nonisolated struct Conversation: Identifiable, Codable, Hashable {
         case title
         case messages
         case modelId
-        case personaId
         case webSearchEnabled
         case documents
         case createdAt
@@ -28,7 +26,6 @@ nonisolated struct Conversation: Identifiable, Codable, Hashable {
         title: String = "New Conversation",
         messages: [ChatMessage] = [],
         modelId: String? = nil,
-        personaId: String? = Persona.defaultID,
         webSearchEnabled: Bool = false,
         documents: [ConversationDocumentReference] = [],
         createdAt: Date = Date(),
@@ -38,7 +35,6 @@ nonisolated struct Conversation: Identifiable, Codable, Hashable {
         self.title = title
         self.messages = messages
         self.modelId = modelId
-        self.personaId = personaId
         self.webSearchEnabled = webSearchEnabled
         self.documents = documents
         self.createdAt = createdAt
@@ -51,7 +47,6 @@ nonisolated struct Conversation: Identifiable, Codable, Hashable {
         title = try container.decode(String.self, forKey: .title)
         messages = try container.decodeIfPresent([ChatMessage].self, forKey: .messages) ?? []
         modelId = try container.decodeIfPresent(String.self, forKey: .modelId)
-        personaId = try container.decodeIfPresent(String.self, forKey: .personaId)
         webSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .webSearchEnabled) ?? false
         documents = try container.decodeIfPresent([ConversationDocumentReference].self, forKey: .documents) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
@@ -64,7 +59,6 @@ nonisolated struct Conversation: Identifiable, Codable, Hashable {
         try container.encode(title, forKey: .title)
         try container.encode(messages, forKey: .messages)
         try container.encodeIfPresent(modelId, forKey: .modelId)
-        try container.encodeIfPresent(personaId, forKey: .personaId)
         try container.encode(webSearchEnabled, forKey: .webSearchEnabled)
         try container.encode(documents, forKey: .documents)
         try container.encode(createdAt, forKey: .createdAt)

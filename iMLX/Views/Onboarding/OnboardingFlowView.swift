@@ -3,7 +3,7 @@ import SwiftUI
 private enum OnboardingStep: Int, CaseIterable {
     case welcome
     case modelSelection
-    case personasAndMemory
+    case memory
     case documentsAndVision
     case finish
 
@@ -11,7 +11,7 @@ private enum OnboardingStep: Int, CaseIterable {
         switch self {
         case .welcome: "Welcome to iMLX"
         case .modelSelection: "Starter Models"
-        case .personasAndMemory: "Personas & Memory"
+        case .memory: "Memory"
         case .documentsAndVision: "Documents & Vision"
         case .finish: "You’re Ready"
         }
@@ -21,7 +21,7 @@ private enum OnboardingStep: Int, CaseIterable {
         switch self {
         case .welcome: "sparkles"
         case .modelSelection: "cpu"
-        case .personasAndMemory: "brain"
+        case .memory: "brain"
         case .documentsAndVision: "eye.fill"
         case .finish: "checkmark.circle.fill"
         }
@@ -219,7 +219,7 @@ private struct OnboardingStepContent: View {
                     OnboardingCardContent(
                         icon: "iphone.gen3",
                         title: "Local-first by default",
-                        body: "iMLX runs your chat models on-device. Your conversations, personas, documents, and memories stay on your Apple hardware unless you explicitly turn on a network feature."
+                        body: "iMLX runs your chat models on-device. Your conversations, documents, and memories stay on your Apple hardware unless you explicitly turn on a network feature."
                     ),
                     OnboardingCardContent(
                         icon: "hand.raised.fill",
@@ -239,14 +239,9 @@ private struct OnboardingStepContent: View {
                 selectedModelID: selectedModelID,
                 onSelectModel: onSelectModel
             )
-        case .personasAndMemory:
+        case .memory:
             OnboardingFeatureList(
                 cards: [
-                    OnboardingCardContent(
-                        icon: "person.2.fill",
-                        title: "Personas shape the assistant",
-                        body: "Each conversation can use a different persona, changing tone, focus, and prompting without swapping your model automatically."
-                    ),
                     OnboardingCardContent(
                         icon: "brain",
                         title: "Memory stays local",
@@ -330,7 +325,7 @@ private struct OnboardingFinishStep: View {
                 content: OnboardingCardContent(
                     icon: "sparkles",
                     title: "You’re ready",
-                    body: "Start chatting as soon as your model is loaded, or keep exploring personas, memory, and documents from the main app."
+                    body: "Start chatting as soon as your model is loaded, or keep exploring memory, documents, and assistant settings from the main app."
                 )
             )
 
@@ -543,4 +538,3 @@ private struct OnboardingFeatureCard: View {
         .padding()
     }
 }
-

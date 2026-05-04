@@ -212,7 +212,6 @@ private struct MemoryEditorView: View {
     @State private var content: String
     @State private var category: String
     @State private var status: UserMemoryStatus
-    @State private var personaScope: String
 
     init(appState: AppState, memory: UserMemory) {
         self.appState = appState
@@ -220,17 +219,14 @@ private struct MemoryEditorView: View {
         _content = State(initialValue: memory.content)
         _category = State(initialValue: memory.category ?? "")
         _status = State(initialValue: memory.status)
-        _personaScope = State(initialValue: memory.personaId ?? "")
     }
 
     var body: some View {
         Form {
             MemoryEditorMemorySection(content: $content)
             MemoryEditorDetailsSection(
-                appState: appState,
                 category: $category,
-                status: $status,
-                personaScope: $personaScope
+                status: $status
             )
             MemoryEditorMetadataSection(memory: memory)
         }
@@ -255,7 +251,7 @@ private struct MemoryEditorView: View {
         updated.content = content.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.category = trimmedCategory
         updated.status = status
-        updated.personaId = personaScope.isEmpty ? nil : personaScope
+        updated.personaId = nil
         appState.updateMemory(updated)
         dismiss()
     }
@@ -278,10 +274,8 @@ private struct MemoryEditorMemorySection: View {
 }
 
 private struct MemoryEditorDetailsSection: View {
-    let appState: AppState
     @Binding var category: String
     @Binding var status: UserMemoryStatus
-    @Binding var personaScope: String
 
     var body: some View {
         Section(String.appLocalized("memory.editor.section.details")) {
@@ -290,13 +284,6 @@ private struct MemoryEditorDetailsSection: View {
             Picker(String.appLocalized("memory.editor.status"), selection: $status) {
                 ForEach(UserMemoryStatus.allCases, id: \.self) { status in
                     Text(status.displayName).tag(status)
-                }
-            }
-
-            Picker(String.appLocalized("memory.editor.scope"), selection: $personaScope) {
-                Text(String.appLocalized("memory.scope.global")).tag("")
-                ForEach(appState.personas) { persona in
-                    Text(persona.localizedName).tag(persona.id)
                 }
             }
         }

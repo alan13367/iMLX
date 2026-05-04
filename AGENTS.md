@@ -59,12 +59,12 @@ xcodebuild -downloadComponent MetalToolchain
 
 ## Architecture
 
-- App state: `AppState` owns shared services, model/persona/conversation selection, and persisted app-level state.
-- Chat orchestration: `ChatViewModel` owns transcript state, send/generation flow, streaming UI state, attachments, persona binding, tool traces, and save/update behavior.
+- App state: `AppState` owns shared services, model and conversation selection, assistant generation settings (system prompt and temperature), and persisted app-level state.
+- Chat orchestration: `ChatViewModel` owns transcript state, send/generation flow, streaming UI state, attachments, tool traces, and save/update behavior.
 - Inference: `InferenceService` is an actor; it loads models and streams tokens via `AsyncThrowingStream<String, Error>` into `@MainActor` UI state.
 - Prompt/session policy: every generation rebuilds prompt/session state from visible conversation history instead of relying on hidden long-lived chat state.
 - UI: SwiftUI + `@Observable`. Root chat orchestration lives in `ChatView`; extracted chat UI lives under `iMLX/Views/Chat/Components`.
-- Models/personas: curated model entries live in `Constants.swift`; built-in personas are seeded by `PersonaService`. Read code for exact IDs/capabilities.
+- Models: curated model entries live in `Constants.swift`. Assistant defaults (system prompt, temperature) live in `AppState` and are edited in `AssistantSettingsView`.
 - Documents: `DocumentLibraryService` imports local PDF/CSV/text files, extracts/chunks/indexes them, and retrieves bounded local context.
 - Memory: `MemorySystem` is the app-facing facade over actor-backed GRDB persistence and retrieval. Persist only facts grounded in user text.
 - Tool calling: `ToolCallingService` plans with the currently loaded local model, executes at most one tool per turn, and fails closed to normal generation on invalid planner output.
@@ -93,6 +93,7 @@ iMLXAlarmWidgetInfo.plist Widget extension Info.plist
 High-value files and folders:
 
 - `iMLX/Models/AppState.swift`
+- `iMLX/Views/Settings/AssistantSettingsView.swift`
 - `iMLX/Models/ToolCallingModels.swift`
 - `iMLX/Models/MessageSource.swift`
 - `iMLX/Models/UserMemory.swift`

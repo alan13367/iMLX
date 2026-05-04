@@ -45,13 +45,11 @@ nonisolated final class MemorySystem: @unchecked Sendable {
 
     func retrieveMemoryResultAsync(
         for query: String,
-        personaId: String?,
         limit: Int,
         maxCharacters: Int
     ) async -> MemoryRetrievalResult {
         await retrievalService.retrieve(
             for: query,
-            personaId: personaId,
             limit: limit,
             maxCharacters: maxCharacters
         )
@@ -61,7 +59,6 @@ nonisolated final class MemorySystem: @unchecked Sendable {
         content: String,
         status: UserMemoryStatus,
         captureType: UserMemoryCaptureType,
-        personaId: String? = nil,
         category: String? = nil,
         sourceConversationId: UUID? = nil,
         sourceMessageId: UUID? = nil,
@@ -75,7 +72,6 @@ nonisolated final class MemorySystem: @unchecked Sendable {
                 content: content,
                 status: status,
                 captureType: captureType,
-                personaId: personaId,
                 category: category,
                 sourceConversationId: sourceConversationId,
                 sourceMessageId: sourceMessageId,
@@ -238,7 +234,6 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
         content: String,
         status: UserMemoryStatus,
         captureType: UserMemoryCaptureType,
-        personaId: String?,
         category: String?,
         sourceConversationId: UUID?,
         sourceMessageId: UUID?,
@@ -267,7 +262,6 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
         let candidates = await store.candidateSummaries(
             for: normalizedContent,
             signature: signature,
-            personaId: personaId,
             statuses: [.active, .pending, .archived],
             mode: .conflict
         )
@@ -275,8 +269,7 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
         if let signature, signature.isRetraction {
             let archiveIDs = conflictingIDs(
                 matching: signature,
-                in: candidates,
-                personaId: personaId
+                in: candidates
             )
             await store.archive(ids: archiveIDs, supersededBy: nil, reason: .forgotten, at: now)
             return nil
@@ -289,7 +282,7 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
                 duplicate.status = status
             }
             duplicate.content = normalizedContent
-            duplicate.personaId = duplicate.personaId ?? personaId
+            duplicate.personaId = nil
             duplicate.category = duplicate.category ?? category
             duplicate.updatedAt = now
             duplicate.vector = duplicate.vector ?? system.embedding(for: normalizedContent)
@@ -305,7 +298,6 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
                     content: duplicate.content,
                     status: duplicate.status,
                     captureType: duplicate.captureType,
-                    personaId: duplicate.personaId,
                     category: duplicate.category,
                     sourceConversationId: sourceConversationId,
                     sourceMessageId: sourceMessageId,
@@ -324,7 +316,7 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
             return updated
         }
 
-        let archiveIDs = signature.map { conflictingIDs(matching: $0, in: candidates, personaId: personaId) } ?? []
+        let archiveIDs = signature.map { conflictingIDs(matching: $0, in: candidates) } ?? []
         let memoryID = UUID()
         return await store.createMemory(
             persistedInput(
@@ -332,7 +324,6 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
                 content: normalizedContent,
                 status: status,
                 captureType: captureType,
-                personaId: personaId,
                 category: category,
                 sourceConversationId: sourceConversationId,
                 sourceMessageId: sourceMessageId,
@@ -374,12 +365,10 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
 
     private func conflictingIDs(
         matching signature: MemoryFactSignature,
-        in memories: [UserMemory],
-        personaId: String?
+        in memories: [UserMemory]
     ) -> [UUID] {
         let candidates = memories.filter { candidate in
             guard candidate.status != .archived else { return false }
-            guard system.memoryScopesCanConflict(existing: candidate.personaId, incoming: personaId) else { return false }
             guard let existingSignature = MemoryFactParser.signature(for: candidate) else { return false }
             return signature.isRetraction
                 ? signature.matchesForgetTarget(existingSignature)
@@ -393,7 +382,6 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
         content: String,
         status: UserMemoryStatus,
         captureType: UserMemoryCaptureType,
-        personaId: String?,
         category: String?,
         sourceConversationId: UUID?,
         sourceMessageId: UUID?,
@@ -411,8 +399,8 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
             id: id,
             canonicalText: content,
             status: status,
-            scopeType: personaId == nil ? .global : .persona,
-            personaId: personaId,
+            scopeType: .global,
+            personaId: nil,
             captureType: captureType,
             category: category,
             salience: captureType == .explicit ? 0.92 : 0.74,
@@ -443,11 +431,5 @@ nonisolated final class MemoryRetrievalService: @unchecked Sendable {
         self.system = system
         self.store = store
         self.diagnosticsService = diagnosticsService
-    }
-}
-
-extension MemorySystem {
-    nonisolated func memoryScopesCanConflict(existing: String?, incoming: String?) -> Bool {
-        existing == incoming || existing == nil || incoming == nil
     }
 }

@@ -14,7 +14,7 @@ The public app-facing API stays intentionally small. `AppState` and chat flows s
 
 - `saveMemory(...)`
 - `forgetMemory(matching:)`
-- `retrieveMemoryContext(for:personaId:maxCharacters:)`
+- `retrieveMemoryContext(for:maxCharacters:)`
 - `accept`, `reject`, `delete`, and `update`
 
 Under the hood, those operations now fan out through a more explicit architecture.
@@ -155,7 +155,6 @@ Retrieval is still fully local and synchronous from the app's point of view.
 Inputs:
 
 - user query
-- optional persona scope
 - max memory count
 - max character budget
 
@@ -164,7 +163,7 @@ Signals used during reranking:
 - sparse lexical overlap
 - local semantic similarity
 - fact relation intent
-- persona/global scope
+- global scope
 - salience and recency
 
 Outputs:

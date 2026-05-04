@@ -75,15 +75,6 @@ final class ChatViewModel {
     var pendingImages: [ChatAttachmentImage] = []
     var pendingDocuments: [ConversationDocumentReference] = []
     var attachedDocuments: [ConversationDocumentReference] = []
-    var activePersonaId: String?
-
-    var activePersona: Persona {
-        appState.persona(id: activePersonaId) ?? appState.defaultPersona()
-    }
-
-    var availablePersonas: [Persona] {
-        appState.personas
-    }
 
     private var inferenceService: InferenceService { appState.inferenceService }
     private var downloadService: ModelDownloadService { appState.downloadService }
@@ -118,7 +109,6 @@ final class ChatViewModel {
         messages = conversation.messages
         pendingDocuments = []
         attachedDocuments = conversation.documents
-        activePersonaId = appState.persona(id: conversation.personaId)?.id ?? appState.defaultPersona().id
         currentResponse = ""
         currentParsedResponse = .empty
         errorMessage = nil
@@ -224,11 +214,10 @@ final class ChatViewModel {
 
         Haptics.impactLight()
 
-        let persona = activePersona
-        let temperature = Float(persona.temperature)
-        let topP = Float(persona.topP)
-        let repetitionPenalty = safeRepetitionPenalty(Float(persona.repetitionPenalty))
-        let systemPrompt = persona.effectiveSystemPrompt
+        let temperature = Float(appState.assistantTemperature)
+        let topP = Constants.Generation.defaultTopP
+        let repetitionPenalty = Constants.Generation.defaultRepetitionPenalty
+        let systemPrompt = appState.assistantSystemPrompt
         let thinkingEnabled = loadedModel?.supportsThinking == true ? isThinkingEnabled : false
         let generationBudget = generationBudget(for: loadedModel, thinkingEnabled: thinkingEnabled)
 
@@ -381,7 +370,6 @@ final class ChatViewModel {
 
             let memoryRetrievalResult = await self.appState.retrieveMemoryContext(
                 for: text,
-                personaId: persona.id,
                 maxCharacters: self.memoryContextCharacterLimit(for: loadedModel)
             )
             try Task.checkCancellation()
@@ -518,7 +506,6 @@ final class ChatViewModel {
                     self.scheduleMemoryExtraction(
                         userMessage: userMessage,
                         assistantMessage: assistantMessage,
-                        personaId: persona.id,
                         conversationId: self.activeConversationId,
                         isEnabled: !handledExplicitMemoryCommand
                     )
@@ -720,7 +707,6 @@ final class ChatViewModel {
             errorMessage = nil
             memoryNotice = nil
             suppressedMemoryNoticeKey = nil
-            activePersonaId = appState.defaultPersona().id
             isWebSearchEnabled = false
             toolNotice = nil
             toolActivityStatus = nil
@@ -732,14 +718,6 @@ final class ChatViewModel {
     func toggleThinking() {
         guard canUseThinking else { return }
         isThinkingEnabled.toggle()
-        Haptics.selectionChanged()
-    }
-
-    @MainActor
-    func selectPersona(_ persona: Persona) {
-        activePersonaId = persona.id
-        saveCurrentConversation()
-        updateThinkingAvailability(for: resolvedCurrentModel())
         Haptics.selectionChanged()
     }
 
@@ -803,7 +781,6 @@ final class ChatViewModel {
             conversation = existing
             conversation.messages = messages
             conversation.modelId = appState.loadedModelId
-            conversation.personaId = activePersonaId ?? appState.defaultPersona().id
             conversation.webSearchEnabled = isWebSearchEnabled
             conversation.documents = attachedDocuments
             conversation.updatedAt = Date()
@@ -812,7 +789,6 @@ final class ChatViewModel {
                 id: conversationId,
                 messages: messages,
                 modelId: appState.loadedModelId,
-                personaId: activePersonaId ?? appState.defaultPersona().id,
                 webSearchEnabled: isWebSearchEnabled,
                 documents: attachedDocuments
             )
@@ -1078,7 +1054,6 @@ final class ChatViewModel {
                 content: memoryContent,
                 status: .active,
                 captureType: .explicit,
-                personaId: activePersonaId,
                 sourceConversationId: activeConversationId,
                 sourceMessageId: userMessage.id,
                 sourceQuote: text
@@ -1113,7 +1088,6 @@ final class ChatViewModel {
                 content: memoryContent,
                 status: .active,
                 captureType: .inferred,
-                personaId: activePersonaId,
                 sourceConversationId: activeConversationId,
                 sourceMessageId: userMessage.id,
                 sourceQuote: text
@@ -1135,7 +1109,6 @@ final class ChatViewModel {
     private func scheduleMemoryExtraction(
         userMessage: ChatMessage,
         assistantMessage: ChatMessage,
-        personaId: String?,
         conversationId: UUID?,
         isEnabled: Bool
     ) {
@@ -1163,7 +1136,6 @@ final class ChatViewModel {
                         content: candidate.canonicalContent,
                         status: status,
                         captureType: .inferred,
-                        personaId: personaId,
                         sourceConversationId: conversationId,
                         sourceMessageId: userMessage.id,
                         sourceLanguageCode: candidate.sourceLanguageCode,

@@ -8,7 +8,6 @@ struct ChatAccessoryStackState {
     let selectedModelDisplayName: String?
     let isGenerating: Bool
     let memoryNotice: ChatMemoryNotice?
-    let activePersona: Persona
     let pendingDocuments: [ConversationDocumentReference]
     let pendingImages: [ChatAttachmentImage]
     let canUseThinking: Bool
@@ -21,7 +20,6 @@ struct ChatAccessoryStackState {
     func composerState(maxWidth: CGFloat) -> ChatComposerState {
         ChatComposerState(
             maxWidth: maxWidth,
-            activePersona: activePersona,
             pendingDocuments: pendingDocuments,
             pendingImages: pendingImages,
             canUseThinking: canUseThinking,

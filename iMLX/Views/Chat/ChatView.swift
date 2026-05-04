@@ -8,7 +8,6 @@ struct ChatView: View {
     @State private var chatViewModel: ChatViewModel
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
-    @State private var showPersonaPicker = false
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
     @State private var showDocumentImporter = false
@@ -125,13 +124,6 @@ struct ChatView: View {
         .sheet(item: $utilitySheet) { sheet in
             utilitySheetView(sheet)
         }
-        .sheet(isPresented: $showPersonaPicker) {
-            PersonaPickerSheet(
-                appState: appState,
-                chatViewModel: chatViewModel,
-                isPresented: $showPersonaPicker
-            )
-        }
         .fullScreenCover(isPresented: $showLiveVoice) {
             LiveVoiceConversationView(appState: appState, chatViewModel: chatViewModel)
         }
@@ -210,7 +202,6 @@ struct ChatView: View {
                 selectedModelDisplayName: chatViewModel.loadingModel?.displayName ?? appState.selectedModel?.displayName,
                 isGenerating: chatViewModel.isGenerating,
                 memoryNotice: chatViewModel.memoryNotice,
-                activePersona: chatViewModel.activePersona,
                 pendingDocuments: chatViewModel.pendingDocuments,
                 pendingImages: chatViewModel.pendingImages,
                 canUseThinking: chatViewModel.canUseThinking,
@@ -226,7 +217,6 @@ struct ChatView: View {
                 dismissMemoryNotice: chatViewModel.dismissMemoryNotice,
                 openMemoryLibrary: openMemoryLibrary,
                 composer: ChatComposerActions(
-                    openPersonaPicker: openPersonaPicker,
                     removeDocument: chatViewModel.removeDocument,
                     removePendingImage: chatViewModel.removePendingImage(id:),
                     openAttachmentImporter: openDocumentImporter,
@@ -442,11 +432,6 @@ struct ChatView: View {
     private func openMemoryLibrary() {
         isInputFocused = false
         utilitySheet = .memoryLibrary
-    }
-
-    private func openPersonaPicker() {
-        isInputFocused = false
-        showPersonaPicker = true
     }
 
     private func openDocumentImporter() {

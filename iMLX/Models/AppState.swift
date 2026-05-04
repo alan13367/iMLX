@@ -7,6 +7,8 @@ final class AppState {
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let pendingStarterModelId = "pendingStarterModelId"
         static let hasSeenWebSearchDisclosure = "hasSeenWebSearchDisclosure"
+        static let assistantSystemPrompt = "assistantSystemPrompt"
+        static let assistantTemperature = "assistantTemperature"
     }
 
     var selectedModel: ModelInfo?
@@ -17,6 +19,8 @@ final class AppState {
     var hasCompletedOnboarding: Bool
     var pendingStarterModelId: String?
     var hasSeenWebSearchDisclosure: Bool
+    var assistantSystemPrompt: String
+    var assistantTemperature: Double
     var voiceSessionInvalidationSeed: Int = 0
     var pendingShortcutRoute: AppShortcutRoute?
 
@@ -27,7 +31,6 @@ final class AppState {
     let speechAssetService: SpeechAssetService
     let webSearchService = WebSearchService()
     let toolCallingService: ToolCallingService
-    let personaService = PersonaService()
     let memoryService = MemorySystem()
     let documentLibraryService = DocumentLibraryService()
     let calendarBriefService = CalendarBriefService()
@@ -35,7 +38,6 @@ final class AppState {
     let timerService = TimerService()
     let contactsService = ContactsService()
     var conversations: [Conversation] = []
-    var personas: [Persona] = []
     var memories: [UserMemory] = []
     var activeConversationId: UUID?
     var preferredAppLanguageCode: String?
@@ -50,7 +52,6 @@ final class AppState {
     )
     private let userDefaults = UserDefaults.standard
     private var conversationsByID: [UUID: Conversation] = [:]
-    private var personasByID: [String: Persona] = [:]
 
     init() {
         self.manifestService = ManifestService()
@@ -72,8 +73,10 @@ final class AppState {
         }
         pendingStarterModelId = userDefaults.string(forKey: Keys.pendingStarterModelId)
         hasSeenWebSearchDisclosure = userDefaults.bool(forKey: Keys.hasSeenWebSearchDisclosure)
+        assistantSystemPrompt = userDefaults.string(forKey: Keys.assistantSystemPrompt) ?? Constants.Generation.defaultSystemPrompt
+        let storedTemperature = userDefaults.object(forKey: Keys.assistantTemperature) as? Double
+        assistantTemperature = Self.clampedAssistantTemperature(storedTemperature ?? Double(Constants.Generation.defaultTemperature))
         pendingShortcutRoute = AppShortcutRouteStore.loadPendingRoute(userDefaults: userDefaults)
-        loadPersonas()
         loadMemories()
         loadConversationsFromDisk()
         restoreModelState()
@@ -126,6 +129,28 @@ final class AppState {
         }
         preferredAppLanguageCode = code
         voiceSessionInvalidationSeed &+= 1
+    }
+
+    func setAssistantSystemPrompt(_ prompt: String) {
+        assistantSystemPrompt = prompt
+        userDefaults.set(prompt, forKey: Keys.assistantSystemPrompt)
+    }
+
+    func setAssistantTemperature(_ temperature: Double) {
+        let clamped = Self.clampedAssistantTemperature(temperature)
+        assistantTemperature = clamped
+        userDefaults.set(clamped, forKey: Keys.assistantTemperature)
+    }
+
+    func resetAssistantGenerationSettings() {
+        assistantSystemPrompt = Constants.Generation.defaultSystemPrompt
+        assistantTemperature = Double(Constants.Generation.defaultTemperature)
+        userDefaults.removeObject(forKey: Keys.assistantSystemPrompt)
+        userDefaults.removeObject(forKey: Keys.assistantTemperature)
+    }
+
+    private static func clampedAssistantTemperature(_ temperature: Double) -> Double {
+        min(max(temperature, 0.0), 1.0)
     }
 
     var showsOnboarding: Bool {
@@ -327,14 +352,12 @@ final class AppState {
     func loadConversations() async {
         let loaded = await Self.fetchConversationsInBackground(using: conversationService)
         conversations = loaded
-        migrateConversationsWithoutPersona()
         rebuildConversationLookup()
         reconcileActiveConversationForChat()
     }
 
     private func loadConversationsFromDisk() {
         conversations = conversationService.listAll()
-        migrateConversationsWithoutPersona()
         rebuildConversationLookup()
         reconcileActiveConversationForChat()
     }
@@ -343,11 +366,6 @@ final class AppState {
         return await Task.detached(priority: .utility) {
             conversationService.listAll()
         }.value
-    }
-
-    func loadPersonas() {
-        personas = personaService.listAll()
-        rebuildPersonaLookup()
     }
 
     func loadMemories() {
@@ -397,8 +415,7 @@ final class AppState {
     @discardableResult
     func createNewConversation() -> UUID {
         let conversation = Conversation(
-            modelId: loadedModelId,
-            personaId: defaultPersona().id
+            modelId: loadedModelId
         )
         conversationService.save(conversation)
         conversations.insert(conversation, at: 0)
@@ -454,57 +471,9 @@ final class AppState {
         return conversationsByID[id]
     }
 
-    func persona(id: String?) -> Persona? {
-        guard let id else { return nil }
-        return personasByID[id]
-    }
-
     func modelInfo(id: String?) -> ModelInfo? {
         guard let id else { return nil }
         return Self.curatedModelsByID[id]
-    }
-
-    func defaultPersona() -> Persona {
-        if let explicitDefault = personasByID[Persona.defaultID] {
-            return explicitDefault
-        }
-        if let firstPersona = personas.first {
-            return firstPersona
-        }
-        let seeded = Persona.starterPersonas()
-        return seeded.first ?? Persona(
-            id: Persona.defaultID,
-            name: "General Assistant",
-            summary: "a clear everyday helper",
-            goal: "Help with common questions and practical tasks.",
-            tone: .balanced,
-            suggestedOpening: "Help me think this through.",
-            defaultModelId: nil,
-            temperature: 0.7,
-            topP: 1.0,
-            repetitionPenalty: 1.0,
-            symbolName: "sparkles",
-            isBuiltIn: true
-        )
-    }
-
-    func savePersona(_ persona: Persona) {
-        personaService.save(persona)
-        loadPersonas()
-    }
-
-    func deletePersona(_ id: String) {
-        guard let persona = persona(id: id), !persona.isBuiltIn else { return }
-        personaService.delete(id: id)
-
-        let fallbackPersonaID = defaultPersona().id
-        for index in conversations.indices where conversations[index].personaId == id {
-            conversations[index].personaId = fallbackPersonaID
-            conversationService.save(conversations[index])
-        }
-        rebuildConversationLookup()
-
-        loadPersonas()
     }
 
     @discardableResult
@@ -512,7 +481,6 @@ final class AppState {
         content: String,
         status: UserMemoryStatus,
         captureType: UserMemoryCaptureType,
-        personaId: String? = nil,
         category: String? = nil,
         sourceConversationId: UUID? = nil,
         sourceMessageId: UUID? = nil,
@@ -525,7 +493,6 @@ final class AppState {
             content: content,
             status: status,
             captureType: captureType,
-            personaId: personaId,
             category: category,
             sourceConversationId: sourceConversationId,
             sourceMessageId: sourceMessageId,
@@ -572,12 +539,10 @@ final class AppState {
 
     func retrieveMemoryContext(
         for query: String,
-        personaId: String?,
         maxCharacters: Int = Constants.Memory.maxContextCharacters
     ) async -> MemoryRetrievalResult {
         let result = await memoryService.retrieveMemoryResultAsync(
             for: query,
-            personaId: personaId,
             limit: Constants.Memory.maxRetrievedMemories,
             maxCharacters: maxCharacters
         )
@@ -596,19 +561,7 @@ final class AppState {
         conversationService.save(conversation)
     }
 
-    private func migrateConversationsWithoutPersona() {
-        let fallbackPersonaID = defaultPersona().id
-        for index in conversations.indices where conversations[index].personaId == nil {
-            conversations[index].personaId = fallbackPersonaID
-            conversationService.save(conversations[index])
-        }
-    }
-
     private func rebuildConversationLookup() {
         conversationsByID = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
-    }
-
-    private func rebuildPersonaLookup() {
-        personasByID = Dictionary(uniqueKeysWithValues: personas.map { ($0.id, $0) })
     }
 }

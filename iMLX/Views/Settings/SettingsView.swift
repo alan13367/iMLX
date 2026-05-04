@@ -1,8 +1,8 @@
 import SwiftUI
 
 private enum SettingsNavigationDestination: String, Hashable {
-    case personas
     case memory
+    case assistant
 }
 
 struct SettingsView: View {
@@ -40,14 +40,14 @@ struct SettingsView: View {
                 }
             }
 
-            Section(String.appLocalized("settings.section.personas")) {
+            Section(String.appLocalized("settings.section.assistant")) {
                 Button {
-                    navigationDestination = .personas
+                    navigationDestination = .assistant
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(String.appLocalized("settings.manage_personas"))
-                        Text(String.appLocalized("settings.manage_personas_detail"))
-                            .font(.footnote)
+                    HStack {
+                        Text(String.appLocalized("settings.assistant.title"))
+                        Spacer()
+                        Text(appState.assistantTemperature, format: .number.precision(.fractionLength(1)))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -66,8 +66,8 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Onboarding") {
-                Button("Replay onboarding") {
+            Section(String.appLocalized("settings.section.onboarding")) {
+                Button(String.appLocalized("settings.replay_onboarding")) {
                     appState.resetOnboarding()
                 }
             }
@@ -124,10 +124,10 @@ struct SettingsView: View {
         }
         .navigationDestination(item: $navigationDestination) { destination in
             switch destination {
-            case .personas:
-                PersonaLibraryView(appState: appState)
             case .memory:
                 MemoryLibraryView(appState: appState)
+            case .assistant:
+                AssistantSettingsView(appState: appState)
             }
         }
         .alert(String.appLocalized("settings.clear_alert_title"), isPresented: $showClearModelsAlert) {

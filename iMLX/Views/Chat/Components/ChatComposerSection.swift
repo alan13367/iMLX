@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ChatComposerState {
     let maxWidth: CGFloat
-    let activePersona: Persona
     let pendingDocuments: [ConversationDocumentReference]
     let pendingImages: [ChatAttachmentImage]
     let canUseThinking: Bool
@@ -15,7 +14,6 @@ struct ChatComposerState {
 }
 
 struct ChatComposerActions {
-    let openPersonaPicker: () -> Void
     let removeDocument: (ConversationDocumentReference) -> Void
     let removePendingImage: (UUID) -> Void
     let openAttachmentImporter: () -> Void
@@ -36,8 +34,6 @@ struct ChatComposerSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ChatComposerPersonaRow(persona: state.activePersona, onChangePersona: openPersonaPicker)
-
             if !state.pendingDocuments.isEmpty {
                 ChatPendingDocumentStrip(
                     pendingDocuments: state.pendingDocuments,
@@ -143,10 +139,5 @@ struct ChatComposerSection: View {
         case .text:
             "doc.text"
         }
-    }
-
-    private func openPersonaPicker() {
-        isInputFocused = false
-        actions.openPersonaPicker()
     }
 }

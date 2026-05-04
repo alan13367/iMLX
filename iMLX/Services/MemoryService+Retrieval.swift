@@ -7,14 +7,12 @@ extension MemorySystem {
 
     nonisolated func retrieveActiveMemories(
         for query: String,
-        personaId: String?,
         limit: Int,
         maxCharacters: Int
     ) -> [UserMemory] {
         blocking { [self] in
             await self.retrievalService.retrieve(
                 for: query,
-                personaId: personaId,
                 limit: limit,
                 maxCharacters: maxCharacters
             ).memories
@@ -23,14 +21,12 @@ extension MemorySystem {
 
     nonisolated func retrieveMemoryResult(
         for query: String,
-        personaId: String?,
         limit: Int,
         maxCharacters: Int
     ) -> MemoryRetrievalResult {
         blocking { [self] in
             await self.retrievalService.retrieve(
                 for: query,
-                personaId: personaId,
                 limit: limit,
                 maxCharacters: maxCharacters
             )
@@ -139,8 +135,7 @@ extension MemorySystem {
             queryVector: queryVector,
             record: record,
             recordIndex: recordIndex,
-            index: index,
-            personaId: nil
+            index: index
         )
         return score >= Constants.Memory.forgetMatchThreshold
     }
@@ -173,14 +168,9 @@ extension MemorySystem {
         record: IndexedMemoryRecord,
         recordIndex: Int,
         index: MemoryVaultIndex,
-        querySignatures: [MemoryFactSignature],
-        personaId: String?
+        querySignatures: [MemoryFactSignature]
     ) -> MemoryRetrievalCandidate? {
         guard record.memory.status == .active else { return nil }
-        if let memoryPersonaId = record.memory.personaId {
-            guard let personaId, memoryPersonaId == personaId else { return nil }
-        }
-
         let baseScore = relevanceScore(
             query: query,
             queryTokens: queryTokens,
@@ -188,8 +178,7 @@ extension MemorySystem {
             record: record,
             recordIndex: recordIndex,
             index: index,
-            querySignatures: querySignatures,
-            personaId: personaId
+            querySignatures: querySignatures
         )
         let topicalScore = topicalAffinityScore(query: query, memoryContent: record.normalizedContent)
         let identityScore = identityAffinityScore(query: query, memoryContent: record.normalizedContent)
@@ -199,11 +188,7 @@ extension MemorySystem {
         guard eligibilityScore >= Constants.Memory.minimumBaseRetrievalScore else { return nil }
 
         var score = eligibilityScore
-        if let memoryPersonaId = record.memory.personaId, let personaId, memoryPersonaId == personaId {
-            score += Constants.Memory.personaMatchBoost
-        } else if record.memory.personaId == nil {
-            score += Constants.Memory.globalMemoryBoost
-        }
+        score += Constants.Memory.globalMemoryBoost
 
         return MemoryRetrievalCandidate(memory: record.memory, score: min(score, 1.0))
     }
@@ -215,8 +200,7 @@ extension MemorySystem {
         record: IndexedMemoryRecord,
         recordIndex: Int,
         index: MemoryVaultIndex,
-        querySignatures: [MemoryFactSignature] = [],
-        personaId: String?
+        querySignatures: [MemoryFactSignature] = []
     ) -> Double {
         let sparseScore = normalizedBM25Score(index.bm25Score(queryTokens: queryTokens, recordIndex: recordIndex))
         let semanticScore = MemoryVectorMath.cosine(normalizedQuery: queryVector, normalizedMemory: record.normalizedVector)
@@ -233,11 +217,7 @@ extension MemorySystem {
 
         score = max(score, relationIntentScore(querySignatures: querySignatures, record: record))
 
-        if let memoryPersonaId = record.memory.personaId, let personaId, memoryPersonaId == personaId {
-            score += Constants.Memory.personaMatchBoost
-        } else if record.memory.personaId == nil {
-            score += Constants.Memory.globalMemoryBoost
-        }
+        score += Constants.Memory.globalMemoryBoost
 
         return min(score, 1.0)
     }
@@ -316,7 +296,6 @@ extension MemoryRetrievalService {
         let candidates = await store.candidateSummaries(
             for: normalizedQuery,
             signature: forgetSignature,
-            personaId: nil,
             statuses: [.active, .pending],
             mode: .conflict
         )
@@ -354,7 +333,6 @@ extension MemoryRetrievalService {
 
     func retrieve(
         for query: String,
-        personaId: String?,
         limit: Int,
         maxCharacters: Int
     ) async -> MemoryRetrievalResult {
@@ -380,7 +358,6 @@ extension MemoryRetrievalService {
         var combinedCandidates = await store.candidateSummaries(
             for: normalizedQuery,
             signature: nil,
-            personaId: personaId,
             statuses: [.active],
             mode: .retrieval
         )
@@ -388,7 +365,6 @@ extension MemoryRetrievalService {
             let more = await store.candidateSummaries(
                 for: normalizedQuery,
                 signature: signature,
-                personaId: personaId,
                 statuses: [.active],
                 mode: .retrieval
             )
@@ -418,8 +394,7 @@ extension MemoryRetrievalService {
                     record: index.records[recordIndex],
                     recordIndex: recordIndex,
                     index: index,
-                    querySignatures: querySignatures,
-                    personaId: personaId
+                    querySignatures: querySignatures
                 )
             }
             .sorted {
@@ -446,8 +421,7 @@ extension MemoryRetrievalService {
                 queryTokens: queryTokens,
                 queryVector: queryVector,
                 memory: candidate.memory,
-                score: candidate.score,
-                personaId: personaId
+                score: candidate.score
             )
             explanations.append(contentsOf: explanationBundle.explanations)
             scoreBreakdown[candidate.memory.id] = explanationBundle.breakdown
@@ -485,8 +459,7 @@ extension MemoryRetrievalService {
         queryTokens: [String],
         queryVector: [Double]?,
         memory: UserMemory,
-        score: Double,
-        personaId: String?
+        score: Double
     ) -> (explanations: [MemoryRetrievalExplanation], breakdown: [String: Double]) {
         let normalizedMemory = system.normalizedMemoryContent(memory.content)
         let memoryTokens = MemoryText.tokens([memory.content, memory.sourceQuote].compactMap { $0 }.joined(separator: " "))
@@ -505,16 +478,6 @@ extension MemoryRetrievalService {
                     kind: .matchedFact,
                     score: score,
                     detail: "Matched the same memory fact category."
-                )
-            )
-        }
-        if memory.personaId != nil, memory.personaId == personaId {
-            explanations.append(
-                diagnosticsService.explanation(
-                    memoryId: memory.id,
-                    kind: .samePersona,
-                    score: score,
-                    detail: "Scoped to the same persona as this conversation."
                 )
             )
         }

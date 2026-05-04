@@ -98,7 +98,7 @@ final class ToolExecutionTests: XCTestCase {
             context: context
         )
 
-        XCTAssertFalse(result.success)
+        XCTAssertTrue(result.success)
         XCTAssertEqual(result.status, .noContent)
     }
 
@@ -227,6 +227,21 @@ final class ToolExecutionTests: XCTestCase {
 
         XCTAssertFalse(result.success)
         XCTAssertEqual(result.status, .invalidArguments)
+    }
+
+    func testExecuteRemindersBriefAcceptsAllRange() async throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let recorder = ArgumentRecorder()
+
+        let result = try await service.execute(
+            call: ToolCallRequest(toolName: "reminders_brief", arguments: ["range": "all"]),
+            tools: ["reminders_brief": RecordingExecutor(toolName: "reminders_brief", recorder: recorder)],
+            context: emptyContext
+        )
+
+        let arguments = await recorder.arguments
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(arguments["range"], "all")
     }
 
     func testExecuteCalendarCreatePassesNormalizedArgumentsToExecutor() async throws {

@@ -43,6 +43,13 @@ actor CalendarBriefService {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
 
+        let rangeReference = dateReferenceBlock(
+            range: range.rawValue,
+            interval: interval,
+            now: now,
+            formatter: formatter
+        )
+
         let dayFormatter = DateFormatter()
         dayFormatter.locale = Locale.current
         dayFormatter.timeZone = calendar.timeZone
@@ -93,7 +100,7 @@ actor CalendarBriefService {
 
         Do not mention event notes, attendees, or private details that are not shown here.
 
-        Calendar range: \(range.rawValue)
+        \(rangeReference)
 
         \(sections.joined(separator: "\n\n---\n\n"))
         """
@@ -212,5 +219,19 @@ actor CalendarBriefService {
             let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start.addingTimeInterval(604_800)
             return DateInterval(start: start, end: end)
         }
+    }
+
+    private func dateReferenceBlock(
+        range: String,
+        interval: DateInterval,
+        now: Date,
+        formatter: DateFormatter
+    ) -> String {
+        """
+        Current local date/time: \(formatter.string(from: now))
+        Calendar range: \(range)
+        Range start: \(formatter.string(from: interval.start))
+        Range end: \(formatter.string(from: interval.end))
+        """
     }
 }

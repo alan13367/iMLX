@@ -569,13 +569,13 @@ actor ToolCallingService {
         )
         let remindersBriefTool = ToolDefinition(
             name: "reminders_brief",
-            description: "Reads incomplete local reminders for a bounded due-date range and returns a private brief.",
+            description: "Reads incomplete local reminders for all reminders or a due-date range and returns a private brief.",
             argumentSchema: [
                 ToolArgument(
                     name: "range",
                     type: "string",
                     required: true,
-                    description: "One of: today, tomorrow, this_week, next_7_days, overdue."
+                    description: "One of: all, today, tomorrow, this_week, next_7_days, overdue."
                 )
             ],
             metadata: ToolMetadata(executionClass: .local)
@@ -881,7 +881,8 @@ actor ToolCallingService {
     nonisolated func preflightDecision(
         userMessage: String,
         context: ToolInputContext,
-        tools: [ToolDefinition]
+        tools: [ToolDefinition],
+        history: [ChatMessage] = []
     ) -> ToolPreflight {
         guard !tools.isEmpty else {
             Self.debugLog("preflight skip: no enabled tools (decision=none)")
@@ -998,7 +999,7 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: dateTimeTool.name, arguments: arguments)))
         }
 
-        // 4f. Reminders list / todo brief for a bounded range.
+        // 4f. Reminders list / todo brief for all reminders or a bounded range.
         if let remindersBriefTool = toolsByName["reminders_brief"],
            let range = heuristicReminderRange(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -1008,6 +1009,16 @@ actor ToolCallingService {
            ) {
             Self.debugLog("preflight selected reminders_brief range=\(range.rawValue) (planner skipped)")
             return .skip(.call(ToolCallRequest(toolName: remindersBriefTool.name, arguments: arguments)))
+        }
+
+        // 4g. Range-only follow-up after a previous brief tool, e.g. "And for tomorrow?"
+        if let followUpDecision = contextualBriefFollowUpDecision(
+            userMessage: userMessage,
+            history: history,
+            context: context,
+            toolsByName: toolsByName
+        ) {
+            return .skip(followUpDecision)
         }
 
         // 5. Strong live-data web_search phrase, but only when no attachments
@@ -1157,6 +1168,129 @@ actor ToolCallingService {
             "number for"
         ]
         return hints.contains(where: { normalized.contains($0) })
+    }
+
+    private nonisolated func contextualBriefFollowUpDecision(
+        userMessage: String,
+        history: [ChatMessage],
+        context: ToolInputContext,
+        toolsByName: [String: ToolDefinition]
+    ) -> ToolDecision? {
+        guard let range = briefFollowUpRange(for: userMessage),
+              let previousTrace = history.reversed().compactMap(\.toolTrace).first(where: { $0.success }) else {
+            return nil
+        }
+
+        switch previousTrace.toolName {
+        case "reminders_brief":
+            guard let remindersTool = toolsByName["reminders_brief"],
+                  let remindersRange = RemindersRange(rawValue: range),
+                  case .success(let arguments) = validatedArguments(
+                    ["range": remindersRange.rawValue],
+                    for: remindersTool,
+                    context: context
+                  ) else {
+                return nil
+            }
+            Self.debugLog("preflight selected reminders_brief follow-up range=\(remindersRange.rawValue) (planner skipped)")
+            return .call(ToolCallRequest(toolName: remindersTool.name, arguments: arguments))
+
+        case "calendar_brief":
+            guard range != RemindersRange.all.rawValue,
+                  range != RemindersRange.overdue.rawValue,
+                  let calendarTool = toolsByName["calendar_brief"],
+                  let calendarRange = CalendarBriefRange(rawValue: range),
+                  case .success(let arguments) = validatedArguments(
+                    ["range": calendarRange.rawValue],
+                    for: calendarTool,
+                    context: context
+                  ) else {
+                return nil
+            }
+            Self.debugLog("preflight selected calendar_brief follow-up range=\(calendarRange.rawValue) (planner skipped)")
+            return .call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments))
+
+        default:
+            return nil
+        }
+    }
+
+    private nonisolated func briefFollowUpRange(for userMessage: String) -> String? {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return nil }
+
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let allowedTokens = Set([
+            "and",
+            "for",
+            "what",
+            "about",
+            "any",
+            "anything",
+            "how",
+            "bout",
+            "the",
+            "ones",
+            "one",
+            "on",
+            "in",
+            "my",
+            "appointment",
+            "appointments",
+            "event",
+            "events",
+            "meeting",
+            "meetings",
+            "reminder",
+            "reminders",
+            "todo",
+            "todos",
+            "task",
+            "tasks",
+            "to",
+            "do",
+            "show",
+            "list",
+            "me",
+            "them",
+            "those",
+            "all",
+            "today",
+            "tomorrow",
+            "overdue",
+            "this",
+            "week",
+            "next",
+            "seven",
+            "7",
+            "days",
+            "coming",
+            "upcoming"
+        ])
+        guard tokens.isSubset(of: allowedTokens) else { return nil }
+
+        if normalized.contains("overdue") {
+            return RemindersRange.overdue.rawValue
+        }
+        if normalized.contains("tomorrow") {
+            return RemindersRange.tomorrow.rawValue
+        }
+        if normalized.contains("today") {
+            return RemindersRange.today.rawValue
+        }
+        if normalized.contains("this week") || tokens.contains("week") {
+            return RemindersRange.thisWeek.rawValue
+        }
+        if normalized.contains("next 7 days")
+            || normalized.contains("next seven days")
+            || normalized.contains("coming 7 days")
+            || normalized.contains("upcoming") {
+            return RemindersRange.next7Days.rawValue
+        }
+        if tokens.contains("all") {
+            return RemindersRange.all.rawValue
+        }
+        return nil
     }
 
     func plan(
@@ -1793,7 +1927,7 @@ actor ToolCallingService {
                 return .success(range)
             case "reminders_brief":
                 guard RemindersRange(rawValue: range) != nil else {
-                    return .failure(.invalidArguments("Argument `range` must be one of: today, tomorrow, this_week, next_7_days, overdue."))
+                    return .failure(.invalidArguments("Argument `range` must be one of: all, today, tomorrow, this_week, next_7_days, overdue."))
                 }
                 return .success(range)
             default:
@@ -2330,8 +2464,11 @@ actor ToolCallingService {
             "available",
             "busy",
             "free",
+            "appointment",
             "appointments",
+            "meeting",
             "meetings",
+            "event",
             "events",
             "conflicts",
             "what do i have",
@@ -2636,7 +2773,10 @@ actor ToolCallingService {
             || normalized.contains("upcoming") {
             return .next7Days
         }
-        return .today
+        if normalized.contains("today") {
+            return .today
+        }
+        return .all
     }
 
     private nonisolated func heuristicWebSearchQuery(for userMessage: String) -> String? {

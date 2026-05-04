@@ -488,6 +488,172 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
+    func testPreflightReminderBriefWithoutDateUsesAllRange() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What reminders I have?",
+            context: emptyContext,
+            tools: [remindersBriefTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "reminders_brief", arguments: ["range": "all"])))
+        )
+    }
+
+    func testPreflightReminderBriefWithTodayKeepsTodayRange() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What reminders do I have today?",
+            context: emptyContext,
+            tools: [remindersBriefTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "reminders_brief", arguments: ["range": "today"])))
+        )
+    }
+
+    func testPreflightReminderBriefRangeFollowUpUsesPreviousReminderTool() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "What reminders do I have?"),
+            ChatMessage(
+                role: .assistant,
+                content: "Here are your reminders.",
+                toolTrace: ToolCallTrace(
+                    toolName: "reminders_brief",
+                    displayInput: "all",
+                    status: .success,
+                    durationSeconds: 0.1,
+                    success: true,
+                    sourceCount: 3
+                )
+            )
+        ]
+
+        let decision = service.preflightDecision(
+            userMessage: "And for tomorrow?",
+            context: emptyContext,
+            tools: [remindersBriefTool],
+            history: history
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "reminders_brief", arguments: ["range": "tomorrow"])))
+        )
+    }
+
+    func testPreflightReminderBriefUpcomingFollowUpUsesNextSevenDays() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "What reminders do I have?"),
+            ChatMessage(
+                role: .assistant,
+                content: "Here are your reminders.",
+                toolTrace: ToolCallTrace(
+                    toolName: "reminders_brief",
+                    displayInput: "all",
+                    status: .success,
+                    durationSeconds: 0.1,
+                    success: true,
+                    sourceCount: 5
+                )
+            )
+        ]
+
+        let decision = service.preflightDecision(
+            userMessage: "And any upcoming?",
+            context: emptyContext,
+            tools: [remindersBriefTool],
+            history: history
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "reminders_brief", arguments: ["range": "next_7_days"])))
+        )
+    }
+
+    func testPreflightCalendarBriefUpcomingFollowUpUsesNextSevenDays() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "What events do I have?"),
+            ChatMessage(
+                role: .assistant,
+                content: "Here are your events.",
+                toolTrace: ToolCallTrace(
+                    toolName: "calendar_brief",
+                    displayInput: "today",
+                    status: .success,
+                    durationSeconds: 0.1,
+                    success: true,
+                    sourceCount: 2
+                )
+            )
+        ]
+
+        let decision = service.preflightDecision(
+            userMessage: "And any upcoming?",
+            context: emptyContext,
+            tools: [calendarTool],
+            history: history
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "calendar_brief", arguments: ["range": "next_7_days"])))
+        )
+    }
+
+    func testPreflightCalendarBriefRecognizesSingularUpcomingEvent() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Any upcoming event?",
+            context: emptyContext,
+            tools: [calendarTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "calendar_brief", arguments: ["range": "next_7_days"])))
+        )
+    }
+
+    func testPreflightRangeFollowUpDoesNotReuseUnrelatedTool() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "Search Marc in my contacts"),
+            ChatMessage(
+                role: .assistant,
+                content: "I found Marc.",
+                toolTrace: ToolCallTrace(
+                    toolName: "contacts_lookup",
+                    displayInput: "Marc",
+                    status: .success,
+                    durationSeconds: 0.1,
+                    success: true,
+                    sourceCount: 1
+                )
+            )
+        ]
+
+        let decision = service.preflightDecision(
+            userMessage: "And for tomorrow?",
+            context: emptyContext,
+            tools: [remindersBriefTool],
+            history: history
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
+    }
+
     func testResolvedDecisionDoesNotConfuseRemindMeToWithMemory() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
@@ -927,13 +1093,13 @@ final class ToolPlannerParsingTests: XCTestCase {
     private var remindersBriefTool: ToolDefinition {
         ToolDefinition(
             name: "reminders_brief",
-            description: "Reads incomplete reminders for a bounded range.",
+            description: "Reads incomplete reminders.",
             argumentSchema: [
                 ToolArgument(
                     name: "range",
                     type: "string",
                     required: true,
-                    description: "One of today, tomorrow, this_week, next_7_days, overdue."
+                    description: "One of all, today, tomorrow, this_week, next_7_days, overdue."
                 )
             ],
             metadata: ToolMetadata(executionClass: .local)

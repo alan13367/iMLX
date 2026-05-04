@@ -308,7 +308,8 @@ final class ChatViewModel {
                 let preflight = appState.toolCallingService.preflightDecision(
                     userMessage: text,
                     context: toolContext,
-                    tools: tools
+                    tools: tools,
+                    history: history
                 )
 
                 let decision: ToolDecision
@@ -389,10 +390,18 @@ final class ChatViewModel {
                 memoryRetrievalResult.contextBlock,
                 for: loadedModel
             )
-            let toolContextBlock = self.promptToolContext(
-                toolResult?.contextBlock ?? "",
-                for: loadedModel
-            )
+            let toolContextBlock: String
+            if let toolResult = toolResult,
+               toolResult.status == .noContent,
+               let message = toolResult.message,
+               !message.isEmpty {
+                toolContextBlock = message
+            } else {
+                toolContextBlock = self.promptToolContext(
+                    toolResult?.contextBlock ?? "",
+                    for: loadedModel
+                )
+            }
             let effectiveUserPrompt = self.promptWithToolContext(
                 userPrompt: text,
                 toolContext: toolContextBlock

@@ -33,6 +33,7 @@ struct ChatNoticeBanner: View {
             }
             .buttonStyle(.plain)
             .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
             .accessibilityLabel(dismissLabel)
         }
         .padding(.horizontal, 12)

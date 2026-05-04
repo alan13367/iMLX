@@ -142,7 +142,7 @@ nonisolated struct ToolExecutionResult: Codable, Hashable, Sendable {
     let durationSeconds: TimeInterval
 
     var success: Bool {
-        status == .success
+        status == .success || status == .noContent
     }
 }
 

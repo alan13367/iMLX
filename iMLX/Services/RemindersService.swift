@@ -2,6 +2,7 @@ import EventKit
 import Foundation
 
 nonisolated enum RemindersRange: String, CaseIterable, Sendable {
+    case all
     case today
     case tomorrow
     case thisWeek = "this_week"
@@ -50,6 +51,14 @@ actor RemindersService {
         formatter.timeZone = calendar.timeZone
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+
+        let rangeReference = dateReferenceBlock(
+            range: range.rawValue,
+            startDate: startDate,
+            endDate: endDate,
+            now: now,
+            formatter: formatter
+        )
 
         var sections: [String] = []
         var sources: [MessageSource] = []
@@ -100,7 +109,7 @@ actor RemindersService {
         let contextBlock = """
         The user granted local Reminders access. Use the items below only for todo, task, and reminder questions.
 
-        Reminders range: \(range.rawValue)
+        \(rangeReference)
 
         \(sections.joined(separator: "\n\n---\n\n"))
         """
@@ -189,6 +198,8 @@ actor RemindersService {
 
     private func dueDateBounds(for range: RemindersRange, now: Date) -> (Date?, Date?) {
         switch range {
+        case .all:
+            return (nil, nil)
         case .overdue:
             return (nil, now)
         case .today:
@@ -205,5 +216,22 @@ actor RemindersService {
             let end = calendar.date(byAdding: .day, value: 7, to: now) ?? now.addingTimeInterval(604_800)
             return (now, end)
         }
+    }
+
+    private func dateReferenceBlock(
+        range: String,
+        startDate: Date?,
+        endDate: Date?,
+        now: Date,
+        formatter: DateFormatter
+    ) -> String {
+        let start = startDate.map { formatter.string(from: $0) } ?? "unbounded"
+        let end = endDate.map { formatter.string(from: $0) } ?? "unbounded"
+        return """
+        Current local date/time: \(formatter.string(from: now))
+        Reminders range: \(range)
+        Range start: \(start)
+        Range end: \(end)
+        """
     }
 }

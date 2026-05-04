@@ -65,56 +65,60 @@ struct UserMessageBubble: View {
 struct MessageDeliveryStatusView: View {
     let state: MessageDeliveryState
     let onRetry: (() -> Void)?
+    @State private var hapticLightTrigger = 0
 
     var body: some View {
-        switch state {
-        case .sent:
-            EmptyView()
-        case .sending:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(.secondary)
-                Text(String.appLocalized("message.sending"))
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .combine)
-            .transition(.opacity)
-        case .failed:
-            HStack(spacing: 8) {
+        Group {
+            switch state {
+            case .sent:
+                EmptyView()
+            case .sending:
                 HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.orange)
-                        .symbolRenderingMode(.hierarchical)
-                    Text(String.appLocalized("message.failed"))
-                        .font(.caption.weight(.semibold))
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.secondary)
+                    Text(String.appLocalized("message.sending"))
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
-
-                if let onRetry {
-                    Button {
-                        Haptics.impactLight()
-                        onRetry()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.caption2.weight(.bold))
-                            Text(String.appLocalized("message.retry"))
-                                .font(.caption.weight(.semibold))
-                        }
-                        .foregroundStyle(BrandPalette.accent)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(BrandPalette.accent.opacity(0.14), in: Capsule())
+                .accessibilityElement(children: .combine)
+                .transition(.opacity)
+            case .failed:
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.orange)
+                            .symbolRenderingMode(.hierarchical)
+                        Text(String.appLocalized("message.failed"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(String.appLocalized("message.retry"))
+
+                    if let onRetry {
+                        Button {
+                            hapticLightTrigger += 1
+                            onRetry()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption2.weight(.bold))
+                                Text(String.appLocalized("message.retry"))
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .foregroundStyle(BrandPalette.accent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(BrandPalette.accent.opacity(0.14), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(String.appLocalized("message.retry"))
+                    }
                 }
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
-            .transition(.opacity.combined(with: .move(edge: .trailing)))
         }
+        .sensoryFeedback(.impact(weight: .light), trigger: hapticLightTrigger)
     }
 }
 
@@ -125,6 +129,7 @@ struct MessageDeliveryStatusView: View {
 struct AssistantMessageText: View {
     let text: String
     let isStreaming: Bool
+    var linkPhoneNumbers: Bool = false
 
     var body: some View {
         if isStreaming {
@@ -141,7 +146,12 @@ struct AssistantMessageText: View {
                     .alignmentGuide(.lastTextBaseline) { d in d[VerticalAlignment.center] + 6 }
             }
         } else {
-            MessageMarkdownText(text: text, isStreaming: false, linkTint: BrandPalette.accent)
+            MessageMarkdownText(
+                text: text,
+                isStreaming: false,
+                linkTint: BrandPalette.accent,
+                linkPhoneNumbers: linkPhoneNumbers
+            )
                 .font(.body)
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.leading)

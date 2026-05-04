@@ -16,6 +16,7 @@ struct MessageToolCallCard: View {
 
     let phase: Phase
     @State private var isExpanded: Bool = false
+    @State private var hapticSelectionTrigger = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -43,6 +44,7 @@ struct MessageToolCallCard: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
+        .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
     }
 
     // MARK: - Header
@@ -78,7 +80,7 @@ struct MessageToolCallCard: View {
             withAnimation(.easeInOut(duration: 0.18)) {
                 isExpanded.toggle()
             }
-            Haptics.selectionChanged()
+            hapticSelectionTrigger += 1
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: completedIconName)
@@ -95,7 +97,7 @@ struct MessageToolCallCard: View {
                 if case .completed(let trace) = phase,
                    let duration = trace.durationSeconds,
                    duration >= 0.1 {
-                    Text(String(format: "%.1fs", duration))
+                    Text("\(duration, format: .number.precision(.fractionLength(1)))s")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }

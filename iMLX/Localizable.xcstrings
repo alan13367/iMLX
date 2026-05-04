@@ -30,6 +30,9 @@
     "%@ Family" : {
 
     },
+    "%@ GB" : {
+
+    },
     "%@, %@" : {
       "localizations" : {
         "en" : {
@@ -59,6 +62,9 @@
           }
         }
       }
+    },
+    "%@s" : {
+
     },
     "%lld" : {
 
@@ -1150,6 +1156,9 @@
 
     },
     "Dismiss error" : {
+
+    },
+    "Dismiss notice" : {
 
     },
     "document.kind.csv" : {

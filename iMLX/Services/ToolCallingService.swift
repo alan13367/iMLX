@@ -1150,6 +1150,7 @@ actor ToolCallingService {
         let hints = [
             "contact",
             "contacts",
+            "address book",
             "phone number",
             "email address",
             "email for",
@@ -2471,14 +2472,19 @@ actor ToolCallingService {
 
     private nonisolated func heuristicContactsLookupRawArguments(for userMessage: String) -> [String: String]? {
         let compact = userMessage
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "‘", with: "'")
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let patterns = [
-            #"(?i)\b(?:look up|find|search for)\s+(.+?)\s+(?:in\s+)?(?:my\s+)?contacts?\b"#,
+            #"(?i)\b(?:look up|find|search(?:\s+for)?)\s+(.+?)\s+(?:in\s+|on\s+)?(?:my\s+)?(?:contacts?|phone|address book)\b"#,
+            #"(?i)\b(?:look up|find|search)\s+(?:my\s+)?(?:contacts?|phone|address book)\s+for\s+(.+?)(?:[.?]|$)"#,
             #"(?i)\b(?:contact info|contact details)\s+(?:for\s+)?(.+?)(?:[.?]|$)"#,
             #"(?i)\bwhat(?:'s| is)?\s+(.+?)\s+(?:contact|contact info|contact details)(?:[.?]|$)"#,
             #"(?i)\b(?:phone number|email address|email|number)\s+(?:for|of)\s+(.+?)(?:[.?]|$)"#,
-            #"(?i)\bwhat(?:'s| is)?\s+(.+?)'s\s+(?:phone number|email address|email|number)(?:[.?]|$)"#
+            #"(?i)\bwhat(?:'s| is)?\s+(.+?)(?:'s|\s+s)?\s+(?:phone number|email address|email|number)(?:[.?]|$)"#,
+            #"(?i)\b(?:do i have|is)\s+(.+?)\s+(?:as\s+(?:a\s+)?)?(?:in\s+|on\s+)?(?:my\s+)?(?:contacts?|phone|address book)\b"#,
+            #"(?i)\b(?:do i have|is)\s+(.+?)\s+as\s+(?:a\s+)?contact\s+(?:in\s+|on\s+)?(?:my\s+)?(?:phone|address book|contacts?)\b"#
         ]
         for pattern in patterns {
             guard let capture = firstRegexCapture(pattern: pattern, in: compact) else { continue }

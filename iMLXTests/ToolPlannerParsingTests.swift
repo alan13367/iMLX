@@ -741,6 +741,21 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
+    func testPreflightContactsLookupAcceptsSearchWithoutFor() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Search Marc in my contacts",
+            context: emptyContext,
+            tools: [contactsLookupTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "contacts_lookup", arguments: ["query": "Marc"])))
+        )
+    }
+
     func testPreflightContactsLookupExtractsWhatIsContactQuery() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
@@ -753,6 +768,36 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertEqual(
             decision,
             .skip(.call(ToolCallRequest(toolName: "contacts_lookup", arguments: ["query": "Mami"])))
+        )
+    }
+
+    func testPreflightContactsLookupExtractsCurlyPossessivePhoneQuery() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What is Ivana’s phone number?",
+            context: emptyContext,
+            tools: [contactsLookupTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "contacts_lookup", arguments: ["query": "Ivana"])))
+        )
+    }
+
+    func testPreflightContactsLookupExtractsContactExistenceQuery() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Do I have Ivana as contact in my phone?",
+            context: emptyContext,
+            tools: [contactsLookupTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "contacts_lookup", arguments: ["query": "Ivana"])))
         )
     }
 

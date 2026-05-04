@@ -7,6 +7,7 @@ struct MessageSourcesPanel: View {
     let openSource: (URL?) -> Void
 
     @State private var isExpanded: Bool = false
+    @State private var hapticSelectionTrigger = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -23,6 +24,7 @@ struct MessageSourcesPanel: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
     }
 
     private var disclosureButton: some View {
@@ -30,7 +32,7 @@ struct MessageSourcesPanel: View {
             withAnimation(.easeInOut(duration: 0.2)) {
                 isExpanded.toggle()
             }
-            Haptics.selectionChanged()
+            hapticSelectionTrigger += 1
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "doc.text.magnifyingglass")

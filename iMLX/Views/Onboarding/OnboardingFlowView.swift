@@ -86,9 +86,6 @@ struct OnboardingFlowView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: step)
-            .onChange(of: step) { _, _ in
-                Haptics.selectionChanged()
-            }
 
             // Fixed Footer
             OnboardingFooter(
@@ -121,6 +118,7 @@ struct OnboardingFlowView: View {
                     .ignoresSafeArea(edges: .bottom)
             )
         }
+        .sensoryFeedback(.selection, trigger: step)
     }
 
     private func selectModel(_ modelID: String) {
@@ -179,14 +177,15 @@ private struct OnboardingProgressHeader: View {
     var body: some View {
         VStack(spacing: 24) {
             Image(systemName: step.icon)
-                .font(.system(size: 56, weight: .light))
+                .font(.largeTitle.weight(.light))
                 .foregroundStyle(BrandPalette.primaryGradient)
                 .symbolEffect(.bounce.up.byLayer, options: .nonRepeating)
                 .frame(height: 60)
             
             VStack(spacing: 12) {
                 Text(step.title)
-                    .font(.system(.title, design: .rounded).weight(.bold))
+                    .font(.system(.title, design: .rounded))
+                    .bold()
                     .multilineTextAlignment(.center)
                 
                 HStack(spacing: 8) {
@@ -286,6 +285,7 @@ private struct OnboardingModelSelectionStep: View {
     let recommendedModels: [ModelInfo]
     let selectedModelID: String?
     let onSelectModel: (String) -> Void
+    @State private var hapticSelectionTrigger = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -302,12 +302,13 @@ private struct OnboardingModelSelectionStep: View {
                     isRecommended: recommendedModels.first?.id == model.id,
                     isSelected: selectedModelID == model.id,
                     onSelect: {
-                        Haptics.selectionChanged()
+                        hapticSelectionTrigger += 1
                         onSelectModel(model.id)
                     }
                 )
             }
         }
+        .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
     }
 }
 
@@ -377,13 +378,15 @@ private struct OnboardingFooter: View {
     let onSkipModelSelection: () -> Void
     let onContinue: () -> Void
     let onBack: () -> Void
+    @State private var hapticLightTrigger = 0
+    @State private var hapticSelectionTrigger = 0
 
     var body: some View {
         VStack(spacing: 16) {
             if step == .modelSelection {
                 if let selectedModel {
                     Button(action: {
-                        Haptics.impactLight()
+                        hapticLightTrigger += 1
                         onDownloadSelectedModel()
                     }) {
                         HStack {
@@ -400,7 +403,7 @@ private struct OnboardingFooter: View {
                 }
 
                 Button(action: {
-                    Haptics.impactLight()
+                    hapticLightTrigger += 1
                     onSkipModelSelection()
                 }) {
                     Text("Skip for now")
@@ -409,7 +412,7 @@ private struct OnboardingFooter: View {
                 .liquidGlassButtonStyle(prominent: false)
             } else {
                 Button(action: {
-                    Haptics.impactLight()
+                    hapticLightTrigger += 1
                     onContinue()
                 }) {
                     Text(step == .finish ? "Start Using iMLX" : "Continue")
@@ -422,7 +425,7 @@ private struct OnboardingFooter: View {
 
             if step.rawValue > OnboardingStep.welcome.rawValue && step != .finish {
                 Button(action: {
-                    Haptics.selectionChanged()
+                    hapticSelectionTrigger += 1
                     onBack()
                 }) {
                     Text("Back")
@@ -432,6 +435,8 @@ private struct OnboardingFooter: View {
                 .buttonStyle(.plain)
             }
         }
+        .sensoryFeedback(.impact(weight: .light), trigger: hapticLightTrigger)
+        .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
     }
 }
 

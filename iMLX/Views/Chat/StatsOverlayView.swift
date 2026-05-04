@@ -5,7 +5,7 @@ struct StatsOverlayView: View {
     let isLive: Bool
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 StatItem(icon: "gauge.with.dots.needle.33percent", value: stats.formattedTokensPerSecond, isLive: isLive)
                 StatItem(icon: "text.word.spacing", value: stats.formattedTokenCount, isLive: isLive)
@@ -14,6 +14,7 @@ struct StatsOverlayView: View {
             }
             .liquidGlassContainer(spacing: 8)
         }
+        .scrollIndicators(.hidden)
         .fixedSize(horizontal: false, vertical: true)
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }

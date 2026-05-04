@@ -1,103 +1,75 @@
 # AGENTS.md — iMLX Working Notes
 
-## Project
-`iMLX` is an on-device AI chat app for iOS/iPadOS built with SwiftUI and MLX Swift. It runs models locally on Apple Silicon with no required cloud backend.
+## Purpose
 
-## Use This File For
-- Core architecture and safety constraints
-- Build commands that work in this repo
-- High-signal codebase orientation
-- Project conventions that are easy to violate
+`iMLX` is an on-device AI chat app for iOS/iPadOS built with SwiftUI and MLX Swift. It runs local models on Apple Silicon with no required cloud backend.
 
-Do not treat this file as a changelog. Prefer code as the source of truth for detailed UX, copy, and current model catalog contents.
+Use this file for build commands, architecture boundaries, runtime constraints, and repo orientation. Do not use it as a changelog; source files are the authority for UX copy, exact model catalog entries, and feature details.
 
 ## Quick Commands
 
-### Build for simulator
 ```bash
+# Simulator build: UI/build verification only; simulator cannot run MLX inference.
 xcodebuild build \
   -project "iMLX.xcodeproj" \
   -scheme "iMLX" \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO
-```
 
-### Build for device
-```bash
+# Device build.
 xcodebuild build \
   -project "iMLX.xcodeproj" \
   -scheme "iMLX" \
   -destination 'generic/platform=iOS'
-```
 
-### Resolve packages
-```bash
+# Resolve packages.
 xcodebuild -resolvePackageDependencies \
   -project "iMLX.xcodeproj" \
   -scheme "iMLX"
-```
 
-### Build tests for simulator
-```bash
+# Build tests, then run the app test bundle.
 xcodebuild build-for-testing \
   -project "iMLX.xcodeproj" \
   -scheme "iMLX" \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO
-```
 
-### Run tool-calling tests
-```bash
 xcodebuild test-without-building \
   -project "iMLX.xcodeproj" \
   -scheme "iMLX" \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:iMLXTests
-```
 
-### Install Metal toolchain for CLI builds
-```bash
+# Needed if CLI/Xcode builds complain about Metal pieces.
 xcodebuild -downloadComponent MetalToolchain
 ```
 
-## Architecture
+## Non-Negotiable Constraints
 
-- App structure: SwiftUI + MVVM using `@Observable`
-- Inference isolation: MLX work is serialized through `InferenceService` (`actor`)
-- Streaming: actor inference streams tokens through `AsyncThrowingStream<String, Error>` into `@MainActor` view model state
-- Shared app state: `AppState` owns shared services and persisted selection state
-- Chat orchestration: `ChatViewModel` owns transcript state, send/generation flow, streaming UI state, attachments, persona selection, and save/update behavior
-- Conversations: each generation rebuilds prompt/session state from visible conversation history rather than relying on hidden long-lived chat session state
-- Tool calling: `ToolCallingService` is the generic planner/executor layer for model-driven tools; it plans with the currently loaded model, executes at most one tool per turn, and fails closed to local generation on invalid planner output
-- Tool inputs: tool availability is current-turn-aware via `ToolInputContext` (latest message text, attached images, detected public URLs)
-- Current tools: `read_url`, `ocr_image_text`, and `web_search`
-- Tool gating: the Web Search toggle gates internet-dependent tools (`web_search` and `read_url`); local OCR remains available when the latest user message includes attached images
-- Tool precedence: one tool call per turn, with deterministic preference for `read_url` over OCR/text extraction fallbacks over `web_search`
-- Retrieval grounding: assistant source attribution can now come from document, web, or image/OCR results
-- Persona system: each conversation binds to a `Persona`; persona selection changes prompting behavior but does not auto-load a different model
-- Documents: local PDF/CSV/text files are imported, extracted, chunked, indexed, and retrieved locally through `DocumentLibraryService`
-- Memory: compact user memories are stored locally through `MemorySystem`; ingestion is source-grounded and multilingual, evidence and lifecycle events are persisted in SQLite/GRDB, and bounded retrieval explanations are injected into prompt context when relevant
-- Vision: vision-capable models must load through the VLM path, not the text-only loader
-- OCR: attached-image text extraction is local and on-device via Vision (`ImageOCRService`); v1 only reads images attached on the current user message
-- TTS vendor boundary: `iMLX/Vendor/KokoroSwift` is a compatibility layer over downloaded Kokoro checkpoints; checkpoint-specific tensor normalization belongs in `WeightLoader.swift` and `QuantizedModuleFactory.swift`, not scattered through model code
-
-## Important Constraints
-
-1. MLX is not thread-safe. Do not perform MLX array/model work outside the inference actor.
-2. Memory pressure is the main runtime constraint. Large models and long prompts can crash or be jetsammed on device.
+1. MLX is not thread-safe. All MLX array/model work belongs inside the `InferenceService` actor or another explicit serialized boundary.
+2. Memory pressure is the dominant runtime risk. Large models, long prompts, and unbounded retrieval context can jetsam the app.
 3. SwiftPM CLI alone cannot compile the Metal pieces; use Xcode/Xcodebuild.
-4. iOS Simulator cannot run MLX inference. Simulator builds are for UI/build verification only.
+4. iOS Simulator cannot run MLX inference, AlarmKit scheduling, or Live Activities. Use it for builds/UI only; use a physical device for those features.
 5. Inference is foreground-only. Do not design around background GPU execution.
 6. Deployment target is iOS 26+.
-7. The project currently uses `main` for `mlx-swift`, pins `mlx-swift-lm` to `3.31.3`, and links `swift-tokenizers-mlx` for local tokenizer loading with MLX Swift LM 3.x.
-8. The Xcode target defaults actor isolation to `MainActor`, so pure helpers that run off the main actor may need explicit `nonisolated` annotations.
-9. Memory extraction must only persist facts grounded in the user message. Do not turn assistant answers, recommendations, prices, or unquoted generated details into memories.
-10. Current Kokoro checkpoints are not shape-compatible with the original vendor assumptions: many linear and embedding tensors are quantized (`U32` packed weights plus `scales`/`biases`), LSTM weights use newer key names, and conv/`weight_v` tensors already arrive in MLX-friendly layout. Do not blindly transpose or load them as dense tensors.
-11. Tool-calling planner output is intentionally treated as untrusted and brittle. Invalid or ambiguous planner output must degrade to `.none`, not to a guessed tool call, except for narrowly defined deterministic fallbacks already encoded in `ToolCallingService`.
-12. Do not treat enabling Web Search as permission to always search. Search is now a tool decision, not a side effect of the toggle.
-13. `read_url` and OCR are grounded only in the latest user turn in v1. Do not silently scrape older messages or attachments when planning/executing these tools.
-14. `read_url` v1 is for a single public `http/https` URL in the latest message. Multiple URLs should force clarification instead of arbitrary selection.
-15. AlarmKit (`timer_create`) requires three things to coexist or `AlarmManager.shared.requestAuthorization()` and `schedule(...)` will fail immediately with the opaque `com.apple.AlarmKit.Alarm` code 1 NSError: (a) `NSAlarmKitUsageDescription` actually present in the runtime `Info.plist`, (b) `NSSupportsLiveActivities = YES`, (c) an embedded Widget Extension that registers an `ActivityConfiguration(for: AlarmAttributes<IMLXTimerMetadata>.self)`. Do not assume a missing key in `Info.plist` would have shown a permission dialog — AlarmKit fails silently before the dialog is ever presented.
+7. The project uses `mlx-swift` from `main`, pins `mlx-swift-lm` to `3.31.3`, and uses `swift-tokenizers-mlx` for local tokenizer loading.
+8. The Xcode target defaults actor isolation to `MainActor`; pure off-main helpers may need explicit `nonisolated`.
+9. Persisted chat/conversation/tool/source models require backward-compatible decoding.
+10. Do not add parallel architecture when an existing service boundary fits.
+
+## Architecture
+
+- App state: `AppState` owns shared services, model/persona/conversation selection, and persisted app-level state.
+- Chat orchestration: `ChatViewModel` owns transcript state, send/generation flow, streaming UI state, attachments, persona binding, tool traces, and save/update behavior.
+- Inference: `InferenceService` is an actor; it loads models and streams tokens via `AsyncThrowingStream<String, Error>` into `@MainActor` UI state.
+- Prompt/session policy: every generation rebuilds prompt/session state from visible conversation history instead of relying on hidden long-lived chat state.
+- UI: SwiftUI + `@Observable`. Root chat orchestration lives in `ChatView`; extracted chat UI lives under `iMLX/Views/Chat/Components`.
+- Models/personas: curated model entries live in `Constants.swift`; built-in personas are seeded by `PersonaService`. Read code for exact IDs/capabilities.
+- Documents: `DocumentLibraryService` imports local PDF/CSV/text files, extracts/chunks/indexes them, and retrieves bounded local context.
+- Memory: `MemorySystem` is the app-facing facade over actor-backed GRDB persistence and retrieval. Persist only facts grounded in user text.
+- Tool calling: `ToolCallingService` plans with the currently loaded local model, executes at most one tool per turn, and fails closed to normal generation on invalid planner output.
+- Vision/OCR: vision-capable models must load through the VLM path. OCR is local via Vision and only reads images attached to the latest user turn in v1.
+- TTS: Kokoro checkpoint compatibility belongs in `Vendor/KokoroSwift` loader/factory code, not scattered through model math.
 
 ## Codebase Map
 
@@ -107,137 +79,99 @@ iMLX/
 ├── Models/               App state and persisted data models
 ├── ViewModels/           Chat and model-management state
 ├── Views/                SwiftUI screens and components
-├── Services/             Inference, downloads, persistence, memory, documents
+│   └── Chat/
+│       ├── ChatView.swift Root chat shell, toolbar, sheets, and orchestration
+│       └── Components/    Transcript, composer, status, attachments, messages
+├── Services/             Inference, downloads, persistence, memory, documents, tools
 ├── Utilities/            Constants, localization, styling, helpers
 └── Assets.xcassets/
-iMLXAlarmWidget/          Widget Extension (Live Activity for AlarmKit timers)
-iMLXInfo.plist            Main app Info.plist (holds keys Xcode 26 won't auto-inject, e.g. NSAlarmKitUsageDescription)
-iMLXAlarmWidgetInfo.plist Widget Extension Info.plist (NSExtension WidgetKit point)
+iMLXAlarmWidget/          Widget Extension for AlarmKit timer Live Activity
+iMLXInfo.plist            Main app Info.plist for keys Xcode will not auto-inject
+iMLXAlarmWidgetInfo.plist Widget extension Info.plist
 ```
 
-High-value files:
+High-value files and folders:
+
 - `iMLX/Models/AppState.swift`
-- `iMLX/Models/UserMemory.swift`
 - `iMLX/Models/ToolCallingModels.swift`
 - `iMLX/Models/MessageSource.swift`
+- `iMLX/Models/UserMemory.swift`
 - `iMLX/ViewModels/ChatViewModel.swift`
 - `iMLX/Services/InferenceService.swift`
-- `iMLX/Services/DocumentLibraryService.swift`
 - `iMLX/Services/ToolCallingService.swift`
 - `iMLX/Services/WebSearchService.swift`
 - `iMLX/Services/ImageOCRService.swift`
-- `iMLX/Services/MemoryService.swift`
+- `iMLX/Services/DocumentLibraryService.swift`
+- `iMLX/Services/MemoryService*.swift`
 - `iMLX/Services/MemoryStore.swift`
 - `iMLX/Services/MemoryDatabase.swift`
-- `iMLX/Services/MemoryService+Extraction.swift`
-- `iMLX/Services/MemoryService+Retrieval.swift`
-- `iMLX/Services/MemoryService+Shared.swift`
 - `iMLX/Services/MemorySupport.swift`
+- `iMLX/Services/TimerService.swift`
+- `iMLX/Services/IMLXTimerMetadata.swift`
 - `iMLX/Views/Chat/ChatView.swift`
+- `iMLX/Views/Chat/Components/`
 - `iMLX/Utilities/Constants.swift`
 - `iMLX/Localizable.xcstrings`
-- `iMLX/Services/TimerService.swift`
-- `iMLX/Services/IMLXTimerMetadata.swift` (shared with the widget extension target via a `PBXFileSystemSynchronizedBuildFileExceptionSet`)
 - `iMLXAlarmWidget/IMLXAlarmWidgetBundle.swift`
 - `iMLXAlarmWidget/IMLXAlarmLiveActivity.swift`
 - `iMLXTests/ToolPlannerParsingTests.swift`
 - `iMLXTests/ToolRegistryTests.swift`
 - `iMLXTests/ToolExecutionTests.swift`
 
-## Memory Architecture
+## Tool Calling Rules
 
-- `MemoryService.swift` now defines `MemorySystem`, the app-facing facade used by `AppState` and chat flows. It owns legacy JSON import, relation blocking policy, and synchronous bridges into the actor-backed store/services.
-- `MemoryStore.swift` is the persistence boundary (`actor`). It owns GRDB reads/writes, transactional inserts/updates, candidate generation, archive/status transitions, evidence/event loading, retrieval logging, and corruption recovery.
-- `MemoryDatabase.swift` owns the normalized SQLite schema and migrations. The durable source of truth is now the `memory_item`, `memory_fact`, `memory_evidence`, `memory_event`, `memory_embedding_cache`, and `memory_fts` tables. The legacy `user_memory` table remains only for migration/backfill compatibility.
-- `MemoryIngestionService` in `MemoryService.swift` orchestrates normalization, quote validation, duplicate detection, contradiction handling, and persistence of canonical memory rows plus evidence.
-- `MemoryService+Extraction.swift` still parses structured LLM extraction output, normalizes candidates, validates source quotes, rejects unsupported memories, and handles legacy string outputs before they reach ingestion.
-- `MemoryService+Retrieval.swift` owns archive/forget matching, candidate reranking, retrieval explanations, and trace generation. Candidate generation now starts from DB-bounded queries instead of a mutable whole-corpus cache.
-- `MemoryService+Shared.swift` holds shared normalization, language detection, metadata cleanup, and Natural Language sentence embedding helpers.
-- `MemorySupport.swift` contains local support types and algorithms: memory relations, fact signatures, multilingual tokenization, vector math, vector sketching, fact parsing, and vault indexing used for bounded reranking.
-- `UserMemory` is now a UI-facing summary/projection model. Rich detail lives in `MemoryDetail`, `MemoryEvidence`, `MemoryEvent`, and `MemoryRetrievalExplanation`.
-- New structured memories should prefer `factRelation` + `factValue` for deduplication and conflict handling. Every persisted memory should remain grounded in user text through at least one source quote.
-- Retrieval should stay synchronous and local. Use FTS + typed fact lookup + bounded reranking rather than loading the entire corpus into a mutable in-memory index.
+Registered tools include `read_url`, `ocr_image_text`, `web_search`, `document_synthesize`, Calendar/Reminders read/create tools, `current_datetime`, `timer_create`, and `contacts_lookup`.
 
-## Models and Personas
+Important behavior:
 
-- Exact curated model entries live in `iMLX/Utilities/Constants.swift`
-- Built-in personas are seeded by `PersonaService`
-- If a task depends on exact model capabilities or IDs, read `Constants.swift` instead of duplicating assumptions from this file
-- Tool-planner behavior also depends on model characteristics. Thinking-tuned checkpoints may need deterministic fallbacks handled in app code rather than assuming strict JSON planner output compliance.
+- Planner output is untrusted. Invalid or ambiguous output must degrade to `.none`, except for deterministic fallbacks already encoded in `ToolCallingService`.
+- Enabling Web Search is permission to make internet tools available, not permission to always search. Search remains a tool decision.
+- `web_search` and `read_url` are gated by the Web Search toggle; local OCR can run when the latest user message has attached images.
+- `read_url` v1 supports exactly one public `http/https` URL in the latest user message. Multiple URLs should force clarification, not arbitrary selection.
+- OCR and `read_url` are grounded only in the latest user turn in v1. Do not silently scrape older messages or attachments.
+- Retrieval results must be clipped, grounded, and source-attributed before prompt injection.
+- Tool traces are stored on assistant `ChatMessage`s; keep older `rewrittenQuery` decoding compatible with newer `displayInput`.
 
-## Tool Calling Notes
+## Memory Rules
 
-- `ToolCallingService` owns tool registry, planner prompt construction, planner-output parsing, deterministic arbitration, timeout handling, and executor dispatch.
-- The planner uses the currently loaded MLX model with a short deterministic generation budget. It is not a second model or a cloud fallback.
-- Current registered tools:
-  - `read_url`: reads one pasted public URL directly and is gated by the Web Search toggle because it requires network access
-  - `ocr_image_text`: extracts text from images attached on the latest user message
-  - `web_search`: live web retrieval, still gated by the conversation’s Web Search toggle
-  - `document_synthesize`: retrieves excerpts from attached conversation documents
-  - `calendar_brief`: reads local Calendar events for bounded private schedule briefs
-  - `calendar_create`: creates one basic event in the default Calendar when title, concrete start, and concrete end/duration are present (EventKit; mutating)
-  - `current_datetime`: reads local date, time, and timezone from the device clock (no permissions)
-  - `reminders_brief`: reads incomplete local reminders for bounded private briefs
-  - `reminders_create`: creates one reminder in the default Reminders list (EventKit; mutating)
-  - `timer_create`: starts one native iOS 26 AlarmKit timer for an explicit duration (mutating)
-  - `contacts_lookup`: reads matching local Contacts names plus phone/email handles only
-- Deterministic arbitration currently prefers:
-  1. `read_url` when the latest message contains exactly one supported public URL
-  2. `document_synthesize` when attached documents and the message imply document Q&A or summary
-  3. `ocr_image_text` for text-focused image requests when the planner returns `.none`
-  4. `calendar_brief` for schedule-shaped requests when the planner returns `.none`
-  5. `timer_create` for explicit “set/start a timer …” phrasing with a parseable duration
-  6. `calendar_create` for explicit event creation when all required fields are parseable
-  7. `contacts_lookup` for explicit local contact/phone/email lookups
-  8. `reminders_create` for explicit “remind me to …” / “add a reminder …” phrasing (before `reminders_brief`)
-  9. `current_datetime` for explicit current time/date questions
-  7. `reminders_brief` for todo/reminder list requests
-  8. `web_search` heuristics for obvious live-data requests when planner output fails on some thinking-oriented models
-- Persisted tool traces are stored on assistant `ChatMessage`s. Backward compatibility matters because older conversation JSON may still decode `rewrittenQuery` instead of `displayInput`.
+- Persisted memories must be grounded in user-provided text with source quotes. Never store facts from assistant answers, generated recommendations, prices, or unquoted inferred details.
+- Prefer structured `factRelation` + `factValue` for deduplication and contradiction handling.
+- `MemoryStore` is the GRDB actor/persistence boundary; `MemoryDatabase` owns schema/migrations; `MemoryService+Extraction/Retrieval/Shared` split extraction, retrieval, and shared normalization.
+- Retrieval should remain synchronous and local: use FTS + typed fact lookup + bounded reranking, not a mutable whole-corpus in-memory index.
+- `UserMemory` is a UI projection. Rich detail lives in `MemoryDetail`, `MemoryEvidence`, `MemoryEvent`, and retrieval explanation types.
 
 ## AlarmKit / Timer Tool
 
-`timer_create` runs through `TimerService` (`iMLX/Services/TimerService.swift`) and `AlarmManager.shared`. Getting it to work on iOS 26 required three things that are easy to overlook:
+`timer_create` runs through `TimerService` and `AlarmManager.shared`. AlarmKit failures often surface as opaque `com.apple.AlarmKit.Alarm` code 1 errors, so preserve these requirements:
 
-1. **`NSAlarmKitUsageDescription` must actually be in the built `Info.plist`.** Xcode 26.4's `INFOPLIST_KEY_*` auto-injection has a hard-coded allowlist that does **not** include `NSAlarmKitUsageDescription`. Setting `INFOPLIST_KEY_NSAlarmKitUsageDescription = "..."` in build settings is silently dropped. The fix in this project is to ship an actual `iMLXInfo.plist` at the repo root and point `INFOPLIST_FILE = iMLXInfo.plist;` for both Debug and Release of the `iMLX` target. `GENERATE_INFOPLIST_FILE = YES` stays on, so the rest of the recognized `INFOPLIST_KEY_*` values still merge in. If you ever need to add another usage description that Xcode refuses to auto-inject, add it to `iMLXInfo.plist`, not to build settings.
-2. **A Widget Extension target (`iMLXAlarmWidgetExtension`) must be embedded in the app bundle**, registering `ActivityConfiguration(for: AlarmAttributes<IMLXTimerMetadata>.self)`. Without this, `schedule(...)` fails with the same opaque `com.apple.AlarmKit.Alarm` code 1 NSError. `IMLXTimerMetadata` lives in `iMLX/Services/IMLXTimerMetadata.swift` and is shared into the widget target via a `PBXFileSystemSynchronizedBuildFileExceptionSet` so both modules link against the same concrete `AlarmAttributes<IMLXTimerMetadata>` symbol.
-3. **Use `AlarmManager.AlarmConfiguration.timer(duration:attributes:)`**, not the generic `AlarmConfiguration(countdownDuration:attributes:)` initializer. The generic `countdownDuration:` shape (without a schedule, stop intent, and secondary intent) is interpreted as a malformed alarm and rejected as code 1.
-
-The project keeps the widget extension's `Info.plist` (`iMLXAlarmWidgetInfo.plist`) outside the synchronized `iMLXAlarmWidget/` folder so Xcode doesn't double-process it as both Info.plist and a bundled resource (which previously broke the build with "Multiple commands produce ... Info.plist").
-
-`AlarmManager.AlarmError` only exposes `.maximumLimitReached` on iOS 26.4 — there is no `.notAuthorized` case. Treat any other thrown error as a generic `NSError` and surface its `domain`, `code`, and `userInfo` instead of trying to map by `code == 1`. The `code == 1` value is a catch-all and has historically masked at least three different root causes.
-
-AlarmKit and Live Activities do not run on the iOS Simulator. The simulator is fine for verifying that the widget extension is being built, signed, and embedded under `iMLX.app/PlugIns/iMLXAlarmWidgetExtension.appex`, but you must run on a physical device to exercise `requestAuthorization()` or `schedule(...)`.
-
-When changing anything in the AlarmKit path, fully delete the app from the device (long-press → Remove App) before reinstalling. AlarmKit caches the previously-registered `AlarmAttributes<Metadata>` widget set at install time, and an incremental install can re-use the stale registration and keep failing for reasons unrelated to your change.
+1. `NSAlarmKitUsageDescription` must be in the built runtime `Info.plist`. Xcode 26.4 does not auto-inject it from `INFOPLIST_KEY_*`; keep it in `iMLXInfo.plist`.
+2. `NSSupportsLiveActivities = YES` must be present.
+3. The embedded `iMLXAlarmWidgetExtension` must register `ActivityConfiguration(for: AlarmAttributes<IMLXTimerMetadata>.self)`.
+4. Use `AlarmManager.AlarmConfiguration.timer(duration:attributes:)`, not the generic `countdownDuration` initializer.
+5. `IMLXTimerMetadata.swift` is shared with the widget target via a `PBXFileSystemSynchronizedBuildFileExceptionSet`.
+6. Keep `iMLXAlarmWidgetInfo.plist` outside the synchronized widget folder so Xcode does not process it as both Info.plist and resource.
+7. On device, fully delete the app before reinstalling after AlarmKit/widget metadata changes; AlarmKit can cache stale `AlarmAttributes` registrations.
+8. Treat non-`.maximumLimitReached` AlarmKit errors as generic `NSError`s and surface domain/code/userInfo; do not map by `code == 1`.
 
 ## TTS Checkpoints
 
-- The Kokoro compatibility boundary lives in `iMLX/Vendor/KokoroSwift/TTSEngine/WeightLoader.swift` and `iMLX/Vendor/KokoroSwift/BuildingBlocks/QuantizedModuleFactory.swift`.
-- Newer Kokoro checkpoints may rename LSTM tensors (for example `Wx_forward`/`Wh_forward`) and store text/style/BERT layers as packed quantized weights with companion `scales` and `biases`.
-- `predictor`, `text_encoder`, and `decoder` conv kernels in the current checkpoints already use the expected MLX layout. Extra transposes can silently corrupt kernel/channel axes and only fail later at runtime.
-- If TTS crashes with MLX shape errors, inspect the loaded checkpoint tensor names and shapes first before changing model math. Most failures in this area come from loader assumptions, not the inference graph itself.
+- Kokoro compatibility lives in `iMLX/Vendor/KokoroSwift/TTSEngine/WeightLoader.swift` and `iMLX/Vendor/KokoroSwift/BuildingBlocks/QuantizedModuleFactory.swift`.
+- Current checkpoints may store linear/embedding tensors as packed quantized `U32` weights plus `scales`/`biases`, and may use newer LSTM key names such as `Wx_forward`/`Wh_forward`.
+- Predictor/text encoder/decoder conv kernels and `weight_v` tensors already arrive in MLX-friendly layout. Do not blindly transpose or densify.
+- If TTS hits MLX shape errors, inspect loaded tensor names/shapes before changing graph math.
 
-## Conventions
+## Coding Conventions
 
-- Follow existing Swift 5.9+/SwiftUI style
-- Use `@Observable` for view models, not `ObservableObject`
-- Keep all UI state mutations on `@MainActor`
-- Use `actor` for services that touch MLX or require serialized access
-- Use `AsyncThrowingStream` for token streaming
-- Keep tool contracts generic and data-driven. New tools should add a `ToolDefinition`, executor, and context-aware enablement path rather than branching ad hoc in `ChatViewModel`
-- Preserve backward-compatible decoding for persisted conversation models when adding fields to `ChatMessage`, `Conversation`, tool traces, or source types
-- Keep tool results grounded and clipped before prompt injection; use source attribution rather than opaque assistant claims
-- Avoid code comments unless they add real clarity
-- Prefer updating existing architecture over introducing parallel patterns
+- Follow existing Swift 5.9+/SwiftUI style.
+- Use `@Observable` for view models, not `ObservableObject`.
+- Keep UI mutations on `@MainActor`.
+- Use `actor` for MLX or other serialized service boundaries.
+- Use `AsyncThrowingStream` for token streaming.
+- Add new tools through `ToolDefinition`, executor, and context-aware enablement, not ad hoc `ChatViewModel` branches.
+- Preserve backward-compatible decoding for persisted conversations, messages, tool traces, source types, and memory records.
+- Prefer source attribution over opaque assistant claims.
+- Avoid comments unless they clarify non-obvious code.
 
 ## Updating This File
 
-Only update `AGENTS.md` when one of these changes:
-- build or dependency workflow
-- architecture or ownership boundaries
-- runtime constraints or safety assumptions
-- top-level folder structure
-- project conventions
-
-Do not append minor UI tweaks, one-off bug fixes, or full feature histories here.
+Update `AGENTS.md` only when build/dependency workflow, architecture boundaries, runtime constraints, top-level structure, or project conventions change. Do not append minor UI tweaks, one-off bug fixes, or feature history.

@@ -415,6 +415,7 @@ nonisolated enum Constants {
         static let maxCalendarNotesLength = 1_000
         static let maxTimerTitleLength = 120
         static let maxContactQueryLength = 80
+        static let maxContactLookupResults = 10
         static let maxToolResultContextCharacters = 6_000
         static let toolExecutionTimeoutSeconds: TimeInterval = 30
         static let plannerSystemPrompt = """
@@ -441,7 +442,7 @@ nonisolated enum Constants {
         - reminders_brief: the user asks about todos, tasks, or reminders (not calendar events). Range must be one of: today, tomorrow, this_week, next_7_days, overdue.
         - reminders_create: the user explicitly asks to create or add a reminder or todo (e.g. "remind me to …"). Args: title (required), due (optional: today, tomorrow, tonight, ISO date/datetime, or "in N hours/minutes/days"), notes (optional).
         - timer_create: the user explicitly asks to set/start/create one timer and gives a concrete duration. Args: duration (required: e.g. "10 minutes", "1 hour 30 minutes", "05:00", seconds), title (optional). Skip alarms, reminders, and calendar events.
-        - contacts_lookup: the user asks to look up a person/contact's phone number or email address from local Contacts. Args: query (required name). Return none if the request needs postal addresses, birthdays, notes, photos, or full contact cards.
+        - contacts_lookup: the user asks to search local Contacts, asks whether someone is in their contacts/phone/address book, or asks for a contact's phone number or email address. Args: query (required name). Return none if the request needs postal addresses, birthdays, notes, photos, or full contact cards.
         - current_datetime: when the user asks for the current time, date, day of week, or timezone on this device. Skip otherwise — the model knows historical dates and eras from training.
         - web_search: only for live, time-sensitive, or external facts the model cannot reliably know. Rewrite the user's question into a short, specific, entity-focused search query.
 

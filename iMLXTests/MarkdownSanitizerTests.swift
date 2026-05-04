@@ -42,4 +42,35 @@ final class MarkdownSanitizerTests: XCTestCase {
 
         XCTAssertEqual(MarkdownSanitizer.removingRemoteImages(from: input), input)
     }
+
+    func testLinksPhoneNumbers() {
+        let input = "Phone: +34 628 72 83 29"
+
+        XCTAssertEqual(
+            MarkdownSanitizer.linkingPhoneNumbers(from: input),
+            "Phone: [+34 628 72 83 29](tel:+34628728329)"
+        )
+    }
+
+    func testKeepsExistingPhoneLinksUnchanged() {
+        let input = "Phone: [+34 628 72 83 29](tel:+34628728329)"
+
+        XCTAssertEqual(MarkdownSanitizer.linkingPhoneNumbers(from: input), input)
+    }
+
+    func testPhoneLinkingKeepsCodeFencesUnchanged() {
+        let input = """
+        ```text
+        Phone: +34 628 72 83 29
+        ```
+        """
+
+        XCTAssertEqual(MarkdownSanitizer.linkingPhoneNumbers(from: input), input)
+    }
+
+    func testPhoneLinkingKeepsInlineCodeUnchanged() {
+        let input = "Use `+34 628 72 83 29` as sample text."
+
+        XCTAssertEqual(MarkdownSanitizer.linkingPhoneNumbers(from: input), input)
+    }
 }

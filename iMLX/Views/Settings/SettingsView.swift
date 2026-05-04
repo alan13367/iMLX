@@ -1,19 +1,23 @@
 import SwiftUI
 
+private enum SettingsNavigationDestination: String, Hashable {
+    case personas
+    case memory
+}
+
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let appState: AppState
+    @Bindable var appState: AppState
     @State private var showClearModelsAlert = false
+    @State private var navigationDestination: SettingsNavigationDestination?
+    @State private var hapticWarningTrigger = 0
     private let deviceCapability = DeviceCapabilityService()
 
     var body: some View {
         Form {
             Section(String.appLocalized("settings.section.language")) {
-                Picker(String.appLocalized("settings.section.language"), selection: Binding(
-                    get: { AppLanguageOption.from(storageCode: appState.preferredAppLanguageCode) },
-                    set: { appState.setPreferredAppLanguage($0.storageCode) }
-                )) {
+                Picker(String.appLocalized("settings.section.language"), selection: $appState.preferredAppLanguageOption) {
                     ForEach(AppLanguageOption.allCases) { option in
                         Text(String.appLocalized(option.titleLocalizationKey)).tag(option)
                     }
@@ -37,8 +41,8 @@ struct SettingsView: View {
             }
 
             Section(String.appLocalized("settings.section.personas")) {
-                NavigationLink {
-                    PersonaLibraryView(appState: appState)
+                Button {
+                    navigationDestination = .personas
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(String.appLocalized("settings.manage_personas"))
@@ -50,8 +54,8 @@ struct SettingsView: View {
             }
 
             Section(String.appLocalized("settings.section.memory")) {
-                NavigationLink {
-                    MemoryLibraryView(appState: appState)
+                Button {
+                    navigationDestination = .memory
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(String.appLocalized("settings.manage_memory"))
@@ -94,7 +98,7 @@ struct SettingsView: View {
 
             Section(String.appLocalized("settings.section.storage")) {
                 LabeledContent(String.appLocalized("settings.models_storage")) {
-                    Text(String(format: "%.2f GB", appState.manifestService.totalStorageUsedGB))
+                    Text("\(appState.manifestService.totalStorageUsedGB, format: .number.precision(.fractionLength(2))) GB")
                 }
                 Button(String.appLocalized("settings.clear_models"), role: .destructive) {
                     showClearModelsAlert = true
@@ -118,6 +122,14 @@ struct SettingsView: View {
                 .accessibilityLabel(String.appLocalized("common.close"))
             }
         }
+        .navigationDestination(item: $navigationDestination) { destination in
+            switch destination {
+            case .personas:
+                PersonaLibraryView(appState: appState)
+            case .memory:
+                MemoryLibraryView(appState: appState)
+            }
+        }
         .alert(String.appLocalized("settings.clear_alert_title"), isPresented: $showClearModelsAlert) {
             Button(String.appLocalized("common.cancel"), role: .cancel) {}
             Button(String.appLocalized("settings.clear_confirm"), role: .destructive) {
@@ -126,20 +138,19 @@ struct SettingsView: View {
         } message: {
             Text(String.appLocalized("settings.clear_alert_message"))
         }
+        .sensoryFeedback(.warning, trigger: hapticWarningTrigger)
     }
 
     private func clearAllModels() {
         Task {
             await appState.clearAllDownloadedModels()
-            await MainActor.run {
-                Haptics.notificationWarning()
-            }
+            hapticWarningTrigger += 1
         }
     }
 
     private var memoryDetailText: String {
-        let pendingCount = appState.memories.filter { $0.status == .pending }.count
-        let activeCount = appState.memories.filter { $0.status == .active }.count
+        let pendingCount = appState.memories.count(where: { $0.status == .pending })
+        let activeCount = appState.memories.count(where: { $0.status == .active })
         if pendingCount > 0 {
             return String(format: String.appLocalized("settings.manage_memory_detail_pending"), activeCount, pendingCount)
         }

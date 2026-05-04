@@ -40,6 +40,11 @@ final class AppState {
     var activeConversationId: UUID?
     var preferredAppLanguageCode: String?
 
+    var preferredAppLanguageOption: AppLanguageOption {
+        get { AppLanguageOption.from(storageCode: preferredAppLanguageCode) }
+        set { setPreferredAppLanguage(newValue.storageCode) }
+    }
+
     private static let curatedModelsByID = Dictionary(
         uniqueKeysWithValues: Constants.ModelRegistry.curatedModels.map { ($0.id, $0) }
     )
@@ -121,6 +126,15 @@ final class AppState {
         }
         preferredAppLanguageCode = code
         voiceSessionInvalidationSeed &+= 1
+    }
+
+    var showsOnboarding: Bool {
+        get { !hasCompletedOnboarding }
+        set {
+            if !newValue {
+                markOnboardingCompleted()
+            }
+        }
     }
 
     func markOnboardingCompleted() {

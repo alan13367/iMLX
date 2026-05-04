@@ -85,7 +85,7 @@ private struct MessageDocumentAttachmentStrip: View {
             AttachmentDocumentCard(document: document)
                 .frame(maxWidth: 320, alignment: role == .user ? .trailing : .leading)
         } else {
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(attachedDocuments) { document in
                         AttachmentDocumentCard(document: document)
@@ -93,6 +93,7 @@ private struct MessageDocumentAttachmentStrip: View {
                 }
                 .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
             }
+            .scrollIndicators(.hidden)
             .frame(maxWidth: 320, alignment: role == .user ? .trailing : .leading)
         }
     }
@@ -119,7 +120,7 @@ private struct MessageImageAttachmentStrip: View {
         let isSingle = attachedImages.count == 1
         let imageSize: CGFloat = isSingle ? 180 : 96
 
-        return ScrollView(.horizontal, showsIndicators: false) {
+        return ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(attachedImages) { image in
                     AttachmentImageThumbnailView(
@@ -133,6 +134,7 @@ private struct MessageImageAttachmentStrip: View {
             }
             .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
         }
+        .scrollIndicators(.hidden)
         .frame(maxWidth: isSingle ? imageSize : 240)
     }
 }
@@ -155,7 +157,7 @@ struct AttachmentDocumentCard: View {
                     .frame(width: 40, height: 48)
 
                 Image(systemName: palette.iconName)
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(.headline.weight(.semibold))
                     .foregroundStyle(palette.tint)
                     .symbolRenderingMode(.hierarchical)
             }
@@ -204,6 +206,8 @@ struct AttachmentDocumentCard: View {
 /// to the previous implementation in `MessageBubbleView.swift` but moved here
 /// so attachment-related code lives in one file.
 struct AttachmentImageThumbnailView: View {
+    @Environment(\.displayScale) private var displayScale
+
     let imageId: UUID
     let imageData: Data
     let size: CGFloat
@@ -212,7 +216,7 @@ struct AttachmentImageThumbnailView: View {
     @State private var image: UIImage?
 
     private var maxPixelSize: CGFloat {
-        size * UIScreen.main.scale
+        size * displayScale
     }
 
     private var cacheKey: String {

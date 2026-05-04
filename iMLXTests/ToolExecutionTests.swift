@@ -1,3 +1,4 @@
+import Contacts
 import XCTest
 @testable import iMLX
 
@@ -360,6 +361,22 @@ final class ToolExecutionTests: XCTestCase {
         XCTAssertEqual(arguments["query"], "Alice Appleseed")
     }
 
+    func testContactsLookupDoesNotMatchLongerFirstNameForSingleTokenQuery() {
+        let service = ContactsService()
+        let marc = mutableContact(givenName: "Marc")
+        let marcel = mutableContact(givenName: "Marcel")
+
+        XCTAssertTrue(service.contactMatchesQuery(marc, query: "Marc"))
+        XCTAssertFalse(service.contactMatchesQuery(marcel, query: "Marc"))
+    }
+
+    func testContactsLookupAllowsMultiTokenPartialNameQuery() {
+        let service = ContactsService()
+        let contact = mutableContact(givenName: "Marc", familyName: "Smith")
+
+        XCTAssertTrue(service.contactMatchesQuery(contact, query: "Marc Sm"))
+    }
+
     func testExecutePropagatesCancellation() async {
         let service = ToolCallingService(
             webSearchService: WebSearchService(),
@@ -406,6 +423,22 @@ final class ToolExecutionTests: XCTestCase {
         XCTAssertNil(trace.status)
         XCTAssertTrue(trace.success)
         XCTAssertEqual(trace.sourceCount, 2)
+    }
+
+    private func mutableContact(
+        givenName: String = "",
+        middleName: String = "",
+        familyName: String = "",
+        nickname: String = "",
+        organizationName: String = ""
+    ) -> CNMutableContact {
+        let contact = CNMutableContact()
+        contact.givenName = givenName
+        contact.middleName = middleName
+        contact.familyName = familyName
+        contact.nickname = nickname
+        contact.organizationName = organizationName
+        return contact
     }
 
     private var emptyContext: ToolInputContext {

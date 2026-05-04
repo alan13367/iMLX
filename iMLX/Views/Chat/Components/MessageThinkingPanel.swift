@@ -25,6 +25,7 @@ struct MessageThinkingPanel: View {
     let mode: Mode
     @Binding var isExpanded: Bool
     var onToggle: (() -> Void)? = nil
+    @State private var hapticSelectionTrigger = 0
 
     var body: some View {
         switch mode {
@@ -67,7 +68,7 @@ struct MessageThinkingPanel: View {
             withAnimation(.easeInOut(duration: 0.18)) {
                 isExpanded.toggle()
             }
-            Haptics.selectionChanged()
+            hapticSelectionTrigger += 1
             onToggle?()
         } label: {
             HStack(spacing: 10) {
@@ -100,6 +101,7 @@ struct MessageThinkingPanel: View {
         .accessibilityValue(isExpanded ? Text("Expanded") : Text("Collapsed"))
         .accessibilityHint(Text(isExpanded ? "Hide reasoning" : "Show reasoning"))
         .accessibilityAddTraits(.isButton)
+        .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
     }
 
     @ViewBuilder
@@ -131,12 +133,13 @@ struct MessageMarkdownText: View {
     let text: String
     let isStreaming: Bool
     let linkTint: Color
+    var linkPhoneNumbers: Bool = false
 
     var body: some View {
         if isStreaming {
             Text(text)
         } else {
-            StructuredText(markdown: MarkdownSanitizer.removingRemoteImages(from: text))
+            StructuredText(markdown: sanitizedMarkdown)
                 .textual.structuredTextStyle(.gitHub)
                 .textual.inlineStyle(chatInlineStyle)
                 .textual.headingStyle(IMLXChatHeadingStyle())
@@ -145,6 +148,12 @@ struct MessageMarkdownText: View {
                 .textual.overflowMode(.scroll)
                 .tint(linkTint)
         }
+    }
+
+    private var sanitizedMarkdown: String {
+        let withoutRemoteImages = MarkdownSanitizer.removingRemoteImages(from: text)
+        guard linkPhoneNumbers else { return withoutRemoteImages }
+        return MarkdownSanitizer.linkingPhoneNumbers(from: withoutRemoteImages)
     }
 
     private var chatInlineStyle: InlineStyle {

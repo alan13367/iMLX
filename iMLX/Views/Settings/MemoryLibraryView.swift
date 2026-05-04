@@ -26,8 +26,10 @@ struct MemoryLibraryView: View {
 
             Section(String.appLocalized("memory.section.pending")) {
                 if pendingMemories.isEmpty {
-                    Text(String.appLocalized("memory.pending.empty"))
-                        .foregroundStyle(.secondary)
+                    ContentUnavailableView(
+                        String.appLocalized("memory.pending.empty"),
+                        systemImage: "brain.head.profile"
+                    )
                 } else {
                     ForEach(pendingMemories) { memory in
                         MemorySummaryRow(
@@ -56,8 +58,10 @@ struct MemoryLibraryView: View {
 
             Section(String.appLocalized("memory.section.saved")) {
                 if activeMemories.isEmpty {
-                    Text(String.appLocalized("memory.saved.empty"))
-                        .foregroundStyle(.secondary)
+                    ContentUnavailableView(
+                        String.appLocalized("memory.saved.empty"),
+                        systemImage: "checkmark.circle"
+                    )
                 } else {
                     ForEach(activeMemories) { memory in
                         MemorySummaryRow(

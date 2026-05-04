@@ -79,7 +79,7 @@ struct ModelCardView: View {
                 .font(.caption2.weight(.semibold))
         } icon: {
             Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .bold))
+                .font(.caption2.weight(.bold))
                 .foregroundStyle(
                     LinearGradient(
                         colors: gradient,
@@ -115,7 +115,7 @@ struct ModelCardView: View {
         if model.isDownloaded {
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(.red)
                     .frame(width: 34, height: 34)
                 .liquidGlassSurface(
@@ -131,7 +131,7 @@ struct ModelCardView: View {
         } else {
             Button(action: onDownload) {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(anyModelDownloading ? .secondary : BrandPalette.accent)
                     .frame(width: 34, height: 34)
                 .liquidGlassSurface(

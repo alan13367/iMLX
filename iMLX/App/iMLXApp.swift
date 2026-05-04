@@ -18,17 +18,15 @@ struct iMLXApp: App {
 
 struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase
-    let appState: AppState
+    @Bindable var appState: AppState
 
     var body: some View {
         let _ = appState.preferredAppLanguageCode
-        ChatRootView(appState: appState)
-            .fullScreenCover(isPresented: Binding(
-                get: { !appState.hasCompletedOnboarding },
-                set: { _ in }
-            )) {
-                OnboardingFlowView(appState: appState)
-            }
+            ChatRootView(appState: appState)
+                .fullScreenCover(isPresented: $appState.showsOnboarding) {
+                    OnboardingFlowView(appState: appState)
+                        .interactiveDismissDisabled()
+                }
             .onAppear {
                 appState.refreshPendingShortcutRoute()
             }

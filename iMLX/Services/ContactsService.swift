@@ -8,7 +8,10 @@ actor ContactsService {
         self.contactStore = contactStore
     }
 
-    func retrieveContext(for query: String, limit: Int = 5) async throws -> MessageGroundingResult {
+    func retrieveContext(
+        for query: String,
+        limit: Int = Constants.ToolCalling.maxContactLookupResults
+    ) async throws -> MessageGroundingResult {
         let sanitizedQuery = query
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -32,10 +35,11 @@ actor ContactsService {
 
         let predicate = CNContact.predicateForContacts(matchingName: sanitizedQuery)
         let contacts = try contactStore.unifiedContacts(matching: predicate, keysToFetch: keys)
+            .filter { contactMatchesQuery($0, query: sanitizedQuery) }
             .sorted { lhs, rhs in
                 contactRank(lhs, query: sanitizedQuery) < contactRank(rhs, query: sanitizedQuery)
             }
-            .prefix(max(1, min(limit, 10)))
+            .prefix(max(1, min(limit, Constants.ToolCalling.maxContactLookupResults)))
 
         guard !contacts.isEmpty else {
             throw ToolExecutionFailure.noContent("No matching contacts were found.")
@@ -105,13 +109,78 @@ actor ContactsService {
         }
     }
 
+    nonisolated func contactMatchesQuery(_ contact: CNContact, query: String) -> Bool {
+        contactRank(contact, query: query) < Int.max
+    }
+
     private nonisolated func contactRank(_ contact: CNContact, query: String) -> Int {
-        let normalizedName = displayName(for: contact).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-        let normalizedQuery = query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-        if normalizedName == normalizedQuery { return 0 }
-        if normalizedName.hasPrefix(normalizedQuery) { return 1 }
-        if normalizedName.contains(normalizedQuery) { return 2 }
-        return 3
+        let queryText = normalizedContactSearchText(query)
+        let queryTokens = contactSearchTokens(in: query)
+        guard !queryText.isEmpty, !queryTokens.isEmpty else { return Int.max }
+
+        let fieldTokens = contactSearchFields(for: contact)
+            .map { (normalizedContactSearchText($0), contactSearchTokens(in: $0)) }
+            .filter { !$0.0.isEmpty && !$0.1.isEmpty }
+
+        if fieldTokens.contains(where: { $0.0 == queryText }) { return 0 }
+
+        if queryTokens.count == 1 {
+            return fieldTokens.contains(where: { $0.1.contains(queryTokens[0]) }) ? 1 : Int.max
+        }
+
+        if fieldTokens.contains(where: { containsTokenSequence(queryTokens, in: $0.1, allowsPrefix: false) }) {
+            return 1
+        }
+        if fieldTokens.contains(where: { containsTokenSequence(queryTokens, in: $0.1, allowsPrefix: true) }) {
+            return 2
+        }
+        return Int.max
+    }
+
+    private nonisolated func contactSearchFields(for contact: CNContact) -> [String] {
+        [
+            displayName(for: contact),
+            contact.givenName,
+            contact.middleName,
+            contact.familyName,
+            contact.nickname,
+            contact.organizationName
+        ]
+    }
+
+    private nonisolated func normalizedContactSearchText(_ text: String) -> String {
+        text
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .replacingOccurrences(of: #"[^\p{L}\p{N}]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private nonisolated func contactSearchTokens(in text: String) -> [String] {
+        normalizedContactSearchText(text)
+            .split(separator: " ")
+            .map(String.init)
+    }
+
+    private nonisolated func containsTokenSequence(
+        _ queryTokens: [String],
+        in fieldTokens: [String],
+        allowsPrefix: Bool
+    ) -> Bool {
+        guard !queryTokens.isEmpty, fieldTokens.count >= queryTokens.count else {
+            return false
+        }
+
+        for startIndex in 0...(fieldTokens.count - queryTokens.count) {
+            let matches = queryTokens.indices.allSatisfy { offset in
+                let fieldToken = fieldTokens[startIndex + offset]
+                let queryToken = queryTokens[offset]
+                return allowsPrefix ? fieldToken.hasPrefix(queryToken) : fieldToken == queryToken
+            }
+            if matches { return true }
+        }
+        return false
     }
 
     private nonisolated func displayName(for contact: CNContact) -> String {

@@ -5,6 +5,7 @@ struct ModelBrowserView: View {
 
     let appState: AppState
     @State private var viewModel: ModelManagerViewModel
+    @State private var selectedFamily: ModelInfo.ModelFamily?
 
     init(appState: AppState) {
         self.appState = appState
@@ -20,14 +21,12 @@ struct ModelBrowserView: View {
             }
 
             ForEach(viewModel.downloadableModelsGroupedByFamily, id: \.family) { group in
-                NavigationLink {
-                    FamilyModelsView(
-                        family: group.family,
-                        viewModel: viewModel
-                    )
+                Button {
+                    selectedFamily = group.family
                 } label: {
                     ModelFamilyRow(family: group.family, modelCount: group.models.count)
                 }
+                .buttonStyle(.plain)
             }
         }
         .navigationTitle(String.appLocalized("models.browser.title"))
@@ -40,6 +39,9 @@ struct ModelBrowserView: View {
                 }
                 .accessibilityLabel(String.appLocalized("common.close"))
             }
+        }
+        .navigationDestination(item: $selectedFamily) { family in
+            FamilyModelsView(family: family, viewModel: viewModel)
         }
         .task {
             refreshDownloadStatus()

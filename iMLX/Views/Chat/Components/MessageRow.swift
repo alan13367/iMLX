@@ -111,7 +111,8 @@ struct MessageRow: View, Equatable {
             if !resolvedParsed.response.isEmpty || isStreaming {
                 AssistantMessageText(
                     text: resolvedParsed.response,
-                    isStreaming: isStreaming
+                    isStreaming: isStreaming,
+                    linkPhoneNumbers: shouldLinkPhoneNumbers
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contextMenu { assistantContextMenu }
@@ -191,6 +192,12 @@ struct MessageRow: View, Equatable {
             return resolvedParsed.copyableText
         }
         return message.content
+    }
+
+    private var shouldLinkPhoneNumbers: Bool {
+        !isStreaming
+            && message.toolTrace?.toolName == "contacts_lookup"
+            && message.toolTrace?.success == true
     }
 }
 

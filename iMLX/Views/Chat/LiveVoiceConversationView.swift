@@ -5,6 +5,8 @@ struct LiveVoiceConversationView: View {
 
     let appState: AppState
     @State private var viewModel: LiveVoiceSessionViewModel
+    @State private var hapticLightTrigger = 0
+    @State private var hapticMediumTrigger = 0
 
     init(appState: AppState, chatViewModel: ChatViewModel) {
         self.appState = appState
@@ -70,6 +72,8 @@ struct LiveVoiceConversationView: View {
                 await viewModel.close()
             }
         }
+        .sensoryFeedback(.impact(weight: .light), trigger: hapticLightTrigger)
+        .sensoryFeedback(.impact(weight: .medium), trigger: hapticMediumTrigger)
     }
 
     private var micButtonEnabled: Bool {
@@ -77,7 +81,7 @@ struct LiveVoiceConversationView: View {
     }
 
     private func close() {
-        Haptics.impactLight()
+        hapticLightTrigger += 1
         Task {
             await viewModel.close()
             dismiss()
@@ -85,14 +89,14 @@ struct LiveVoiceConversationView: View {
     }
 
     private func downloadAssets() {
-        Haptics.impactMedium()
+        hapticMediumTrigger += 1
         Task {
             await viewModel.downloadAssets()
         }
     }
 
     private func primaryControlTap() {
-        Haptics.impactMedium()
+        hapticMediumTrigger += 1
         Task {
             if viewModel.isSpeaking, viewModel.canStopSpeaking {
                 await viewModel.stopSpeaking()
@@ -407,7 +411,7 @@ private struct LiveVoiceMicButton: View {
                 }
 
                 Image(systemName: isStopMode ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.title.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(width: 88, height: 88)
                     .liquidGlassSurface(

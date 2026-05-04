@@ -263,16 +263,10 @@ struct ConversationListView: View {
     }
 
     private var emptyContent: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary.opacity(0.4))
-            Text(String.appLocalized("conversation.empty"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        ContentUnavailableView(
+            String.appLocalized("conversation.empty"),
+            systemImage: "bubble.left.and.bubble.right"
+        )
         .listRowBackground(Color.clear)
     }
 }

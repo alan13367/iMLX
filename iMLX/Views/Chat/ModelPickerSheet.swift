@@ -26,18 +26,11 @@ struct ModelPickerSheet: View {
 
                 if downloadedModels.isEmpty {
                     Section {
-                        VStack(spacing: 12) {
-                            Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 40))
-                                .foregroundStyle(.secondary.opacity(0.5))
-                            Text(String.appLocalized("models.picker.none"))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text(String.appLocalized("models.picker.hint_download"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
+                        ContentUnavailableView(
+                            String.appLocalized("models.picker.none"),
+                            systemImage: "arrow.down.circle",
+                            description: Text(String.appLocalized("models.picker.hint_download"))
+                        )
                         .padding(.vertical, 20)
                     }
                 } else {

@@ -1,5 +1,7 @@
 import UIKit
 
+/// UIKit haptics utility for non-View contexts (ViewModels, AppState, etc.).
+/// SwiftUI views should prefer `.sensoryFeedback()` directly.
 enum Haptics {
     static func impactLight() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()

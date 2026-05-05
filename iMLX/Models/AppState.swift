@@ -7,8 +7,10 @@ final class AppState {
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let pendingStarterModelId = "pendingStarterModelId"
         static let hasSeenWebSearchDisclosure = "hasSeenWebSearchDisclosure"
+        static let assistantPersonalizationEnabled = "assistantPersonalizationEnabled"
         static let assistantSystemPrompt = "assistantSystemPrompt"
         static let assistantTemperature = "assistantTemperature"
+        static let openKeyboardOnLaunch = "openKeyboardOnLaunch"
     }
 
     var selectedModel: ModelInfo?
@@ -19,8 +21,10 @@ final class AppState {
     var hasCompletedOnboarding: Bool
     var pendingStarterModelId: String?
     var hasSeenWebSearchDisclosure: Bool
+    var assistantPersonalizationEnabled: Bool
     var assistantSystemPrompt: String
     var assistantTemperature: Double
+    var openKeyboardOnLaunch: Bool
     var voiceSessionInvalidationSeed: Int = 0
     var pendingShortcutRoute: AppShortcutRoute?
 
@@ -40,12 +44,6 @@ final class AppState {
     var conversations: [Conversation] = []
     var memories: [UserMemory] = []
     var activeConversationId: UUID?
-    var preferredAppLanguageCode: String?
-
-    var preferredAppLanguageOption: AppLanguageOption {
-        get { AppLanguageOption.from(storageCode: preferredAppLanguageCode) }
-        set { setPreferredAppLanguage(newValue.storageCode) }
-    }
 
     private static let curatedModelsByID = Dictionary(
         uniqueKeysWithValues: Constants.ModelRegistry.curatedModels.map { ($0.id, $0) }
@@ -65,7 +63,6 @@ final class AppState {
             timerService: timerService,
             contactsService: contactsService
         )
-        preferredAppLanguageCode = userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
         if let persistedOnboardingState = userDefaults.object(forKey: Keys.hasCompletedOnboarding) as? Bool {
             hasCompletedOnboarding = persistedOnboardingState
         } else {
@@ -73,9 +70,11 @@ final class AppState {
         }
         pendingStarterModelId = userDefaults.string(forKey: Keys.pendingStarterModelId)
         hasSeenWebSearchDisclosure = userDefaults.bool(forKey: Keys.hasSeenWebSearchDisclosure)
+        assistantPersonalizationEnabled = userDefaults.bool(forKey: Keys.assistantPersonalizationEnabled)
         assistantSystemPrompt = userDefaults.string(forKey: Keys.assistantSystemPrompt) ?? Constants.Generation.defaultSystemPrompt
         let storedTemperature = userDefaults.object(forKey: Keys.assistantTemperature) as? Double
-        assistantTemperature = Self.clampedAssistantTemperature(storedTemperature ?? Double(Constants.Generation.defaultTemperature))
+        assistantTemperature = Self.clampedAssistantTemperature(storedTemperature ?? Double(Constants.Generation.defaultPersonalizationTemperature))
+        openKeyboardOnLaunch = userDefaults.bool(forKey: Keys.openKeyboardOnLaunch)
         pendingShortcutRoute = AppShortcutRouteStore.loadPendingRoute(userDefaults: userDefaults)
         loadMemories()
         loadConversationsFromDisk()
@@ -104,7 +103,6 @@ final class AppState {
 
     private static func hasExistingUserState(userDefaults: UserDefaults) -> Bool {
         userDefaults.string(forKey: Keys.selectedModelId) != nil
-            || userDefaults.string(forKey: AppLocalization.preferredLanguageUserDefaultsKey) != nil
             || !ManifestService().getDownloadedModels().isEmpty
             || !MemorySystem().listAll().isEmpty
             || !ConversationService().listAll().isEmpty
@@ -116,24 +114,19 @@ final class AppState {
 
     var resolvedVoiceLocale: VoiceLocale {
         VoiceLocale.resolve(
-            preferredAppLanguageCode: preferredAppLanguageCode,
+            preferredAppLanguageCode: nil,
             effectiveLocale: effectiveLocale
         )
-    }
-
-    func setPreferredAppLanguage(_ code: String?) {
-        if let code, !code.isEmpty {
-            userDefaults.set(code, forKey: AppLocalization.preferredLanguageUserDefaultsKey)
-        } else {
-            userDefaults.removeObject(forKey: AppLocalization.preferredLanguageUserDefaultsKey)
-        }
-        preferredAppLanguageCode = code
-        voiceSessionInvalidationSeed &+= 1
     }
 
     func setAssistantSystemPrompt(_ prompt: String) {
         assistantSystemPrompt = prompt
         userDefaults.set(prompt, forKey: Keys.assistantSystemPrompt)
+    }
+
+    func setAssistantPersonalizationEnabled(_ enabled: Bool) {
+        assistantPersonalizationEnabled = enabled
+        userDefaults.set(enabled, forKey: Keys.assistantPersonalizationEnabled)
     }
 
     func setAssistantTemperature(_ temperature: Double) {
@@ -142,9 +135,29 @@ final class AppState {
         userDefaults.set(clamped, forKey: Keys.assistantTemperature)
     }
 
+    func setOpenKeyboardOnLaunch(_ enabled: Bool) {
+        openKeyboardOnLaunch = enabled
+        userDefaults.set(enabled, forKey: Keys.openKeyboardOnLaunch)
+    }
+
+    var effectiveAssistantSystemPrompt: String {
+        guard assistantPersonalizationEnabled else {
+            return Constants.Generation.defaultSystemPrompt
+        }
+
+        let trimmedPrompt = assistantSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedPrompt.isEmpty ? Constants.Generation.defaultSystemPrompt : assistantSystemPrompt
+    }
+
+    var effectiveAssistantTemperature: Double {
+        assistantPersonalizationEnabled ? assistantTemperature : Double(Constants.Generation.defaultTemperature)
+    }
+
     func resetAssistantGenerationSettings() {
+        assistantPersonalizationEnabled = false
         assistantSystemPrompt = Constants.Generation.defaultSystemPrompt
-        assistantTemperature = Double(Constants.Generation.defaultTemperature)
+        assistantTemperature = Double(Constants.Generation.defaultPersonalizationTemperature)
+        userDefaults.removeObject(forKey: Keys.assistantPersonalizationEnabled)
         userDefaults.removeObject(forKey: Keys.assistantSystemPrompt)
         userDefaults.removeObject(forKey: Keys.assistantTemperature)
     }
@@ -358,8 +371,13 @@ final class AppState {
 
     private func loadConversationsFromDisk() {
         conversations = conversationService.listAll()
+        let hadPersistedConversations = !conversations.isEmpty
         rebuildConversationLookup()
-        reconcileActiveConversationForChat()
+        if hadPersistedConversations {
+            createNewConversation(emitHaptics: false)
+        } else {
+            reconcileActiveConversationForChat()
+        }
     }
 
     nonisolated private static func fetchConversationsInBackground(using conversationService: ConversationService) async -> [Conversation] {
@@ -413,16 +431,39 @@ final class AppState {
     }
 
     @discardableResult
-    func createNewConversation() -> UUID {
+    func createNewConversation(emitHaptics: Bool = true) -> UUID {
+        removeEmptyDraftConversations()
         let conversation = Conversation(
             modelId: loadedModelId
         )
-        conversationService.save(conversation)
         conversations.insert(conversation, at: 0)
         conversationsByID[conversation.id] = conversation
         activeConversationId = conversation.id
-        Haptics.impactLight()
+        if emitHaptics {
+            Haptics.impactLight()
+        }
         return conversation.id
+    }
+
+    private func removeEmptyDraftConversations(excluding preservedID: UUID? = nil) {
+        let emptyDraftIDs = conversations
+            .filter { conversation in
+                conversation.isEmptyDraft && conversation.id != preservedID
+            }
+            .map(\.id)
+        guard !emptyDraftIDs.isEmpty else { return }
+
+        let emptyDraftIDSet = Set(emptyDraftIDs)
+        conversations.removeAll { emptyDraftIDSet.contains($0.id) }
+        Task {
+            for id in emptyDraftIDs {
+                await documentLibraryService.deleteDocuments(for: id)
+            }
+        }
+        for draftID in emptyDraftIDs {
+            conversationsByID[draftID] = nil
+            conversationService.delete(id: draftID)
+        }
     }
 
     func deleteConversation(_ id: UUID) {
@@ -458,6 +499,7 @@ final class AppState {
     }
 
     func selectConversation(_ id: UUID) {
+        removeEmptyDraftConversations(excluding: id)
         activeConversationId = id
         Haptics.selectionChanged()
     }
@@ -558,10 +600,20 @@ final class AppState {
         }
         conversations.insert(conversation, at: 0)
         conversationsByID[conversation.id] = conversation
+        guard !conversation.isEmptyDraft else {
+            conversationService.delete(id: conversation.id)
+            return
+        }
         conversationService.save(conversation)
     }
 
     private func rebuildConversationLookup() {
         conversationsByID = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
+    }
+}
+
+private extension Conversation {
+    var isEmptyDraft: Bool {
+        messages.isEmpty && documents.isEmpty
     }
 }

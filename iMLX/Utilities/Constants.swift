@@ -303,6 +303,7 @@ nonisolated enum Constants {
 
     enum Generation {
         static let defaultTemperature: Float = 0.7
+        static let defaultPersonalizationTemperature: Float = 0.8
         static let defaultSystemPrompt = """
         You are iMLX, a helpful local AI assistant running on the user's device. Give clear, practical answers, point out uncertainty when needed, and keep responses grounded in the conversation and any provided context.
         """
@@ -429,10 +430,11 @@ nonisolated enum Constants {
         - Stop generating immediately after the closing brace.
 
         DEFAULT BEHAVIOR:
-        - Default to {"tool":"none"}. The model can answer most questions directly from its training.
-        - Only call a tool when the message clearly requires fresh external data, the contents of a specific URL, the contents of an attached image/document, the user's local calendar or reminders, or the device's current date and time.
-        - When in doubt, return {"tool":"none"}.
-        - Do NOT call tools for greetings, thanks, casual chat, math, definitions, opinions, coding help, translations the model can do directly, or follow-ups that don't need new external input.
+        - The tools listed under "Available tools" below are the only valid tool targets.
+        - If NO internet-accessing tools (web_search, read_url) appear in the Available tools list, default to {"tool":"none"} for questions about external facts, recent events, website content, or live data — these require internet access which is currently unavailable.
+        - If internet-accessing tools DO appear, strongly prefer them over guessing for any factual question where the model's training data alone might not be accurate or current. The model can easily hallucinate facts it was never trained on; grounded web or URL results prevent that. Err on the side of searching whenever the user asks about specific facts, figures, named entities, recent events, real-world data, or anything beyond common knowledge.
+        - Only call non-internet tools when the message clearly requires: the contents of an attached image/document, the user's local calendar, reminders, contacts, a timer, or the device's current date and time.
+        - Do NOT call tools for greetings, thanks, casual chat, math, opinions, coding help, or translations the model can handle directly.
 
         TOOL GUIDANCE:
         - read_url: latest message includes one specific public URL and the user wants that page read or summarized.
@@ -445,7 +447,7 @@ nonisolated enum Constants {
         - timer_create: the user explicitly asks to set/start/create one timer and gives a concrete duration. Args: duration (required: e.g. "10 minutes", "1 hour 30 minutes", "05:00", seconds), title (optional). Skip alarms, reminders, and calendar events.
         - contacts_lookup: the user asks to search local Contacts, asks whether someone is in their contacts/phone/address book, or asks for a contact's phone number or email address. Args: query (required name). Return none if the request needs postal addresses, birthdays, notes, photos, or full contact cards.
         - current_datetime: when the user asks for the current time, date, day of week, or timezone on this device. Skip otherwise — the model knows historical dates and eras from training.
-        - web_search: only for live, time-sensitive, or external facts the model cannot reliably know. Rewrite the user's question into a short, specific, entity-focused search query.
+        - web_search: for any factual question where the model's training data may be outdated, incomplete, or unreliable. Rewrite the user's question into a short, specific, entity-focused search query. Use web_search generously — internet results prevent hallucination and provide grounded, up-to-date answers.
 
         At most one tool call is allowed per turn.
         """

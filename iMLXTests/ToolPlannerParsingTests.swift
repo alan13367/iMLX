@@ -203,6 +203,85 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertNil(decision)
     }
 
+    func testHeuristicFallbackDoesNotTriggerForPersonalTodayMessage() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.heuristicFallbackDecision(
+            userMessage: "I feel anxious today",
+            tools: [webSearchTool]
+        )
+
+        XCTAssertNil(decision)
+    }
+
+    func testPreflightForPersonalTodayMessageDoesNotForceWebSearch() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "I feel anxious today",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
+    }
+
+    func testPreflightForBroadSwiftQuestionUsesPlannerInsteadOfForcedWebSearch() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What is the difference between let and var in Swift?",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
+    func testPreflightStillForcesClearLiveDataWebSearch() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What is the weather in Barcelona for today?",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "weather Barcelona today"]
+                    )
+                )
+            )
+        )
+    }
+
+    func testPreflightForExplicitWebSearchExtractsQuery() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Please search the web for Swift 6 concurrency updates.",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "Swift 6 concurrency updates"]
+                    )
+                )
+            )
+        )
+    }
+
     func testResolvedDecisionPrefersReadURLOverPlannerWebSearchWhenSingleURLIsPresent() {
         let service = ToolCallingService(webSearchService: WebSearchService())
         let context = ToolInputContext(

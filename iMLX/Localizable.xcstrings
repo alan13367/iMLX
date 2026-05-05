@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ - %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ - %2$@"
+          }
+        }
+      }
+    },
     "%@ · %@" : {
       "localizations" : {
         "en" : {
@@ -4102,6 +4112,121 @@
         }
       }
     },
+    "settings.assistant.personalization" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personalization"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personalización"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "个性化"
+          }
+        }
+      }
+    },
+    "settings.assistant.personalization_description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When off, iMLX uses its default prompt and temperature in the background. Turn this on to use custom instructions and response style."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cuando está desactivada, iMLX usa su prompt y temperatura predeterminados en segundo plano. Actívala para usar instrucciones y estilo de respuesta personalizados."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭时，iMLX 会在后台使用默认提示词和温度。开启后可使用自定义说明和回复风格。"
+          }
+        }
+      }
+    },
+    "settings.assistant.personalization.enabled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable personalization"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activar personalización"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用个性化"
+          }
+        }
+      }
+    },
+    "settings.assistant.personalization.off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivada"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
+    "settings.assistant.prompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom instructions"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instrucciones personalizadas"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义说明"
+          }
+        }
+      }
+    },
     "settings.assistant.reset" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4194,25 +4319,80 @@
         }
       }
     },
+    "settings.assistant.temperature.label.0_0" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Precise"
+          }
+        }
+      }
+    },
+    "settings.assistant.temperature.label.0_3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Focused"
+          }
+        }
+      }
+    },
+    "settings.assistant.temperature.label.0_5" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Balanced"
+          }
+        }
+      }
+    },
+    "settings.assistant.temperature.label.0_8" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creative"
+          }
+        }
+      }
+    },
+    "settings.assistant.temperature.label.1_0" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experimental"
+          }
+        }
+      }
+    },
     "settings.assistant.title" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant"
+            "value" : "Personalization"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Asistente"
+            "value" : "Personalización"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "助手"
+            "value" : "个性化"
           }
         }
       }
@@ -4305,6 +4485,167 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除所有已下载模型"
+          }
+        }
+      }
+    },
+    "settings.about.licenses" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Licenses"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Licencias"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "许可"
+          }
+        }
+      }
+    },
+    "settings.about.licenses_body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX includes open-source components distributed under their own licenses. The app project is distributed under the MIT and Apache 2.0 licenses included with the source, and dependency licenses remain owned by their respective authors."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX incluye componentes de código abierto distribuidos bajo sus propias licencias. El proyecto de la app se distribuye bajo las licencias MIT y Apache 2.0 incluidas con el código fuente, y las licencias de las dependencias pertenecen a sus respectivos autores."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX 包含按各自许可证分发的开源组件。本应用项目按源码中包含的 MIT 和 Apache 2.0 许可证分发，依赖项许可证归各自作者所有。"
+          }
+        }
+      }
+    },
+    "settings.about.open_source_packages" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open-Source Packages"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paquetes de código abierto"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开源包"
+          }
+        }
+      }
+    },
+    "settings.about.privacy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacidad"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐私"
+          }
+        }
+      }
+    },
+    "settings.about.privacy_body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX is designed for local, on-device AI. Chats and local memories stay on this device unless you explicitly enable and use network features such as Web Search or URL reading. Those network requests may send the query, URL, and returned page content through internet services."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX está diseñado para IA local en el dispositivo. Los chats y recuerdos locales permanecen en este dispositivo salvo que actives y uses explícitamente funciones de red como Búsqueda web o lectura de URL. Esas solicitudes de red pueden enviar la consulta, la URL y el contenido devuelto de la página a través de servicios de internet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX 专为本地设备端 AI 设计。聊天和本地记忆会保留在此设备上，除非你明确启用并使用网页搜索或 URL 读取等网络功能。这些网络请求可能会通过互联网服务发送查询、URL 和返回的网页内容。"
+          }
+        }
+      }
+    },
+    "settings.about.terms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terms"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Términos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "条款"
+          }
+        }
+      }
+    },
+    "settings.about.terms_body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX runs local AI models and can produce incorrect or incomplete output. You are responsible for reviewing answers before relying on them, especially for medical, legal, financial, safety, or other high-impact decisions. Network tools are optional and only run when enabled."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX ejecuta modelos de IA locales y puede producir resultados incorrectos o incompletos. Eres responsable de revisar las respuestas antes de confiar en ellas, especialmente para decisiones médicas, legales, financieras, de seguridad u otras de alto impacto. Las herramientas de red son opcionales y solo se ejecutan cuando están activadas."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX 运行本地 AI 模型，可能产生不正确或不完整的输出。在依赖回答之前，尤其是医疗、法律、财务、安全或其他高影响决策中，你有责任自行审核。网络工具是可选的，只有启用后才会运行。"
           }
         }
       }
@@ -4420,6 +4761,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跟随系统"
+          }
+        }
+      }
+    },
+    "settings.language.system_settings_detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use iPhone Settings"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usar Ajustes del iPhone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 iPhone 设置"
+          }
+        }
+      }
+    },
+    "settings.open_keyboard_on_launch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open keyboard on launch"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abrir teclado al iniciar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动时打开键盘"
           }
         }
       }
@@ -4585,25 +4972,71 @@
         }
       }
     },
+    "settings.section.ai" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IA"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI"
+          }
+        }
+      }
+    },
+    "settings.section.app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用"
+          }
+        }
+      }
+    },
     "settings.section.assistant" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant"
+            "value" : "Personalization"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Asistente"
+            "value" : "Personalización"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "助手"
+            "value" : "个性化"
           }
         }
       }
@@ -4627,6 +5060,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设备"
+          }
+        }
+      }
+    },
+    "settings.section.device_models" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device & Models"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dispositivo y modelos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备与模型"
           }
         }
       }
@@ -4742,6 +5198,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "存储"
+          }
+        }
+      }
+    },
+    "settings.section.system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sistema"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统"
           }
         }
       }

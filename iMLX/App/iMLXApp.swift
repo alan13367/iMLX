@@ -21,12 +21,11 @@ struct AppRootView: View {
     @Bindable var appState: AppState
 
     var body: some View {
-        let _ = appState.preferredAppLanguageCode
-            ChatRootView(appState: appState)
-                .fullScreenCover(isPresented: $appState.showsOnboarding) {
-                    OnboardingFlowView(appState: appState)
-                        .interactiveDismissDisabled()
-                }
+        ChatRootView(appState: appState)
+            .fullScreenCover(isPresented: $appState.showsOnboarding) {
+                OnboardingFlowView(appState: appState)
+                    .interactiveDismissDisabled()
+            }
             .onAppear {
                 appState.refreshPendingShortcutRoute()
             }

@@ -107,8 +107,8 @@ final class ChatViewModel {
     func loadConversation(_ conversation: Conversation) {
         activeConversationId = conversation.id
         messages = conversation.messages
-        pendingDocuments = []
         attachedDocuments = conversation.documents
+        pendingDocuments = conversation.messages.isEmpty ? conversation.documents : []
         currentResponse = ""
         currentParsedResponse = .empty
         errorMessage = nil
@@ -214,10 +214,10 @@ final class ChatViewModel {
 
         Haptics.impactLight()
 
-        let temperature = Float(appState.assistantTemperature)
+        let temperature = Float(appState.effectiveAssistantTemperature)
         let topP = Constants.Generation.defaultTopP
         let repetitionPenalty = Constants.Generation.defaultRepetitionPenalty
-        let systemPrompt = appState.assistantSystemPrompt
+        let systemPrompt = appState.effectiveAssistantSystemPrompt
         let thinkingEnabled = loadedModel?.supportsThinking == true ? isThinkingEnabled : false
         let generationBudget = generationBudget(for: loadedModel, thinkingEnabled: thinkingEnabled)
 

@@ -1021,19 +1021,20 @@ actor ToolCallingService {
             return .skip(followUpDecision)
         }
 
-        // 5. Strong live-data web_search phrase, but only when no attachments
-        //    might reframe the request as document/image-grounded.
+        // 5. Explicit web requests and strong live-data web_search phrases,
+        //    but only when no attachments might reframe the request as
+        //    document/image-grounded.
         if let webSearchTool = toolsByName["web_search"],
            context.attachedDocuments.isEmpty,
            context.attachedImages.isEmpty,
-           shouldForceWebSearch(for: userMessage),
+           shouldForceWebSearch(for: userMessage) || shouldForceExplicitWebSearch(for: userMessage),
            let query = heuristicWebSearchQuery(for: userMessage),
            case .success(let arguments) = validatedArguments(
                 ["query": query],
                 for: webSearchTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected web_search via live-data heuristic (planner skipped)")
+            Self.debugLog("preflight selected web_search via explicit/live-data heuristic (planner skipped)")
             return .skip(.call(ToolCallRequest(toolName: webSearchTool.name, arguments: arguments)))
         }
 
@@ -1076,6 +1077,13 @@ actor ToolCallingService {
            messageLooksWebSearchAdjacent(userMessage) {
             return true
         }
+        // When web_search is available and the message looks like a factual
+        // question, route to the planner so the new bias-toward-search prompt
+        // can decide instead of skipping straight to model-only generation.
+        if toolsByName["web_search"] != nil,
+           messageLooksLikeFactualQuestion(userMessage) {
+            return true
+        }
         if toolsByName["current_datetime"] != nil,
            messageLooksDateTimeAdjacent(userMessage) {
             return true
@@ -1115,9 +1123,71 @@ actor ToolCallingService {
             "current price",
             "current weather",
             "live score",
-            "live update"
+            "live update",
+            "do you know",
+            "can you find",
+            "information about",
+            "information on",
+            "how many",
+            "how much does",
+            "how much is",
+            "who is",
+            "who was",
+            "what happened to",
+            "why did",
+            "is it true that",
+            "true that",
+            "real or",
+            "difference between",
+            "what's the",
+            "what is the",
+            "when is the next",
+            "has there been",
+            "is it still",
+            "tell me about"
         ]
         return webHints.contains(where: { normalized.contains($0) })
+    }
+
+    private nonisolated func shouldForceExplicitWebSearch(for userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+
+        let explicitPhrases = [
+            "web search",
+            "search the web",
+            "search online",
+            "search internet",
+            "search the internet",
+            "find online",
+            "look up online",
+            "look it up online",
+            "google ",
+            "can you search the web",
+            "can you search online",
+            "please search the web",
+            "please search online",
+            "can you find online",
+            "please find online"
+        ]
+        return explicitPhrases.contains(where: { normalized.contains($0) })
+    }
+
+    private nonisolated func messageLooksLikeFactualQuestion(_ userMessage: String) -> Bool {
+        let trimmed = userMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        if trimmed.contains("?") {
+            return true
+        }
+
+        let lowercase = trimmed.lowercased()
+        let factualQuestionWords = ["who ", "what ", "where ", "when ", "why ", "how "]
+        if factualQuestionWords.contains(where: { lowercase.hasPrefix($0) }) {
+            return true
+        }
+
+        return false
     }
 
     private nonisolated func messageLooksDateTimeAdjacent(_ userMessage: String) -> Bool {
@@ -2351,7 +2421,11 @@ actor ToolCallingService {
             "next match",
             "live score",
             "score today",
-            "price today"
+            "price today",
+            "recently happened",
+            "news about",
+            "latest on",
+            "latest about"
         ]
 
         if liveDataPhrases.contains(where: { normalized.contains($0) }) {
@@ -2359,11 +2433,63 @@ actor ToolCallingService {
         }
 
         let tokens = Set(normalized.split(separator: " ").map(String.init))
-        let currentInfoMarkers = Set(["latest", "current", "today", "tomorrow", "now", "live"])
-        let topicalMarkers = Set(["news", "weather", "forecast", "score", "match", "game", "price", "stock", "stocks"])
+        let currentInfoMarkers = Set(["latest", "current", "today", "tomorrow", "now", "live", "recent", "recently"])
+        let topicalMarkers = Set([
+            "news",
+            "weather",
+            "forecast",
+            "score",
+            "scores",
+            "match",
+            "matches",
+            "game",
+            "games",
+            "price",
+            "prices",
+            "stock",
+            "stocks",
+            "rate",
+            "rates",
+            "schedule",
+            "ranking",
+            "rankings",
+            "result",
+            "results",
+            "update",
+            "updates",
+            "event",
+            "events",
+            "standings",
+            "market",
+            "markets"
+        ])
+        let inherentlyLiveMarkers = Set([
+            "weather",
+            "forecast",
+            "score",
+            "scores",
+            "price",
+            "prices",
+            "stock",
+            "stocks",
+            "rate",
+            "rates",
+            "schedule",
+            "standings"
+        ])
 
-        return !tokens.intersection(currentInfoMarkers).isEmpty
-            && !tokens.intersection(topicalMarkers).isEmpty
+        let hasCurrentInfo = !tokens.intersection(currentInfoMarkers).isEmpty
+        let hasTopical = !tokens.intersection(topicalMarkers).isEmpty
+
+        if hasCurrentInfo && hasTopical { return true }
+
+        let questionWords = Set(["who", "what", "where", "when", "why", "how"])
+        let hasQuestionWord = !tokens.intersection(questionWords).isEmpty
+        let hasInherentlyLiveTopic = !tokens.intersection(inherentlyLiveMarkers).isEmpty
+
+        if hasQuestionWord && hasInherentlyLiveTopic { return true }
+
+        return false
     }
 
     private nonisolated func shouldForceOCR(for userMessage: String, context: ToolInputContext) -> Bool {
@@ -2784,6 +2910,19 @@ actor ToolCallingService {
         guard !sanitized.isEmpty else { return nil }
 
         let compact = sanitized.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+
+        let explicitSearchPatterns = [
+            #"(?i)\b(?:please\s+)?(?:web search|search the web|search online|search the internet|search internet|google|find online|look up online|look it up online)\s+(?:for\s+)?(.+?)(?:[.!?\n]|$)"#,
+            #"(?i)\bcan you (?:search the web|search online|find online)\s+(?:for\s+)?(.+?)(?:[.!?\n]|$)"#
+        ]
+        for pattern in explicitSearchPatterns {
+            if let explicitQuery = firstRegexCapture(pattern: pattern, in: compact) {
+                let query = sanitizeRecoveredQuery(explicitQuery)
+                if !query.isEmpty {
+                    return query
+                }
+            }
+        }
 
         if let weatherLocation = firstRegexCapture(
             pattern: #"(?i)\bweather(?:\s+for|\s+in)?\s+(.+?)(?:\s+for\s+(today|tomorrow)|\s+(today|tomorrow)|\?|$)"#,

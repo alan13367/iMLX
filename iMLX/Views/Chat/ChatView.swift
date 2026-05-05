@@ -19,6 +19,7 @@ struct ChatView: View {
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var downloadedModels: [ModelInfo] = []
     @State private var conversationHistorySwipePrimed = false
+    @State private var didRequestLaunchKeyboard = false
     @State private var hapticSelectionTrigger = 0
     @State private var hapticMediumTrigger = 0
     @State private var hapticLightTrigger = 0
@@ -73,13 +74,18 @@ struct ChatView: View {
         .onChange(of: appState.loadedModelId) { _, _ in
             handlePendingShortcutRoute()
             Task { await refreshDownloadedModels() }
+            requestLaunchKeyboardIfReady()
         }
         .onChange(of: chatViewModel.isModelLoading) { _, _ in
             handlePendingShortcutRoute()
+            requestLaunchKeyboardIfReady()
         }
         .onChange(of: utilitySheet) { oldValue, newValue in
             if oldValue == .models, newValue == nil {
                 Task { await refreshDownloadedModels() }
+            }
+            if newValue == nil {
+                requestLaunchKeyboardIfReady()
             }
         }
         .task(id: appState.modelDownloadSnapshots.count) {
@@ -87,6 +93,7 @@ struct ChatView: View {
         }
         .task {
             await refreshDownloadedModels()
+            requestLaunchKeyboardIfReady()
         }
         .onChange(of: selectedPhotoItem) { _, _ in
             if let item = selectedPhotoItem {
@@ -160,6 +167,7 @@ struct ChatView: View {
             ChatEmptyStateView()
                 .opacity(isShowingEmptyState ? 1 : 0)
                 .allowsHitTesting(isShowingEmptyState)
+                .contentShape(Rectangle())
                 .onTapGesture {
                     isInputFocused = false
                 }
@@ -473,6 +481,27 @@ struct ChatView: View {
         isInputFocused = false
         chatViewModel.startNewConversation()
         inputText = ""
+    }
+
+    private func requestLaunchKeyboardIfReady() {
+        guard appState.openKeyboardOnLaunch else { return }
+        guard !didRequestLaunchKeyboard else { return }
+        guard appState.hasCompletedOnboarding else { return }
+        guard appState.loadedModelId != nil else { return }
+        guard !chatViewModel.isModelLoading else { return }
+        guard !chatViewModel.isGenerating else { return }
+        guard utilitySheet == nil else { return }
+        guard !showLiveVoice else { return }
+
+        didRequestLaunchKeyboard = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard appState.openKeyboardOnLaunch else { return }
+            guard appState.loadedModelId != nil else { return }
+            guard !chatViewModel.isModelLoading && !chatViewModel.isGenerating else { return }
+            guard utilitySheet == nil && !showLiveVoice else { return }
+            isInputFocused = true
+        }
     }
 
     private var canSendMessage: Bool {

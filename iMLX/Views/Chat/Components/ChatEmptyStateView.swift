@@ -19,6 +19,7 @@ struct ChatEmptyStateView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
         .padding(.horizontal, 40)
     }
 }

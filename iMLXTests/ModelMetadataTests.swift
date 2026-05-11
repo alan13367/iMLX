@@ -38,6 +38,24 @@ final class ModelMetadataTests: XCTestCase {
     XCTAssertNil(model.localURL)
     }
 
+  func testCurrentToolsImlxModelRetainsExpectedRegistryMetadata() throws {
+        let model = try XCTUnwrap(Constants.ModelRegistry.curatedModels.first { $0.id == "imlx-qwen3-1.7b-current-tools-8bit" })
+
+    XCTAssertEqual(model.displayName, "iMLX Qwen3 1.7B Tools")
+    XCTAssertEqual(model.huggingFaceId, "alan13367/iMLX-Qwen3-1.7B-Current-Tools-8bit")
+    XCTAssertEqual(model.parameterCount, "1.7B")
+    XCTAssertEqual(model.quantization, "8-bit")
+    XCTAssertEqual(model.estimatedSizeGB, 1.7)
+    XCTAssertEqual(model.minDeviceRAM, 8)
+    XCTAssertEqual(model.family, .imlx)
+    XCTAssertEqual(model.logoName, "BrandLogo")
+    XCTAssertTrue(model.supportsThinking)
+    XCTAssertFalse(model.supportsVision)
+    XCTAssertFalse(model.prefersThinkingEnabled)
+    XCTAssertFalse(model.isDownloaded)
+    XCTAssertNil(model.localURL)
+    }
+
     func testDownloadedModelEntryDecodesLegacyManifestEntry() throws {
         let json = """
         {

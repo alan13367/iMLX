@@ -4,6 +4,20 @@ nonisolated enum Constants {
     enum ModelRegistry {
         static let curatedModels: [ModelInfo] = [
             ModelInfo(
+                id: "imlx-qwen3-1.7b-current-tools-8bit",
+                displayName: "iMLX Qwen3 1.7B Tools",
+                huggingFaceId: "alan13367/iMLX-Qwen3-1.7B-Current-Tools-8bit",
+                parameterCount: "1.7B",
+                quantization: "8-bit",
+                estimatedSizeGB: 1.7,
+                minDeviceRAM: 8,
+                family: .imlx,
+                logoName: "BrandLogo",
+                supportsThinking: true,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
                 id: "imlx-qwen3-1.7b-4bit",
                 displayName: "iMLX Qwen3 1.7B",
                 huggingFaceId: "alan13367/iMLX-Qwen3-1.7B-4bit",

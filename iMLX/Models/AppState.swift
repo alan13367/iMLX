@@ -529,7 +529,8 @@ final class AppState {
         sourceLanguageCode: String? = nil,
         sourceQuote: String? = nil,
         factRelation: String? = nil,
-        factValue: String? = nil
+        factValue: String? = nil,
+        confidence: Double? = nil
     ) -> UserMemory? {
         let memory = memoryService.upsert(
             content: content,
@@ -541,7 +542,8 @@ final class AppState {
             sourceLanguageCode: sourceLanguageCode,
             sourceQuote: sourceQuote,
             factRelation: factRelation,
-            factValue: factValue
+            factValue: factValue,
+            confidence: confidence
         )
         loadMemories()
         return memory

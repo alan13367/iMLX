@@ -372,6 +372,9 @@ nonisolated enum Constants {
         static let minimumCandidateCharacters = 8
         static let maximumCandidateCharacters = 220
         static let minimumBaseRetrievalScore = 0.12
+        static let minimumPromptRetrievalScore = 0.32
+        static let technicalPromptRetrievalScore = 0.42
+        static let explicitMemoryRecallRetrievalScore = 0.20
         static let topicalAffinityScore = 0.24
         static let coreIdentityRetrievalScore = 0.14
         static let duplicateScoreThreshold = 0.82

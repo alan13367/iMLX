@@ -1141,7 +1141,8 @@ final class ChatViewModel {
                         sourceLanguageCode: candidate.sourceLanguageCode,
                         sourceQuote: candidate.sourceQuote,
                         factRelation: candidate.relation,
-                        factValue: candidate.value
+                        factValue: candidate.value,
+                        confidence: candidate.confidence
                     )
                 }
 

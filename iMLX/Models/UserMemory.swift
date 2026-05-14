@@ -57,9 +57,12 @@ nonisolated enum MemoryEventKind: String, Codable, CaseIterable, DatabaseValueCo
 
 nonisolated enum MemoryRetrievalExplanationKind: String, Codable, CaseIterable {
     case matchedFact = "matched_fact"
+    case matchedIntent = "matched_intent"
     case matchedTopic = "matched_topic"
     case recentRelevant = "recent_relevant"
     case sourceQuoteOverlap = "source_quote_overlap"
+    case sourceGrounded = "source_grounded"
+    case suppressedByIntent = "suppressed_by_intent"
 }
 
 nonisolated struct UserMemory: Identifiable, Codable, Hashable {
@@ -80,6 +83,8 @@ nonisolated struct UserMemory: Identifiable, Codable, Hashable {
     var sourceQuote: String?
     var factRelation: String?
     var factValue: String?
+    var confidence: Double?
+    var salience: Double?
 
     init(
         id: UUID = UUID(),
@@ -98,7 +103,9 @@ nonisolated struct UserMemory: Identifiable, Codable, Hashable {
         sourceLanguageCode: String? = nil,
         sourceQuote: String? = nil,
         factRelation: String? = nil,
-        factValue: String? = nil
+        factValue: String? = nil,
+        confidence: Double? = nil,
+        salience: Double? = nil
     ) {
         self.id = id
         self.content = content
@@ -117,6 +124,8 @@ nonisolated struct UserMemory: Identifiable, Codable, Hashable {
         self.sourceQuote = sourceQuote
         self.factRelation = factRelation
         self.factValue = factValue
+        self.confidence = confidence
+        self.salience = salience
     }
 
     var displayCategory: String {

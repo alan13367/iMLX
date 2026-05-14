@@ -5,6 +5,8 @@ import NaturalLanguage
 nonisolated struct MemoryRetrievalCandidate {
     let memory: UserMemory
     let score: Double
+    let scoreBreakdown: [String: Double]
+    let explanationKinds: Set<MemoryRetrievalExplanationKind>
 }
 
 nonisolated struct RawMemoryExtractionCandidate {
@@ -15,6 +17,361 @@ nonisolated struct RawMemoryExtractionCandidate {
     let sourceLanguageCode: String?
     let confidence: Double?
     let requiresSourceQuote: Bool
+}
+
+nonisolated enum MemoryRequestIntent: Hashable {
+    case explicitMemoryRecall
+    case technicalTask
+    case foodRecommendation
+    case localPlanning
+    case preferencePersonalization
+    case identityLookup
+    case generalChat
+}
+
+nonisolated enum MemoryTopicDomain: String, Hashable {
+    case food
+    case location
+    case tech
+    case workProject
+    case sports
+    case language
+    case healthDiet
+    case identity
+    case travel
+    case general
+
+    static func topics(in text: String) -> Set<MemoryTopicDomain> {
+        let normalized = MemoryText.aliasSearchable(text)
+        guard !normalized.isEmpty else { return [] }
+
+        var topics = Set<MemoryTopicDomain>()
+        if containsAny([
+            "food", "eat", "dinner", "lunch", "breakfast", "restaurant", "cuisine", "coffee",
+            "meal", "recipe", "cook", "pasta", "pizza", "taco", "sushi", "dessert",
+            "broccoli", "vegetable", "vegetables", "salad", "burger", "chicken", "fish",
+            "rice", "noodle", "noodles", "soup"
+        ], in: normalized) {
+            topics.insert(.food)
+        }
+        if containsAny([
+            "city", "home", "address", "where i live", "where do i live", "live in", "lives in",
+            "based in", "near me", "nearby", "local", "location", "neighborhood",
+            "neighbourhood", "residence"
+        ], in: normalized) {
+            topics.insert(.location)
+        }
+        if containsAny([
+            "swift", "swiftui", "xcode", "ios", "ipad", "mlx", "code", "coding", "debug",
+            "bug", "layout", "refactor", "test", "build", "compiler", "api", "function",
+            "struct", "class", "view", "model", "crash", "stack trace", "package", "git",
+            "pull request", "continuous integration"
+        ], in: normalized) {
+            topics.insert(.tech)
+        }
+        if containsAny([
+            "project", "work", "job", "career", "company", "team", "app", "product",
+            "client", "startup"
+        ], in: normalized) {
+            topics.insert(.workProject)
+        }
+        if containsAny([
+            "football", "soccer", "basketball", "tennis", "baseball", "match", "league",
+            "team", "club", "sport", "sports"
+        ], in: normalized) {
+            topics.insert(.sports)
+        }
+        if containsAny([
+            "language", "speak", "speaks", "spanish", "english", "catalan", "french",
+            "german", "italian", "portuguese"
+        ], in: normalized) {
+            topics.insert(.language)
+        }
+        if containsAny([
+            "allergy", "allergic", "vegan", "vegetarian", "kosher", "halal", "diet",
+            "dietary", "gluten", "dairy", "health"
+        ], in: normalized) {
+            topics.insert(.healthDiet)
+        }
+        if containsAny([
+            "name", "pronoun", "pronouns", "identity", "who am i", "about me"
+        ], in: normalized) {
+            topics.insert(.identity)
+        }
+        if containsAny([
+            "travel", "trip", "weekend", "vacation", "hotel", "flight", "itinerary",
+            "visit", "plan a weekend"
+        ], in: normalized) {
+            topics.insert(.travel)
+        }
+
+        return topics
+    }
+
+    private static func containsAny(_ terms: [String], in text: String) -> Bool {
+        terms.contains { text.contains($0) }
+    }
+}
+
+nonisolated struct MemoryQueryProfile {
+    let normalizedText: String
+    let aliasText: String
+    let queryTokens: [String]
+    let querySignatures: [MemoryFactSignature]
+    let intent: MemoryRequestIntent
+    let topics: Set<MemoryTopicDomain>
+
+    init(normalizedText: String, querySignatures: [MemoryFactSignature]) {
+        self.normalizedText = normalizedText
+        aliasText = MemoryText.aliasSearchable(normalizedText)
+        queryTokens = MemoryText.tokens(normalizedText)
+        self.querySignatures = querySignatures
+        topics = MemoryTopicDomain.topics(in: normalizedText)
+        intent = Self.detectIntent(aliasText: aliasText, querySignatures: querySignatures, topics: topics)
+    }
+
+    var isExplicitMemoryRecall: Bool {
+        intent == .explicitMemoryRecall
+    }
+
+    var isBroadExplicitMemoryRecall: Bool {
+        isExplicitMemoryRecall && !hasExplicitRecallScope
+    }
+
+    private var hasExplicitRecallScope: Bool {
+        !querySignatures.isEmpty || !topics.subtracting([.identity, .general]).isEmpty
+    }
+
+    var retrievalThreshold: Double {
+        switch intent {
+        case .explicitMemoryRecall:
+            Constants.Memory.explicitMemoryRecallRetrievalScore
+        case .technicalTask:
+            Constants.Memory.technicalPromptRetrievalScore
+        case .foodRecommendation, .localPlanning, .preferencePersonalization, .identityLookup, .generalChat:
+            Constants.Memory.minimumPromptRetrievalScore
+        }
+    }
+
+    var candidateSignatures: [MemoryFactSignature] {
+        var relations: [MemoryRelation] = []
+        func append(_ relation: MemoryRelation) {
+            guard !relations.contains(relation) else { return }
+            relations.append(relation)
+        }
+
+        querySignatures.forEach { append($0.relation) }
+
+        switch intent {
+        case .explicitMemoryRecall:
+            break
+        case .technicalTask:
+            if Self.containsAny(["my project", "my app", "my codebase", "my code", "what am i working on"], in: aliasText) {
+                append(.project)
+                append(.constraint)
+                append(.goal)
+            }
+        case .foodRecommendation:
+            append(.likes)
+            append(.dislikes)
+            append(.diet)
+            append(.allergy)
+            append(.constraint)
+        case .localPlanning:
+            append(.residence)
+            append(.language)
+            append(.timezone)
+        case .preferencePersonalization:
+            append(.likes)
+            append(.dislikes)
+            append(.diet)
+            append(.allergy)
+            append(.constraint)
+            append(.language)
+        case .identityLookup:
+            if querySignatures.isEmpty {
+                append(.name)
+                append(.pronouns)
+                append(.occupation)
+                append(.employer)
+                append(.residence)
+                append(.language)
+            }
+        case .generalChat:
+            break
+        }
+
+        return relations.map {
+            MemoryFactSignature(relation: $0, valueKey: "", isRetraction: false)
+        }
+    }
+
+    func allowsMemory(relation: MemoryRelation?, memoryTopics: Set<MemoryTopicDomain>) -> Bool {
+        if isExplicitMemoryRecall {
+            guard !isBroadExplicitMemoryRecall else { return true }
+            if let relation, querySignatures.contains(where: { $0.relation == relation }) {
+                return true
+            }
+            return hasCompatibleTopicOverlap(with: memoryTopics)
+        }
+        if let relation, querySignatures.contains(where: { $0.relation == relation }) {
+            return true
+        }
+
+        let topicMatch = hasCompatibleTopicOverlap(with: memoryTopics)
+
+        switch intent {
+        case .explicitMemoryRecall:
+            return true
+        case .technicalTask:
+            guard memoryTopics.contains(.tech) || memoryTopics.contains(.workProject) else { return false }
+            switch relation {
+            case .some(.project), .some(.constraint), .some(.goal):
+                return true
+            case .some(.likes), .some(.dislikes):
+                return memoryTopics.contains(.tech)
+            case .none:
+                return topicMatch
+            case .some:
+                return false
+            }
+        case .foodRecommendation:
+            switch relation {
+            case .some(.diet), .some(.allergy):
+                return true
+            case .some(.likes), .some(.dislikes), .some(.constraint):
+                return memoryTopics.contains(.food) || memoryTopics.contains(.healthDiet)
+            case .none:
+                return memoryTopics.contains(.food) || memoryTopics.contains(.healthDiet)
+            case .some:
+                return false
+            }
+        case .localPlanning:
+            switch relation {
+            case .some(.residence):
+                return true
+            case .some(.language), .some(.timezone):
+                return topicMatch
+            case .some(.likes), .some(.dislikes):
+                return topicMatch && (memoryTopics.contains(.food) || memoryTopics.contains(.travel))
+            case .none:
+                return topicMatch
+            case .some:
+                return false
+            }
+        case .preferencePersonalization:
+            switch relation {
+            case .some(.likes), .some(.dislikes), .some(.diet), .some(.allergy), .some(.constraint), .some(.language):
+                return topicMatch || topics.isEmpty || memoryTopics.contains(.healthDiet)
+            case .some(.project), .some(.goal):
+                return topicMatch
+            case .none:
+                return topicMatch
+            case .some:
+                return false
+            }
+        case .identityLookup:
+            switch relation {
+            case .some(.name), .some(.pronouns), .some(.residence), .some(.occupation), .some(.employer), .some(.language), .some(.identity):
+                return true
+            case .none:
+                return topicMatch
+            case .some:
+                return false
+            }
+        case .generalChat:
+            switch relation {
+            case .some(.likes), .some(.dislikes), .some(.project), .some(.goal), .some(.constraint):
+                return topicMatch
+            case .none:
+                return topicMatch
+            case .some:
+                return false
+            }
+        }
+    }
+
+    func hasCompatibleTopicOverlap(with memoryTopics: Set<MemoryTopicDomain>) -> Bool {
+        topicAffinity(with: memoryTopics) > 0
+    }
+
+    func topicAffinity(with memoryTopics: Set<MemoryTopicDomain>) -> Double {
+        guard !topics.isEmpty, !memoryTopics.isEmpty else { return 0 }
+        let exactOverlap = topics.intersection(memoryTopics).count
+        let compatibleOverlap = topics.reduce(into: 0) { count, queryTopic in
+            if memoryTopics.contains(where: { Self.topicsAreCompatible(queryTopic, $0) }) {
+                count += 1
+            }
+        }
+        let overlap = max(exactOverlap, compatibleOverlap)
+        guard overlap > 0 else { return 0 }
+        return min(1, Double(overlap) / Double(max(topics.count, memoryTopics.count)))
+    }
+
+    private static func detectIntent(
+        aliasText: String,
+        querySignatures: [MemoryFactSignature],
+        topics: Set<MemoryTopicDomain>
+    ) -> MemoryRequestIntent {
+        if containsAny([
+            "what do you remember", "what do you know about me", "remember about me",
+            "what have i told you", "my memories", "stored memories", "anything about me",
+            "que recuerdas de mi", "que sabes de mi"
+        ], in: aliasText) {
+            return .explicitMemoryRecall
+        }
+
+        if containsAny([
+            "swift", "swiftui", "xcode", "mlx", "code", "coding", "debug", "bug", "layout",
+            "refactor", "test", "build", "compiler", "stack trace", "crash", "function",
+            "class", "struct", "api", "git", "pull request", "continuous integration"
+        ], in: aliasText) {
+            return .technicalTask
+        }
+
+        if containsAny([
+            "my city", "near me", "nearby", "where i live", "local", "around me",
+            "plan a weekend", "weekend in my city"
+        ], in: aliasText) {
+            return .localPlanning
+        }
+
+        if topics.contains(.food)
+            && containsAny(["suggest", "recommend", "ideas", "dinner", "lunch", "restaurant", "recipe", "meal"], in: aliasText) {
+            return .foodRecommendation
+        }
+
+        if querySignatures.contains(where: { [.likes, .dislikes].contains($0.relation) })
+            || containsAny([
+                "my preferences", "my taste", "i might like", "for me", "personalized",
+                "based on what i like", "recommend something"
+            ], in: aliasText) {
+            return .preferencePersonalization
+        }
+
+        if !querySignatures.isEmpty
+            || containsAny(["who am i", "my name", "where do i live", "my job", "my language"], in: aliasText) {
+            return .identityLookup
+        }
+
+        return .generalChat
+    }
+
+    private static func topicsAreCompatible(_ left: MemoryTopicDomain, _ right: MemoryTopicDomain) -> Bool {
+        if left == right { return true }
+        switch (left, right) {
+        case (.food, .healthDiet), (.healthDiet, .food),
+             (.tech, .workProject), (.workProject, .tech),
+             (.travel, .location), (.location, .travel):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func containsAny(_ terms: [String], in text: String) -> Bool {
+        terms.contains { text.contains($0) }
+    }
 }
 
 nonisolated enum MemoryRelation: String, Hashable {
@@ -439,6 +796,7 @@ nonisolated enum MemoryFactParser {
             "was mag ich", "cosa mi piace", "o que eu gosto", "我喜欢", "好きな"
         ], in: text) {
             append(.likes)
+            append(.dislikes)
         }
 
         if containsAny([

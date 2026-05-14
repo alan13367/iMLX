@@ -588,6 +588,8 @@ actor MemoryStore {
                 mi.updatedAt AS updatedAt,
                 mi.lastUsedAt AS lastUsedAt,
                 mi.usageCount AS usageCount,
+                mi.confidence AS confidence,
+                mi.salience AS salience,
                 ec.vector AS vector,
                 latest.sourceLanguageCode AS sourceLanguageCode,
                 latest.sourceQuote AS sourceQuote,
@@ -631,7 +633,9 @@ actor MemoryStore {
             sourceLanguageCode: row["sourceLanguageCode"],
             sourceQuote: row["sourceQuote"],
             factRelation: row["factRelation"],
-            factValue: row["factValue"]
+            factValue: row["factValue"],
+            confidence: row["confidence"],
+            salience: row["salience"]
         )
     }
 

@@ -6,28 +6,39 @@ nonisolated final class MemorySystem: @unchecked Sendable {
         static let didResetMemoryStorage = "memory.didResetStorage.v3"
     }
 
-    private let fileManager = FileManager.default
+    private let fileManager: FileManager
     private let memoriesDirectory: URL
     private let memoriesURL: URL
     private let store: MemoryStore
-    private let userDefaults = UserDefaults.standard
+    private let userDefaults: UserDefaults
 
     lazy var diagnosticsService = MemoryDiagnosticsService(system: self)
     lazy var ingestionService = MemoryIngestionService(system: self, store: store, diagnosticsService: diagnosticsService)
     lazy var retrievalService = MemoryRetrievalService(system: self, store: store, diagnosticsService: diagnosticsService)
 
-    init() {
+    init(
+        fileManager: FileManager = .default,
+        userDefaults: UserDefaults = .standard,
+        memoriesDirectory: URL? = nil,
+        resetStorageIfNeeded: Bool = true
+    ) {
+        self.fileManager = fileManager
+        self.userDefaults = userDefaults
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
-        memoriesDirectory = appSupport.appendingPathComponent(Constants.Storage.memoriesDirectory, isDirectory: true)
-        memoriesURL = memoriesDirectory.appendingPathComponent(Constants.Storage.memoriesFilename)
-        Self.resetMemoryStorageIfNeeded(
-            fileManager: fileManager,
-            userDefaults: userDefaults,
-            memoriesDirectory: memoriesDirectory
-        )
-        try? fileManager.createDirectory(at: memoriesDirectory, withIntermediateDirectories: true)
-        let dbURL = memoriesDirectory.appendingPathComponent("memories.sqlite")
-        store = MemoryStore(databaseURL: dbURL)
+        let resolvedDirectory = memoriesDirectory
+            ?? appSupport.appendingPathComponent(Constants.Storage.memoriesDirectory, isDirectory: true)
+        self.memoriesDirectory = resolvedDirectory
+        memoriesURL = resolvedDirectory.appendingPathComponent(Constants.Storage.memoriesFilename)
+        if resetStorageIfNeeded {
+            Self.resetMemoryStorageIfNeeded(
+                fileManager: fileManager,
+                userDefaults: userDefaults,
+                memoriesDirectory: resolvedDirectory
+            )
+        }
+        try? fileManager.createDirectory(at: resolvedDirectory, withIntermediateDirectories: true)
+        let dbURL = resolvedDirectory.appendingPathComponent("memories.sqlite")
+        store = MemoryStore(databaseURL: dbURL, fileManager: fileManager)
     }
 
     func listAll() -> [UserMemory] {
@@ -65,7 +76,8 @@ nonisolated final class MemorySystem: @unchecked Sendable {
         sourceLanguageCode: String? = nil,
         sourceQuote: String? = nil,
         factRelation: String? = nil,
-        factValue: String? = nil
+        factValue: String? = nil,
+        confidence: Double? = nil
     ) -> UserMemory? {
         blocking { [self] in
             await self.ingestionService.upsert(
@@ -78,7 +90,8 @@ nonisolated final class MemorySystem: @unchecked Sendable {
                 sourceLanguageCode: sourceLanguageCode,
                 sourceQuote: sourceQuote,
                 factRelation: factRelation,
-                factValue: factValue
+                factValue: factValue,
+                confidence: confidence
             )
         }
     }
@@ -240,7 +253,8 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
         sourceLanguageCode: String?,
         sourceQuote: String?,
         factRelation: String?,
-        factValue: String?
+        factValue: String?,
+        confidence: Double?
     ) async -> UserMemory? {
         let normalizedContent = system.normalizedStoredMemoryContent(content)
         guard !normalizedContent.isEmpty else { return nil }
@@ -251,6 +265,7 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
             ?? system.detectedLanguageCode(in: normalizedSourceQuote)
         let normalizedFactRelation = MemoryFactParser.normalizedRelationRawValue(factRelation)
         let normalizedFactValue = system.normalizedMetadataValue(factValue, maxLength: 180)
+        let normalizedConfidence = confidence.map { min(max($0, 0), 1) }
 
         if system.isRelationBlocked(normalizedFactRelation) {
             return nil
@@ -309,7 +324,7 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
                     updatedAt: now,
                     usageCount: duplicate.usageCount,
                     vector: duplicate.vector,
-                    confidence: duplicate.captureType == .explicit ? 1.0 : 0.82
+                    confidence: duplicate.captureType == .explicit ? 1.0 : (normalizedConfidence ?? 0.82)
                 ),
                 eventKind: duplicate.status == .archived ? .reactivated : .updated
             )
@@ -335,7 +350,7 @@ nonisolated final class MemoryIngestionService: @unchecked Sendable {
                 updatedAt: now,
                 usageCount: 0,
                 vector: system.embedding(for: normalizedContent),
-                confidence: captureType == .explicit ? 1.0 : 0.78
+                confidence: captureType == .explicit ? 1.0 : (normalizedConfidence ?? 0.78)
             ),
             archivedIDs: archiveIDs,
             archiveReason: .archived

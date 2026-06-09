@@ -1389,7 +1389,15 @@ actor ToolCallingService {
             maxTokens: Constants.ToolCalling.plannerMaxTokens,
             temperature: Constants.ToolCalling.plannerTemperature,
             topP: Constants.ToolCalling.plannerTopP,
-            repetitionPenalty: 1.0
+            repetitionPenalty: 1.0,
+            profileRunLabel: "Tool Planning",
+            profilingContext: LLMProfilingRunContext(
+                maxTokens: Constants.ToolCalling.plannerMaxTokens,
+                temperature: Constants.ToolCalling.plannerTemperature,
+                topP: Constants.ToolCalling.plannerTopP,
+                repetitionPenalty: 1.0,
+                thinkingEnabled: false
+            )
         )
 
         var rawOutput = ""

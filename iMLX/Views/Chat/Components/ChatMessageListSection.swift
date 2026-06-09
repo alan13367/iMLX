@@ -218,6 +218,11 @@ struct ChatMessageListSection: View {
         canScrollToBottom && (!scrollPinnedToBottom || !streamingAutoscrollEnabled)
     }
 
+    private var finalizedScrollTargetMessageId: UUID? {
+        guard !isGenerating, currentResponse.isEmpty else { return nil }
+        return messages.last?.id
+    }
+
     @ViewBuilder
     private func scrollToBottomOverlay(using proxy: ScrollViewProxy) -> some View {
         HStack(spacing: 0) {
@@ -299,8 +304,16 @@ struct ChatMessageListSection: View {
     private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool) {
         if animated {
             withAnimation(.easeOut(duration: 0.15)) {
-                proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
+                scrollToResolvedBottomTarget(using: proxy)
             }
+        } else {
+            scrollToResolvedBottomTarget(using: proxy)
+        }
+    }
+
+    private func scrollToResolvedBottomTarget(using proxy: ScrollViewProxy) {
+        if let finalizedScrollTargetMessageId {
+            proxy.scrollTo(finalizedScrollTargetMessageId, anchor: .bottom)
         } else {
             proxy.scrollTo("chatBottomAnchor", anchor: .bottom)
         }

@@ -27,6 +27,16 @@ final class AppState {
     var openKeyboardOnLaunch: Bool
     var voiceSessionInvalidationSeed: Int = 0
     var pendingShortcutRoute: AppShortcutRoute?
+    var latestLLMExecutionProfile: LLMExecutionProfile?
+    var llmExecutionProfiles: [LLMExecutionProfile] = []
+    var llmProfilingSessions: [LLMProfilingSessionRecord] = []
+    var llmInferenceCrashReports: [LLMInferenceCrashReport] = []
+    var latestLLMBenchmarkResult: LLMBenchmarkResult?
+
+    private static let preferredLatestProfileRunLabels: Set<String> = [
+        "Chat Response",
+        "Benchmark"
+    ]
 
     let conversationService = ConversationService()
     let inferenceService = InferenceService()
@@ -98,6 +108,7 @@ final class AppState {
                 self.speechAssetStatus = speechStatus
             }
             _ = await self.reconcileModelCatalogState()
+            await self.refreshLLMExecutionProfiles()
         }
     }
 
@@ -237,6 +248,99 @@ final class AppState {
 
     func setLoadedModel(id: String?) {
         loadedModelId = id
+    }
+
+    @MainActor
+    func refreshLatestLLMExecutionProfile() async {
+        await refreshLLMExecutionProfiles()
+    }
+
+    @MainActor
+    func refreshLLMExecutionProfiles() async {
+        let sessions = await inferenceService.executionProfileSessions()
+        let profiles = await inferenceService.executionProfileHistory()
+        let crashReports = await inferenceService.recoveredInferenceCrashReports()
+        llmProfilingSessions = sessions.sorted { $0.startedAt > $1.startedAt }
+        llmExecutionProfiles = profiles.sorted { $0.createdAt > $1.createdAt }
+        latestLLMExecutionProfile = Self.preferredLatestProfile(from: llmExecutionProfiles)
+        llmInferenceCrashReports = crashReports.sorted { $0.recoveredAt > $1.recoveredAt }
+    }
+
+    @MainActor
+    func recordLLMExecutionProfile(_ profile: LLMExecutionProfile, updateLatest: Bool = true) {
+        if let index = llmExecutionProfiles.firstIndex(where: { $0.id == profile.id }) {
+            llmExecutionProfiles[index] = profile
+        } else {
+            llmExecutionProfiles.insert(profile, at: 0)
+        }
+        llmExecutionProfiles.sort { $0.createdAt > $1.createdAt }
+        if updateLatest, Self.shouldPromoteToLatestProfile(profile) {
+            latestLLMExecutionProfile = profile
+        } else {
+            latestLLMExecutionProfile = Self.preferredLatestProfile(from: llmExecutionProfiles)
+        }
+    }
+
+    @MainActor
+    func recordLLMBenchmarkResult(_ result: LLMBenchmarkResult) {
+        latestLLMBenchmarkResult = result
+        for profile in result.profiles.reversed() {
+            recordLLMExecutionProfile(profile, updateLatest: profile.runLabel == "Benchmark")
+        }
+    }
+
+    @MainActor
+    func runLLMBenchmark(
+        prompt: String,
+        iterations: Int,
+        systemPrompt: String = "",
+        maxTokens: Int = 256
+    ) async throws {
+        guard let modelId = loadedModelId,
+              let model = selectedModel ?? modelInfo(id: modelId) else {
+            throw InferenceError.noModelLoaded
+        }
+        let result = try await inferenceService.benchmark(
+            prompt: prompt,
+            iterations: iterations,
+            systemPrompt: systemPrompt,
+            maxTokens: maxTokens,
+            modelName: model.displayName,
+            profilingContext: LLMProfilingRunContext(
+                model: model,
+                maxTokens: maxTokens,
+                temperature: Constants.Generation.defaultTemperature,
+                topP: Constants.Generation.defaultTopP,
+                repetitionPenalty: Constants.Generation.defaultRepetitionPenalty,
+                thinkingEnabled: false
+            )
+        )
+        recordLLMBenchmarkResult(result)
+    }
+
+    @MainActor
+    private static func preferredLatestProfile(from profiles: [LLMExecutionProfile]) -> LLMExecutionProfile? {
+        let sorted = profiles.sorted { $0.createdAt > $1.createdAt }
+        return sorted.first { preferredLatestProfileRunLabels.contains($0.runLabel) } ?? sorted.first
+    }
+
+    @MainActor
+    private static func shouldPromoteToLatestProfile(_ profile: LLMExecutionProfile) -> Bool {
+        preferredLatestProfileRunLabels.contains(profile.runLabel)
+    }
+
+    @MainActor
+    func makeLLMProfilingSessionExport(for sessionID: UUID) -> LLMProfilingSessionExport? {
+        guard let session = llmProfilingSessions.first(where: { $0.id == sessionID }) else {
+            return nil
+        }
+        return LLMProfilingSessionExport(session: session)
+    }
+
+    @MainActor
+    func deleteLLMProfilingSession(id: UUID) async {
+        await inferenceService.deleteExecutionProfileSession(id: id)
+        await refreshLLMExecutionProfiles()
     }
 
     func restoreModelState() {

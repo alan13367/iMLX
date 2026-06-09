@@ -20,26 +20,7 @@ struct ModelCardView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    if model.supportsVision || model.supportsThinking {
-                        HStack(spacing: 8) {
-                            if model.supportsThinking {
-                                capabilityBadge(
-                                    title: String.appLocalized("models.card.thinking"),
-                                    systemImage: "brain.head.profile",
-                                    color: BrandPalette.magenta,
-                                    gradient: [BrandPalette.magenta, BrandPalette.magenta.opacity(0.7)]
-                                )
-                            }
-                            if model.supportsVision {
-                                capabilityBadge(
-                                    title: String.appLocalized("models.card.vision"),
-                                    systemImage: "eye",
-                                    color: BrandPalette.cyan,
-                                    gradient: [BrandPalette.cyan, BrandPalette.cyan.opacity(0.7)]
-                                )
-                            }
-                        }
-                    }
+                    capabilityBadges
                 }
 
                 Spacer(minLength: 12)
@@ -73,41 +54,59 @@ struct ModelCardView: View {
         .padding(.vertical, 6)
     }
 
-    private func capabilityBadge(title: String, systemImage: String, color: Color, gradient: [Color]) -> some View {
-        Label {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-        } icon: {
+    @ViewBuilder
+    private var capabilityBadges: some View {
+        if model.supportsVision || model.supportsThinking {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    badgeViews
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    badgeViews
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var badgeViews: some View {
+        if model.supportsThinking {
+            capabilityBadge(
+                title: String.appLocalized("models.card.thinking"),
+                systemImage: "lightbulb.fill",
+                foreground: BrandPalette.magenta,
+                background: BrandPalette.magenta.opacity(0.24)
+            )
+        }
+
+        if model.supportsVision {
+            capabilityBadge(
+                title: String.appLocalized("models.card.vision"),
+                systemImage: "eye.fill",
+                foreground: Color(red: 1.0, green: 0.82, blue: 0.02),
+                background: Color(red: 0.42, green: 0.36, blue: 0.08).opacity(0.82)
+            )
+        }
+    }
+
+    private func capabilityBadge(title: String, systemImage: String, foreground: Color, background: Color) -> some View {
+        HStack(spacing: 6) {
             Image(systemName: systemImage)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: gradient,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .font(.subheadline.weight(.bold))
+
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .foregroundStyle(color)
-        .lineLimit(1)
+        .foregroundStyle(foreground)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(background, in: Capsule())
         .fixedSize(horizontal: true, vertical: false)
-        .background {
-            Capsule()
-                .fill(color.opacity(0.08))
-                .overlay(
-                    Capsule()
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [color.opacity(0.4), color.opacity(0.1)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.75
-                        )
-                )
-        }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder

@@ -116,6 +116,20 @@ nonisolated enum Constants {
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
+                id: "minicpm5-1b-mlx-8bit",
+                displayName: "MiniCPM5 1B",
+                huggingFaceId: "alan13367/iMLX-MiniCPM5-1B-8bit",
+                parameterCount: "1B",
+                quantization: "8-bit",
+                estimatedSizeGB: 1.2,
+                minDeviceRAM: 8,
+                family: .minicpm,
+                logoName: "openbmb_logo",
+                supportsThinking: true,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
                 id: "gemma3-1b-4bit",
                 displayName: "Gemma 3 1B",
                 huggingFaceId: "mlx-community/gemma-3-1b-it-4bit",

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import CoreImage
 import ImageIO
 import MLX
@@ -10,41 +11,103 @@ import MLXVLM
 actor InferenceService {
     private var modelContainer: ModelContainer?
     private var loadedModelSupportsVision = false
+    private var visionFeaturesEnabled = false
     private var kokoroTTS: KokoroTTS?
     private var kokoroVoiceEmbedding: MLXArray?
     private var kokoroAssets: SpeechAssetFileLocations?
     private var kokoroVoiceLocale: VoiceLocale?
+    private var lastModelLoadMetrics: LLMModelLoadMetrics?
+    private let profilingStore = LLMProfilingStore()
+    private var latestProfile: LLMExecutionProfile?
+    private var profileHistory: [LLMExecutionProfile] = []
+    private var profilingSessions: [LLMProfilingSessionRecord] = []
+    private var recoveredCrashReports: [LLMInferenceCrashReport] = []
+    private var didLoadPersistedProfiles = false
+    private var lastInProgressSnapshotPersistedAt: ContinuousClock.Instant?
+    private let inProgressSnapshotMinInterval: Duration = .seconds(15)
 
     var isModelLoaded: Bool {
         modelContainer != nil
     }
 
-    func load(modelId: String, localDirectory: URL) async throws {
+    func latestExecutionProfile() async -> LLMExecutionProfile? {
+        await loadPersistedProfilesIfNeeded()
+        return latestProfile
+    }
+
+    func executionProfileHistory() async -> [LLMExecutionProfile] {
+        await loadPersistedProfilesIfNeeded()
+        return profileHistory
+    }
+
+    func executionProfileSessions() async -> [LLMProfilingSessionRecord] {
+        await loadPersistedProfilesIfNeeded()
+        return profilingSessions
+    }
+
+    func recoveredInferenceCrashReports() async -> [LLMInferenceCrashReport] {
+        await loadPersistedProfilesIfNeeded()
+        return recoveredCrashReports
+    }
+
+    func deleteExecutionProfileSession(id: UUID) async {
+        await loadPersistedProfilesIfNeeded()
+        let persistedState = await profilingStore.deleteSession(id: id)
+        profilingSessions = persistedState.sessions
+        profileHistory = persistedState.profiles
+        recoveredCrashReports = persistedState.crashReports
+        latestProfile = profileHistory.max { $0.createdAt < $1.createdAt }
+    }
+
+    func load(modelId: String, modelName: String? = nil, localDirectory: URL, appRegistrySupportsVision: Bool? = nil) async throws {
         #if targetEnvironment(simulator)
         throw InferenceError.simulatorUnsupported
         #else
         if isModelLoaded {
             await unload()
         }
+        lastModelLoadMetrics = nil
 
-        let shouldPreferVisionLoader = detectVisionSupport(in: localDirectory)
+        let configSupportsVision = detectVisionSupport(in: localDirectory)
+        let appSaysVision = appRegistrySupportsVision ?? false
+        let shouldPreferVisionLoader = configSupportsVision && appSaysVision
+        let displayName = modelName ?? modelId
+        let memoryBeforeLoad = LLMProfiler.currentMemoryFootprintBytes()
+        let loadTimer = LLMProfiler.Timer()
+        let loadSignpost = LLMProfiler.beginInterval("Model Loading")
+        let tokenizerLoader = ProfilingTokenizerLoader()
 
-        let container = try await withPreferredDevice {
-            if shouldPreferVisionLoader {
-                return try await VLMModelFactory.shared.loadContainer(
+        do {
+            let container = try await withPreferredDevice {
+                if shouldPreferVisionLoader {
+                    return try await VLMModelFactory.shared.loadContainer(
+                        from: localDirectory,
+                        using: tokenizerLoader
+                    )
+                }
+
+                return try await MLXLMCommon.loadModelContainer(
                     from: localDirectory,
-                    using: TokenizersLoader()
+                    using: tokenizerLoader
                 )
             }
 
-            return try await MLXLMCommon.loadModelContainer(
-                from: localDirectory,
-                using: TokenizersLoader()
+            modelContainer = container
+            loadedModelSupportsVision = shouldPreferVisionLoader
+            visionFeaturesEnabled = shouldPreferVisionLoader
+            lastModelLoadMetrics = LLMModelLoadMetrics(
+                modelName: displayName,
+                modelLoadDuration: loadTimer.elapsedSeconds(),
+                tokenizerLoadDuration: await tokenizerLoader.duration,
+                memoryBeforeModelLoad: memoryBeforeLoad,
+                memoryAfterModelLoad: LLMProfiler.currentMemoryFootprintBytes()
             )
+            LLMProfiler.endInterval("Model Loading", loadSignpost)
+        } catch {
+            LLMProfiler.endInterval("Model Loading", loadSignpost)
+            MLX.Memory.clearCache()
+            throw error
         }
-
-        modelContainer = container
-        loadedModelSupportsVision = shouldPreferVisionLoader
         #endif
     }
 
@@ -57,14 +120,83 @@ actor InferenceService {
         maxTokens: Int,
         temperature: Float = 0.7,
         topP: Float = 1.0,
-        repetitionPenalty: Float = 1.0
+        repetitionPenalty: Float = 1.0,
+        modelName: String? = nil,
+        profileRunLabel: String = "Local LLM Inference",
+        promptConstructionDuration: TimeInterval? = nil,
+        profilingContext: LLMProfilingRunContext? = nil
     ) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+        let contextMessageCount = (systemPrompt.isEmpty ? 0 : 1) + history.count + 1
+        let contextCharacterCount = (systemPrompt.isEmpty ? 0 : systemPrompt.count)
+            + history.reduce(0) { partialResult, message in
+                partialResult + message.content.count
+            }
+            + prompt.count
+        let contextTextBytes = (systemPrompt.isEmpty ? 0 : systemPrompt.utf8.count)
+            + history.reduce(0) { partialResult, message in
+                partialResult + message.content.utf8.count
+            }
+            + prompt.utf8.count
+        let currentMediaBytes = images?.reduce(0) { partialResult, image in
+            partialResult + image.data.count
+        } ?? 0
+        let historyMediaBytes = history.reduce(0) { partialResult, message in
+            partialResult + (message.attachedImages?.reduce(0) { imageResult, image in
+                imageResult + image.data.count
+            } ?? 0)
+        }
+        let contextMediaBytes = historyMediaBytes + currentMediaBytes
+        let currentMediaCount = images?.count ?? 0
+        let historyMediaCount = history.reduce(0) { partialResult, message in
+            partialResult + (message.attachedImages?.count ?? 0)
+        }
+        let contextMediaAttachmentCount = historyMediaCount + currentMediaCount
+        let contextTotalBytes = contextTextBytes + contextMediaBytes
+
+        return AsyncThrowingStream<String, Error> { continuation in
             #if targetEnvironment(simulator)
+            var profile = makeExecutionProfile(
+                runLabel: profileRunLabel,
+                modelName: modelName,
+                promptCharacterCount: prompt.count,
+                contextMessageCount: contextMessageCount,
+                contextCharacterCount: contextCharacterCount,
+                contextTextBytes: contextTextBytes,
+                contextMediaAttachmentCount: contextMediaAttachmentCount,
+                contextMediaBytes: contextMediaBytes,
+                contextTotalBytes: contextTotalBytes,
+                promptConstructionDuration: promptConstructionDuration,
+                profilingContext: profilingContext
+            )
+            profile.errorInfo = LLMProfiler.errorInfo(from: InferenceError.simulatorUnsupported)
+            recordExecutionProfileInMemory(profile)
+            let profilingStore = profilingStore
+            Task {
+                await profilingStore.recordCompletedProfile(profile)
+            }
             continuation.finish(throwing: InferenceError.simulatorUnsupported)
             return
             #else
             guard let modelContainer else {
+                var profile = makeExecutionProfile(
+                    runLabel: profileRunLabel,
+                    modelName: modelName,
+                    promptCharacterCount: prompt.count,
+                    contextMessageCount: contextMessageCount,
+                    contextCharacterCount: contextCharacterCount,
+                    contextTextBytes: contextTextBytes,
+                    contextMediaAttachmentCount: contextMediaAttachmentCount,
+                    contextMediaBytes: contextMediaBytes,
+                    contextTotalBytes: contextTotalBytes,
+                    promptConstructionDuration: promptConstructionDuration,
+                    profilingContext: profilingContext
+                )
+                profile.errorInfo = LLMProfiler.errorInfo(from: InferenceError.noModelLoaded)
+                recordExecutionProfileInMemory(profile)
+                let profilingStore = profilingStore
+                Task {
+                    await profilingStore.recordCompletedProfile(profile)
+                }
                 continuation.finish(throwing: InferenceError.noModelLoaded)
                 return
             }
@@ -72,19 +204,112 @@ actor InferenceService {
             let userInputImages = userInputImages(from: images)
             if let images, !images.isEmpty {
                 guard !userInputImages.isEmpty else {
+                    var profile = makeExecutionProfile(
+                        runLabel: profileRunLabel,
+                        modelName: modelName,
+                        promptCharacterCount: prompt.count,
+                        contextMessageCount: contextMessageCount,
+                        contextCharacterCount: contextCharacterCount,
+                        contextTextBytes: contextTextBytes,
+                        contextMediaAttachmentCount: contextMediaAttachmentCount,
+                        contextMediaBytes: contextMediaBytes,
+                        contextTotalBytes: contextTotalBytes,
+                        promptConstructionDuration: promptConstructionDuration,
+                        profilingContext: profilingContext
+                    )
+                    profile.errorInfo = LLMProfiler.errorInfo(from: InferenceError.invalidImageData)
+                    recordExecutionProfileInMemory(profile)
+                    let profilingStore = profilingStore
+                    Task {
+                        await profilingStore.recordCompletedProfile(profile)
+                    }
                     continuation.finish(throwing: InferenceError.invalidImageData)
                     return
                 }
-                guard loadedModelSupportsVision else {
+                guard loadedModelSupportsVision && visionFeaturesEnabled else {
+                    var profile = makeExecutionProfile(
+                        runLabel: profileRunLabel,
+                        modelName: modelName,
+                        promptCharacterCount: prompt.count,
+                        contextMessageCount: contextMessageCount,
+                        contextCharacterCount: contextCharacterCount,
+                        contextTextBytes: contextTextBytes,
+                        contextMediaAttachmentCount: contextMediaAttachmentCount,
+                        contextMediaBytes: contextMediaBytes,
+                        contextTotalBytes: contextTotalBytes,
+                        promptConstructionDuration: promptConstructionDuration,
+                        profilingContext: profilingContext
+                    )
+                    profile.errorInfo = LLMProfiler.errorInfo(from: InferenceError.visionUnsupportedModel)
+                    recordExecutionProfileInMemory(profile)
+                    let profilingStore = profilingStore
+                    Task {
+                        await profilingStore.recordCompletedProfile(profile)
+                    }
                     continuation.finish(throwing: InferenceError.visionUnsupportedModel)
                     return
                 }
             }
 
+            let loadMetrics = lastModelLoadMetrics
+            let resolvedModelName = modelName ?? loadMetrics?.modelName ?? "Unknown Model"
             let task = Task {
                 defer {
                     MLX.Memory.clearCache()
                 }
+                await loadPersistedProfilesIfNeeded()
+                lastInProgressSnapshotPersistedAt = nil
+                var profile = makeExecutionProfile(
+                    runLabel: profileRunLabel,
+                    modelName: resolvedModelName,
+                    promptCharacterCount: prompt.count,
+                    contextMessageCount: contextMessageCount,
+                    contextCharacterCount: contextCharacterCount,
+                    contextTextBytes: contextTextBytes,
+                    contextMediaAttachmentCount: contextMediaAttachmentCount,
+                    contextMediaBytes: contextMediaBytes,
+                    contextTotalBytes: contextTotalBytes,
+                    promptConstructionDuration: promptConstructionDuration,
+                    profilingContext: profilingContext
+                )
+                var peakFootprintBytes = LLMProfiler.currentMemoryFootprintBytes() ?? 0
+                profile.memoryAvailableAtInferenceStart = LLMProfiler.availableMemoryBytes()
+                profile.memoryBeforeInference = peakFootprintBytes == 0 ? nil : peakFootprintBytes
+                profile.recordMemoryFootprintSample(peakFootprintBytes: &peakFootprintBytes)
+                profile.thermalStateBeforeInference = LLMProfiler.thermalStateDescription()
+                profile.batteryLevelBeforeInference = await LLMProfiler.coarseBatteryLevel()
+
+                let fullTimer = LLMProfiler.Timer()
+                let fullSignpost = LLMProfiler.beginInterval("Full Local LLM Inference")
+                var didEndFullSignpost = false
+                func endFullSignpostIfNeeded() {
+                    guard !didEndFullSignpost else { return }
+                    LLMProfiler.endInterval("Full Local LLM Inference", fullSignpost)
+                    didEndFullSignpost = true
+                }
+
+                func finishProfile(error: Error? = nil) async {
+                    profile.totalInferenceDuration = fullTimer.elapsedSeconds()
+                    profile.recordMemoryFootprintSample(peakFootprintBytes: &peakFootprintBytes)
+                    profile.memoryAfterInference = LLMProfiler.currentMemoryFootprintBytes()
+                    if let before = profile.memoryBeforeInference,
+                       let after = profile.memoryAfterInference {
+                        profile.memoryDelta = Int64(after) - Int64(before)
+                    }
+                    if profile.timeToFirstGeneratedToken == nil,
+                       let firstChunk = profile.timeToFirstOutputChunk {
+                        profile.timeToFirstGeneratedToken = firstChunk
+                        profile.timeToFirstGeneratedTokenSource = "first_output_chunk_fallback"
+                    }
+                    profile.thermalStateAfterInference = LLMProfiler.thermalStateDescription()
+                    profile.batteryLevelAfterInference = await LLMProfiler.coarseBatteryLevel()
+                    if let error {
+                        profile.errorInfo = LLMProfiler.errorInfo(from: error)
+                    }
+                    await recordExecutionProfile(profile)
+                    endFullSignpostIfNeeded()
+                }
+
                 do {
                     try await withPreferredDevice {
                         let additionalContext: [String: any Sendable]? = thinkingEnabled.map { value in
@@ -99,29 +324,104 @@ actor InferenceService {
                         )
                         var parameters = GenerateParameters(
                             temperature: temperature,
-                            topP: topP,
-                            //repetitionPenalty: repetitionPenalty == 1 ? nil : repetitionPenalty
+                            topP: topP
                         )
                         parameters.maxTokens = maxTokens
+                        if repetitionPenalty != 1.0 {
+                            parameters.repetitionPenalty = repetitionPenalty
+                        }
 
                         session.generateParameters = parameters
 
                         let stream = session.streamResponse(to: prompt, role: .user, images: userInputImages, videos: [])
 
-                        for try await chunk in stream {
-                            guard !Task.isCancelled else {
-                                break
+                        do {
+                            let decodeSignpost = LLMProfiler.beginInterval("Decode / Token Generation")
+                            defer {
+                                LLMProfiler.endInterval("Decode / Token Generation", decodeSignpost)
                             }
-                            continuation.yield(chunk)
+                            let streamSetupTimer = LLMProfiler.Timer()
+                            var decodeTimer: LLMProfiler.Timer?
+                            var emittedTextChunkCount = 0
+                            var emittedTextCharacterCount = 0
+                            var lastDecodeProgressSnapshot = 0.0
+
+                            generationLoop: for try await chunk in stream {
+                                try Task.checkCancellation()
+
+                                if profile.tokenizationDuration == nil {
+                                    profile.tokenizationDuration = streamSetupTimer.elapsedSeconds()
+                                    saveInProgressProfile(
+                                        &profile,
+                                        peakFootprintBytes: &peakFootprintBytes,
+                                        stage: "tokenized_input"
+                                    )
+                                }
+                                emittedTextChunkCount += 1
+                                emittedTextCharacterCount += chunk.count
+                                profile.outputTextChunkCount = emittedTextChunkCount
+                                profile.outputCharacterCount = emittedTextCharacterCount
+                                if profile.timeToFirstOutputChunk == nil {
+                                    profile.timeToFirstOutputChunk = fullTimer.elapsedSeconds()
+                                    LLMProfiler.emitEvent("Detokenization")
+                                    let yieldResult = continuation.yield(chunk)
+                                    lastDecodeProgressSnapshot = fullTimer.elapsedSeconds()
+                                    saveInProgressProfile(
+                                        &profile,
+                                        peakFootprintBytes: &peakFootprintBytes,
+                                        stage: "first_output_chunk",
+                                        emittedTextChunkCount: emittedTextChunkCount,
+                                        emittedTextCharacterCount: emittedTextCharacterCount
+                                    )
+                                    decodeTimer = LLMProfiler.Timer()
+                                    if case .terminated = yieldResult {
+                                        profile.stopReason = "cancelled"
+                                        break generationLoop
+                                    }
+                                    continue
+                                }
+                                if case .terminated = continuation.yield(chunk) {
+                                    profile.stopReason = "cancelled"
+                                    break generationLoop
+                                }
+                                let elapsed = fullTimer.elapsedSeconds()
+                                if elapsed - lastDecodeProgressSnapshot >= 15 {
+                                    profile.decodeGenerationDuration = decodeTimer?.elapsedSeconds()
+                                    profile.decodeGenerationDurationSource = "in_progress_consumer_wall_clock_decode_loop"
+                                    saveInProgressProfile(
+                                        &profile,
+                                        peakFootprintBytes: &peakFootprintBytes,
+                                        stage: "decode_progress",
+                                        emittedTextChunkCount: emittedTextChunkCount,
+                                        emittedTextCharacterCount: emittedTextCharacterCount,
+                                        writeSessionExport: false
+                                    )
+                                    lastDecodeProgressSnapshot = elapsed
+                                }
+                            }
+
+                            if profile.stopReason == nil {
+                                profile.stopReason = "stream_completed"
+                                profile.decodeGenerationDuration = decodeTimer?.elapsedSeconds()
+                                profile.decodeGenerationDurationSource = "consumer_wall_clock_decode_loop"
+                            }
                         }
                     }
 
+                    await finishProfile()
                     continuation.finish()
                 } catch {
                     if Task.isCancelled {
+                        profile.stopReason = "cancelled"
+                    }
+                    let mappedError = Task.isCancelled
+                        ? InferenceError.generationCancelled
+                        : mapError(error)
+                    await finishProfile(error: Task.isCancelled ? nil : mappedError)
+                    if Task.isCancelled {
                         continuation.finish(throwing: InferenceError.generationCancelled)
                     } else {
-                        continuation.finish(throwing: mapError(error))
+                        continuation.finish(throwing: mappedError)
                     }
                 }
             }
@@ -133,10 +433,51 @@ actor InferenceService {
         }
     }
 
+    func benchmark(
+        prompt: String,
+        iterations: Int,
+        systemPrompt: String,
+        maxTokens: Int,
+        temperature: Float = 0.7,
+        topP: Float = 1.0,
+        repetitionPenalty: Float = 1.0,
+        modelName: String? = nil,
+        profilingContext: LLMProfilingRunContext? = nil
+    ) async throws -> LLMBenchmarkResult {
+        let iterationCount = max(0, iterations)
+        var profiles: [LLMExecutionProfile] = []
+        profiles.reserveCapacity(iterationCount)
+
+        for _ in 0..<iterationCount {
+            let stream = generate(
+                prompt: prompt,
+                history: [],
+                systemPrompt: systemPrompt,
+                maxTokens: maxTokens,
+                temperature: temperature,
+                topP: topP,
+                repetitionPenalty: repetitionPenalty,
+                modelName: modelName,
+                profileRunLabel: "Benchmark",
+                profilingContext: profilingContext
+            )
+            for try await _ in stream {
+                try Task.checkCancellation()
+            }
+            if let latestProfile {
+                profiles.append(latestProfile)
+            }
+        }
+
+        return LLMBenchmarkResult(prompt: prompt, profiles: profiles)
+    }
+
     func unload() async {
         let wasLoaded = modelContainer != nil
         modelContainer = nil
         loadedModelSupportsVision = false
+        visionFeaturesEnabled = false
+        lastModelLoadMetrics = nil
 
         if wasLoaded {
             await Task.yield()
@@ -343,12 +684,154 @@ actor InferenceService {
         }
         return InferenceError.modelLoadFailed(error.localizedDescription)
     }
+
+    private func loadPersistedProfilesIfNeeded() async {
+        guard !didLoadPersistedProfiles else { return }
+        let persistedState = await profilingStore.loadPersistedState()
+        profilingSessions = persistedState.sessions
+        for profile in persistedState.profiles {
+            recordExecutionProfileInMemory(profile)
+        }
+        recoveredCrashReports = persistedState.crashReports
+        profileHistory.sort { $0.createdAt < $1.createdAt }
+        latestProfile = profileHistory.max { $0.createdAt < $1.createdAt }
+        didLoadPersistedProfiles = true
+    }
+
+    private func makeExecutionProfile(
+        runLabel: String,
+        modelName: String?,
+        promptCharacterCount: Int,
+        contextMessageCount: Int,
+        contextCharacterCount: Int,
+        contextTextBytes: Int,
+        contextMediaAttachmentCount: Int,
+        contextMediaBytes: Int,
+        contextTotalBytes: Int,
+        promptConstructionDuration: TimeInterval?,
+        profilingContext: LLMProfilingRunContext?
+    ) -> LLMExecutionProfile {
+        LLMExecutionProfile(
+            runLabel: runLabel,
+            modelName: modelName ?? lastModelLoadMetrics?.modelName ?? "Unknown Model",
+            promptCharacterCount: promptCharacterCount,
+            contextMessageCount: contextMessageCount,
+            contextCharacterCount: contextCharacterCount,
+            contextTextBytes: contextTextBytes,
+            contextMediaAttachmentCount: contextMediaAttachmentCount,
+            contextMediaBytes: contextMediaBytes,
+            contextTotalBytes: contextTotalBytes,
+            modelLoadMetrics: lastModelLoadMetrics,
+            promptConstructionDuration: promptConstructionDuration,
+            profilingContext: profilingContext
+        )
+    }
+
+    private func saveInProgressProfile(
+        _ profile: inout LLMExecutionProfile,
+        peakFootprintBytes: inout UInt64,
+        stage: String,
+        emittedTextChunkCount: Int? = nil,
+        emittedTextCharacterCount: Int? = nil,
+        writeSessionExport: Bool = true
+    ) {
+        profile.recordMemoryFootprintSample(peakFootprintBytes: &peakFootprintBytes)
+        let profileSnapshot = profile
+        let profilingStore = profilingStore
+        let memoryFootprintBytes = LLMProfiler.currentMemoryFootprintBytes()
+        let thermalState = LLMProfiler.thermalStateDescription()
+        let persistInProgressSnapshot = shouldPersistInProgressSnapshot(for: stage)
+        Task {
+            await profilingStore.saveInProgressProfile(
+                profileSnapshot,
+                stage: stage,
+                memoryFootprintBytes: memoryFootprintBytes,
+                thermalState: thermalState,
+                batteryLevel: nil,
+                emittedTextChunkCount: emittedTextChunkCount,
+                emittedTextCharacterCount: emittedTextCharacterCount,
+                persistInProgressSnapshot: persistInProgressSnapshot,
+                writeSessionExport: writeSessionExport
+            )
+        }
+    }
+
+    private func shouldPersistInProgressSnapshot(for stage: String) -> Bool {
+        switch stage {
+        case "tokenized_input", "first_output_chunk":
+            lastInProgressSnapshotPersistedAt = ContinuousClock().now
+            return true
+        case "decode_progress":
+            let now = ContinuousClock().now
+            if let lastPersisted = lastInProgressSnapshotPersistedAt,
+               lastPersisted.duration(to: now) < inProgressSnapshotMinInterval {
+                return false
+            }
+            lastInProgressSnapshotPersistedAt = now
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func recordExecutionProfile(_ profile: LLMExecutionProfile) async {
+        recordExecutionProfileInMemory(profile)
+        let session = await profilingStore.recordCompletedProfile(profile)
+        recordProfilingSessionInMemory(session)
+    }
+
+    private func recordExecutionProfileInMemory(_ profile: LLMExecutionProfile) {
+        latestProfile = profile
+        if let index = profileHistory.firstIndex(where: { $0.id == profile.id }) {
+            profileHistory[index] = profile
+        } else {
+            profileHistory.append(profile)
+        }
+    }
+
+    private func recordProfilingSessionInMemory(_ session: LLMProfilingSessionRecord) {
+        if let index = profilingSessions.firstIndex(where: { $0.id == session.id }) {
+            profilingSessions[index] = session
+        } else {
+            profilingSessions.append(session)
+        }
+        profilingSessions.sort { $0.startedAt < $1.startedAt }
+        recoveredCrashReports = profilingSessions
+            .flatMap(\.crashReports)
+            .sorted { $0.recoveredAt < $1.recoveredAt }
+    }
+
+    private nonisolated static func stopReasonDescription(_ stopReason: GenerateStopReason) -> String {
+        switch stopReason {
+        case .stop:
+            return "stop"
+        case .length:
+            return "length"
+        case .cancelled:
+            return "cancelled"
+        }
+    }
+}
+
+private actor ProfilingTokenizerLoader: MLXLMCommon.TokenizerLoader {
+    private let underlying = TokenizersLoader()
+    private(set) var duration: TimeInterval?
+
+    func load(from directory: URL) async throws -> any MLXLMCommon.Tokenizer {
+        let signpost = LLMProfiler.beginInterval("Tokenizer Loading")
+        let timer = LLMProfiler.Timer()
+        defer {
+            duration = timer.elapsedSeconds()
+            LLMProfiler.endInterval("Tokenizer Loading", signpost)
+        }
+        return try await underlying.load(from: directory)
+    }
 }
 
 nonisolated private extension ChatMessage {
     var chatMessage: Chat.Message {
         let userInputImages = userInputImages(from: attachedImages)
-        
+
         switch role {
         case .user:
             return .user(content, images: userInputImages)
@@ -356,6 +839,17 @@ nonisolated private extension ChatMessage {
             return .assistant(content, images: userInputImages)
         case .system:
             return .system(content, images: userInputImages)
+        }
+    }
+
+    var chatMessageStrippingImages: Chat.Message {
+        switch role {
+        case .user:
+            return .user(content, images: [])
+        case .assistant:
+            return .assistant(content, images: [])
+        case .system:
+            return .system(content, images: [])
         }
     }
 }

@@ -6,6 +6,9 @@ private enum SettingsNavigationDestination: String, Hashable {
     case personalization
     case speechAssets
     case about
+    #if DEBUG
+    case profiling
+    #endif
 }
 
 struct SettingsView: View {
@@ -77,6 +80,20 @@ struct SettingsView: View {
                 SettingsSectionHeader(title: String.appLocalized("settings.section.system"))
             }
 
+            #if DEBUG
+            Section {
+                SettingsNavigationRow(
+                    title: "LLM Profiling",
+                    detail: profilingDetail,
+                    systemImage: "gauge.with.dots.needle.67percent"
+                ) {
+                    navigationDestination = .profiling
+                }
+            } header: {
+                SettingsSectionHeader(title: "Developer")
+            }
+            #endif
+
             Section {
                 SettingsNavigationRow(
                     title: String.appLocalized("settings.section.about"),
@@ -115,6 +132,10 @@ struct SettingsView: View {
                     deviceCapability: deviceCapability,
                     showClearModelsAlert: $showClearModelsAlert
                 )
+            #if DEBUG
+            case .profiling:
+                LLMProfilingView(appState: appState)
+            #endif
             }
         }
         .alert(String.appLocalized("settings.clear_alert_title"), isPresented: $showClearModelsAlert) {
@@ -160,6 +181,18 @@ struct SettingsView: View {
         }
         return String(format: String.appLocalized("settings.manage_memory_detail"), activeCount)
     }
+
+    #if DEBUG
+    private var profilingDetail: String {
+        guard let profile = appState.latestLLMExecutionProfile else {
+            return "No run yet"
+        }
+        return [
+            LLMProfileFormatters.duration(profile.totalInferenceDuration),
+            LLMProfileFormatters.characterRate(profile.outputCharactersPerSecond)
+        ].joined(separator: " · ")
+    }
+    #endif
 }
 
 private struct SpeechAssetsSettingsView: View {

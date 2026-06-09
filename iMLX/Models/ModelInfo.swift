@@ -22,6 +22,7 @@ struct ModelInfo: Identifiable, Codable {
         case qwen3
         case qwen35
         case qwen2vl
+        case minicpm
         case gemma3
         case gemma4
         case mistral3
@@ -34,6 +35,7 @@ struct ModelInfo: Identifiable, Codable {
             case .qwen3: return "Qwen 3"
             case .qwen35: return "Qwen 3.5"
             case .qwen2vl: return "Qwen 2-VL"
+            case .minicpm: return "MiniCPM"
             case .gemma3: return "Gemma 3"
             case .gemma4: return "Gemma 4"
             case .mistral3: return "Mistral 3"
@@ -52,6 +54,8 @@ struct ModelInfo: Identifiable, Codable {
                 return "Qwen3.5 represents a significant leap forward, integrating breakthroughs in multimodal learning, architectural efficiency, reinforcement learning scale, and global accessibility to empower developers and enterprises with unprecedented capability and efficiency."
             case .qwen2vl:
                 return "Qwen2-VL is optimized for vision-language understanding, combining image perception and grounded text generation for multimodal tasks."
+            case .minicpm:
+                return "MiniCPM is built for compact on-device assistants, reasoning, coding, and tool-use workflows with a small local footprint."
             case .gemma3:
                 return "Gemma 3 brings lightweight multimodal models with strong everyday quality and practical local-device efficiency."
             case .gemma4:
@@ -68,6 +72,7 @@ struct ModelInfo: Identifiable, Codable {
         var logoName: String {
             switch self {
             case .imlx: return "BrandLogo"
+            case .minicpm: return "openbmb_logo"
             case .qwen3, .qwen35, .qwen2vl: return "qwen_logo"
             case .gemma3, .gemma4: return "gemma_logo"
             case .mistral3: return "mistral_logo"
@@ -81,11 +86,12 @@ struct ModelInfo: Identifiable, Codable {
             case .qwen3: return 1
             case .qwen35: return 2
             case .qwen2vl: return 3
-            case .gemma3: return 4
-            case .gemma4: return 5
-            case .mistral3: return 6
-            case .lfm2: return 7
-            case .lfm25: return 8
+            case .minicpm: return 4
+            case .gemma3: return 5
+            case .gemma4: return 6
+            case .mistral3: return 7
+            case .lfm2: return 8
+            case .lfm25: return 9
             }
         }
     }

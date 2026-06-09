@@ -22,6 +22,27 @@ xcodebuild build \
   -scheme "iMLX" \
   -destination 'generic/platform=iOS'
 
+# Optional physical iPhone debug/install flow. Use only when explicitly asked;
+# simulator remains the default verification target.
+# List paired devices and substitute the destination id from that output:
+xcrun xctrace list devices
+
+xcodebuild build \
+  -project "iMLX.xcodeproj" \
+  -scheme "iMLX" \
+  -configuration Debug \
+  -destination 'id=DEVICE_UDID' \
+  -derivedDataPath /tmp/iMLX-device-derived
+
+xcrun devicectl device install app \
+  --device DEVICE_UDID \
+  /tmp/iMLX-device-derived/Build/Products/Debug-iphoneos/iMLX.app
+
+xcrun devicectl device process launch \
+  --terminate-existing \
+  --device DEVICE_UDID \
+  com.alan13367.iMLX
+
 # Resolve packages.
 xcodebuild -resolvePackageDependencies \
   -project "iMLX.xcodeproj" \

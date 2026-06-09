@@ -77,6 +77,12 @@
         }
       }
     },
+    "%@ recovered interruption(s)" : {
+
+    },
+    "%@ runs" : {
+
+    },
     "%@, %@" : {
       "localizations" : {
         "en" : {
@@ -316,6 +322,12 @@
           }
         }
       }
+    },
+    "Benchmark" : {
+
+    },
+    "Benchmark prompt" : {
+
     },
     "brand.subtitle" : {
       "extractionState" : "manual",
@@ -1421,6 +1433,18 @@
         }
       }
     },
+    "Copy Benchmark JSON" : {
+
+    },
+    "Copy CSV Row" : {
+
+    },
+    "Copy JSON" : {
+
+    },
+    "Delete" : {
+
+    },
     "Delete conversation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1466,6 +1490,9 @@
           }
         }
       }
+    },
+    "Detailed Metrics" : {
+
     },
     "Details" : {
       "extractionState" : "manual",
@@ -1719,6 +1746,9 @@
           }
         }
       }
+    },
+    "Each app launch/debug run is saved as its own timestamped session. Measurement notes and limitations are included once per session export, not repeated on every profile." : {
+
     },
     "Enable thinking" : {
       "extractionState" : "manual",
@@ -2111,6 +2141,9 @@
         }
       }
     },
+    "Iterations: %lld" : {
+
+    },
     "Keep" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2157,6 +2190,15 @@
         }
       }
     },
+    "Latest Benchmark" : {
+
+    },
+    "Latest Run" : {
+
+    },
+    "Latest Run Export" : {
+
+    },
     "Live Voice" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2179,6 +2221,9 @@
           }
         }
       }
+    },
+    "LLM Profiling" : {
+
     },
     "Load %@" : {
       "extractionState" : "manual",
@@ -3721,6 +3766,9 @@
         }
       }
     },
+    "No Profile Yet" : {
+
+    },
     "Onboarding" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3859,6 +3907,9 @@
         }
       }
     },
+    "Profiling Sessions" : {
+
+    },
     "Recommended" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3881,6 +3932,9 @@
           }
         }
       }
+    },
+    "Refresh" : {
+
     },
     "Relation" : {
       "extractionState" : "manual",
@@ -4020,6 +4074,18 @@
         }
       }
     },
+    "Run Benchmark" : {
+
+    },
+    "Run local generation once, then return here." : {
+
+    },
+    "Running Benchmark…" : {
+
+    },
+    "Runs repeated local generation with an empty system prompt. Load a model before starting. Exports omit the raw prompt text." : {
+
+    },
     "Salience" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4042,6 +4108,9 @@
           }
         }
       }
+    },
+    "Save JSON" : {
+
     },
     "Scroll to bottom" : {
       "extractionState" : "manual",
@@ -4085,6 +4154,167 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已选 ID"
+          }
+        }
+      }
+    },
+    "settings.about.licenses" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Licenses"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Licencias"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "许可"
+          }
+        }
+      }
+    },
+    "settings.about.licenses_body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX includes open-source components distributed under their own licenses. The app project is distributed under the MIT and Apache 2.0 licenses included with the source, and dependency licenses remain owned by their respective authors."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX incluye componentes de código abierto distribuidos bajo sus propias licencias. El proyecto de la app se distribuye bajo las licencias MIT y Apache 2.0 incluidas con el código fuente, y las licencias de las dependencias pertenecen a sus respectivos autores."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX 包含按各自许可证分发的开源组件。本应用项目按源码中包含的 MIT 和 Apache 2.0 许可证分发，依赖项许可证归各自作者所有。"
+          }
+        }
+      }
+    },
+    "settings.about.open_source_packages" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open-Source Packages"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paquetes de código abierto"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开源包"
+          }
+        }
+      }
+    },
+    "settings.about.privacy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacidad"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐私"
+          }
+        }
+      }
+    },
+    "settings.about.privacy_body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX is designed for local, on-device AI. Chats and local memories stay on this device unless you explicitly enable and use network features such as Web Search or URL reading. Those network requests may send the query, URL, and returned page content through internet services."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX está diseñado para IA local en el dispositivo. Los chats y recuerdos locales permanecen en este dispositivo salvo que actives y uses explícitamente funciones de red como Búsqueda web o lectura de URL. Esas solicitudes de red pueden enviar la consulta, la URL y el contenido devuelto de la página a través de servicios de internet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX 专为本地设备端 AI 设计。聊天和本地记忆会保留在此设备上，除非你明确启用并使用网页搜索或 URL 读取等网络功能。这些网络请求可能会通过互联网服务发送查询、URL 和返回的网页内容。"
+          }
+        }
+      }
+    },
+    "settings.about.terms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terms"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Términos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "条款"
+          }
+        }
+      }
+    },
+    "settings.about.terms_body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX runs local AI models and can produce incorrect or incomplete output. You are responsible for reviewing answers before relying on them, especially for medical, legal, financial, safety, or other high-impact decisions. Network tools are optional and only run when enabled."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX ejecuta modelos de IA locales y puede producir resultados incorrectos o incompletos. Eres responsable de revisar las respuestas antes de confiar en ellas, especialmente para decisiones médicas, legales, financieras, de seguridad u otras de alto impacto. Las herramientas de red son opcionales y solo se ejecutan cuando están activadas."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iMLX 运行本地 AI 模型，可能产生不正确或不完整的输出。在依赖回答之前，尤其是医疗、法律、财务、安全或其他高影响决策中，你有责任自行审核。网络工具是可选的，只有启用后才会运行。"
           }
         }
       }
@@ -4489,167 +4719,6 @@
         }
       }
     },
-    "settings.about.licenses" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Licenses"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Licencias"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "许可"
-          }
-        }
-      }
-    },
-    "settings.about.licenses_body" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX includes open-source components distributed under their own licenses. The app project is distributed under the MIT and Apache 2.0 licenses included with the source, and dependency licenses remain owned by their respective authors."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX incluye componentes de código abierto distribuidos bajo sus propias licencias. El proyecto de la app se distribuye bajo las licencias MIT y Apache 2.0 incluidas con el código fuente, y las licencias de las dependencias pertenecen a sus respectivos autores."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX 包含按各自许可证分发的开源组件。本应用项目按源码中包含的 MIT 和 Apache 2.0 许可证分发，依赖项许可证归各自作者所有。"
-          }
-        }
-      }
-    },
-    "settings.about.open_source_packages" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open-Source Packages"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paquetes de código abierto"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开源包"
-          }
-        }
-      }
-    },
-    "settings.about.privacy" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Privacy"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Privacidad"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "隐私"
-          }
-        }
-      }
-    },
-    "settings.about.privacy_body" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX is designed for local, on-device AI. Chats and local memories stay on this device unless you explicitly enable and use network features such as Web Search or URL reading. Those network requests may send the query, URL, and returned page content through internet services."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX está diseñado para IA local en el dispositivo. Los chats y recuerdos locales permanecen en este dispositivo salvo que actives y uses explícitamente funciones de red como Búsqueda web o lectura de URL. Esas solicitudes de red pueden enviar la consulta, la URL y el contenido devuelto de la página a través de servicios de internet."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX 专为本地设备端 AI 设计。聊天和本地记忆会保留在此设备上，除非你明确启用并使用网页搜索或 URL 读取等网络功能。这些网络请求可能会通过互联网服务发送查询、URL 和返回的网页内容。"
-          }
-        }
-      }
-    },
-    "settings.about.terms" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Terms"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Términos"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "条款"
-          }
-        }
-      }
-    },
-    "settings.about.terms_body" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX runs local AI models and can produce incorrect or incomplete output. You are responsible for reviewing answers before relying on them, especially for medical, legal, financial, safety, or other high-impact decisions. Network tools are optional and only run when enabled."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX ejecuta modelos de IA locales y puede producir resultados incorrectos o incompletos. Eres responsable de revisar las respuestas antes de confiar en ellas, especialmente para decisiones médicas, legales, financieras, de seguridad u otras de alto impacto. Las herramientas de red son opcionales y solo se ejecutan cuando están activadas."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iMLX 运行本地 AI 模型，可能产生不正确或不完整的输出。在依赖回答之前，尤其是医疗、法律、财务、安全或其他高影响决策中，你有责任自行审核。网络工具是可选的，只有启用后才会运行。"
-          }
-        }
-      }
-    },
     "settings.device_tier" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4788,29 +4857,6 @@
         }
       }
     },
-    "settings.open_keyboard_on_launch" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open keyboard on launch"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Abrir teclado al iniciar"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "启动时打开键盘"
-          }
-        }
-      }
-    },
     "settings.manage_memory" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4899,6 +4945,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "模型占用"
+          }
+        }
+      }
+    },
+    "settings.open_keyboard_on_launch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open keyboard on launch"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abrir teclado al iniciar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动时打开键盘"
           }
         }
       }

@@ -270,6 +270,10 @@ final class ChatViewModel {
             }
             let now = Date()
             guard force || now.timeIntervalSince(lastResponseFlush) >= flushInterval else { return }
+            let uiStreamingSignpost = LLMProfiler.beginInterval("UI Streaming / Rendering")
+            defer {
+                LLMProfiler.endInterval("UI Streaming / Rendering", uiStreamingSignpost)
+            }
             refreshParsedResponse()
             self.currentResponse = accumulatedResponse
             self.currentParsedResponse = latestParsedResponse
@@ -374,6 +378,8 @@ final class ChatViewModel {
             )
             try Task.checkCancellation()
 
+            let promptConstructionSignpost = LLMProfiler.beginInterval("Prompt Construction")
+            let promptConstructionTimer = LLMProfiler.Timer()
             let memoryContext = self.promptMemoryContext(
                 memoryRetrievalResult.contextBlock,
                 for: loadedModel
@@ -405,6 +411,8 @@ final class ChatViewModel {
                 thinkingEnabled: thinkingEnabled,
                 replyMode: replyMode
             )
+            let promptConstructionDuration = promptConstructionTimer.elapsedSeconds()
+            LLMProfiler.endInterval("Prompt Construction", promptConstructionSignpost)
 
             let stream = await self.inferenceService.generate(
                 prompt: effectiveUserPrompt,
@@ -415,7 +423,18 @@ final class ChatViewModel {
                 maxTokens: generationBudget.streamMaxTokens,
                 temperature: temperature,
                 topP: topP,
-                repetitionPenalty: repetitionPenalty
+                repetitionPenalty: repetitionPenalty,
+                modelName: loadedModel?.displayName,
+                profileRunLabel: "Chat Response",
+                promptConstructionDuration: promptConstructionDuration,
+                profilingContext: LLMProfilingRunContext(
+                    model: loadedModel,
+                    maxTokens: generationBudget.streamMaxTokens,
+                    temperature: temperature,
+                    topP: topP,
+                    repetitionPenalty: repetitionPenalty,
+                    thinkingEnabled: loadedModel?.supportsThinking == true ? thinkingEnabled : nil
+                )
             )
 
             for try await token in stream {
@@ -438,25 +457,43 @@ final class ChatViewModel {
                     }
                 }
             }
+            await syncLatestLLMExecutionProfile()
 
             flushResponseToUI(force: true)
 
             if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: latestParsedResponse, thinkingEnabled: thinkingEnabled) {
+                let finalPromptConstructionSignpost = LLMProfiler.beginInterval("Prompt Construction")
+                let finalPromptConstructionTimer = LLMProfiler.Timer()
+                let finalSystemPrompt = self.finalAnswerSystemPrompt(
+                    base: systemPrompt,
+                    memoryContext: memoryContext,
+                    toolContext: "",
+                    replyMode: replyMode
+                )
+                let finalPromptConstructionDuration = finalPromptConstructionTimer.elapsedSeconds()
+                LLMProfiler.endInterval("Prompt Construction", finalPromptConstructionSignpost)
+
                 let followUpStream = await self.inferenceService.generate(
                     prompt: effectiveUserPrompt,
                     images: userMessage.attachedImages,
                     thinkingEnabled: false,
                     history: history,
-                    systemPrompt: self.finalAnswerSystemPrompt(
-                        base: systemPrompt,
-                        memoryContext: memoryContext,
-                        toolContext: "",
-                        replyMode: replyMode
-                    ),
+                    systemPrompt: finalSystemPrompt,
                     maxTokens: generationBudget.finalAnswerMaxTokens,
                     temperature: temperature,
                     topP: topP,
-                    repetitionPenalty: repetitionPenalty
+                    repetitionPenalty: repetitionPenalty,
+                    modelName: loadedModel?.displayName,
+                    profileRunLabel: "Final Answer Follow-up",
+                    promptConstructionDuration: finalPromptConstructionDuration,
+                    profilingContext: LLMProfilingRunContext(
+                        model: loadedModel,
+                        maxTokens: generationBudget.finalAnswerMaxTokens,
+                        temperature: temperature,
+                        topP: topP,
+                        repetitionPenalty: repetitionPenalty,
+                        thinkingEnabled: false
+                    )
                 )
 
                 var startedFollowUpOutput = false
@@ -474,6 +511,7 @@ final class ChatViewModel {
                         try enforceMemorySafety()
                     }
                 }
+                await syncLatestLLMExecutionProfile()
             }
 
             flushResponseToUI(force: true)
@@ -525,6 +563,7 @@ final class ChatViewModel {
             Haptics.impactMedium()
         } catch is CancellationError {
             Self.debugToolLog("send cancelled")
+            await syncLatestLLMExecutionProfile()
             toolActivityStatus = nil
             flushResponseToUI(force: true)
             if !shouldDiscardCancelledGeneration, !accumulatedResponse.isEmpty {
@@ -549,6 +588,7 @@ final class ChatViewModel {
             self.saveCurrentConversation()
         } catch {
             Self.debugToolLog("send failed: \(String(describing: error))")
+            await syncLatestLLMExecutionProfile()
             toolActivityStatus = nil
             flushResponseToUI(force: true)
             if !accumulatedResponse.isEmpty {
@@ -643,7 +683,9 @@ final class ChatViewModel {
             let localURL = await downloadService.localURL(for: model)
             try await inferenceService.load(
                 modelId: model.id,
-                localDirectory: localURL
+                modelName: model.displayName,
+                localDirectory: localURL,
+                appRegistrySupportsVision: model.supportsVision
             )
             var updatedModel = model
             updatedModel.isDownloaded = true
@@ -1082,15 +1124,19 @@ final class ChatViewModel {
         }
 
         if !handledCommand,
-           let memoryContent = highConfidenceSelfFactMemoryContent(from: text) {
+           let candidate = highConfidenceSelfFactMemoryCandidate(from: text) {
             handledCommand = true
             let savedMemory = appState.saveMemory(
-                content: memoryContent,
+                content: candidate.canonicalContent,
                 status: .active,
                 captureType: .inferred,
                 sourceConversationId: activeConversationId,
                 sourceMessageId: userMessage.id,
-                sourceQuote: text
+                sourceLanguageCode: candidate.sourceLanguageCode,
+                sourceQuote: candidate.sourceQuote ?? text,
+                factRelation: candidate.relation,
+                factValue: candidate.value,
+                confidence: candidate.confidence
             )
             if savedMemory != nil {
                 showMemoryNotice(
@@ -1188,6 +1234,18 @@ final class ChatViewModel {
         userMessage: ChatMessage,
         assistantMessage _: ChatMessage
     ) async throws -> [MemoryExtractionCandidate] {
+        let deterministicCandidates = appState.memoryService.deterministicCandidates(from: userMessage.content)
+        if !deterministicCandidates.isEmpty {
+            return deterministicCandidates
+        }
+
+        guard appState.memoryService.shouldRunLLMMemoryExtraction(
+            for: userMessage.content,
+            hasDeterministicCandidates: false
+        ) else {
+            return []
+        }
+
         if #available(iOS 26.0, *) {
             if let candidates = try await extractMemoryCandidatesWithAppleFoundationModel(
                 userMessage: userMessage
@@ -1231,6 +1289,7 @@ final class ChatViewModel {
         userMessage: ChatMessage
     ) async throws -> [MemoryExtractionCandidate] {
         let prompt = memoryExtractionPrompt(userMessage: userMessage)
+        let loadedModel = resolvedCurrentModel()
         let stream = await inferenceService.generate(
             prompt: prompt,
             history: [],
@@ -1238,7 +1297,17 @@ final class ChatViewModel {
             maxTokens: Constants.Memory.extractionMaxTokens,
             temperature: 0.1,
             topP: 0.8,
-            repetitionPenalty: 1.0
+            repetitionPenalty: 1.0,
+            modelName: loadedModel?.displayName,
+            profileRunLabel: "Memory Extraction",
+            profilingContext: LLMProfilingRunContext(
+                model: loadedModel,
+                maxTokens: Constants.Memory.extractionMaxTokens,
+                temperature: 0.1,
+                topP: 0.8,
+                repetitionPenalty: 1.0,
+                thinkingEnabled: false
+            )
         )
 
         var rawOutput = ""
@@ -1254,6 +1323,11 @@ final class ChatViewModel {
 
     private func currentMemoryUsage() async -> UInt64 {
         UInt64(deviceCapabilityService.currentMemoryUsageMB)
+    }
+
+    @MainActor
+    private func syncLatestLLMExecutionProfile() async {
+        await appState.refreshLatestLLMExecutionProfile()
     }
 
     private func resolvedCurrentModel() -> ModelInfo? {
@@ -1486,103 +1560,17 @@ final class ChatViewModel {
         )
     }
 
-    private func highConfidenceSelfFactMemoryContent(from text: String) -> String? {
-        if let name = captureExplicitCommand(
-            in: text,
-            minimumCharacters: 2,
-            patterns: [
-                #"^\s*(?:(?:hi|hello|hey|hola|buenas)[,!\.\s]+)?(?:my\s+name\s+is|my\s+name(?:'|’)?s|i(?:'|’)?m\s+called|i\s+am\s+called)\s+(.+)$"#,
-                #"^\s*(?:(?:hi|hello|hey|hola|buenas)[,!\.\s]+)?(?:me\s+llamo|mi\s+nombre\s+es|me\s+chamo|je\s+m(?:'|’)?appelle|ich\s+hei(?:ss|ß)e|mi\s+chiamo)\s+(.+)$"#
-            ]
-        ) {
-            let phrase = normalizedMemoryPhrase(stableSelfFactPhrase(from: name))
-            guard !phrase.isEmpty else { return nil }
-            return "The user's name is \(phrase)."
+    private func highConfidenceSelfFactMemoryCandidate(from text: String) -> MemoryExtractionCandidate? {
+        appState.memoryService.deterministicCandidates(from: text).first { candidate in
+            switch MemoryRelation(externalValue: candidate.relation) {
+            case .some(.name), .some(.occupation):
+                return true
+            case .some(.likes):
+                return candidate.canonicalContent.lowercased().contains(" fan of ")
+            case .none, .some(.pronouns), .some(.residence), .some(.timezone), .some(.employer), .some(.education), .some(.language), .some(.dislikes), .some(.goal), .some(.project), .some(.constraint), .some(.allergy), .some(.diet), .some(.identity), .some(.general):
+                return false
+            }
         }
-
-        if let fandom = highConfidenceFandomTarget(from: text) {
-            let phrase = "\(fandom) fan"
-            return "The user is \(article(for: phrase)) \(phrase)."
-        }
-
-        if let occupation = captureExplicitCommand(
-            in: text,
-            minimumCharacters: 3,
-            patterns: [
-                #"^\s*(?:(?:hi|hello|hey|hola)[,!\.\s]+)?i(?:'|’)?m\s+an?\s+([a-z][a-z0-9\s\-\/&,]+)$"#,
-                #"^\s*(?:(?:hi|hello|hey|hola)[,!\.\s]+)?i\s+am\s+an?\s+([a-z][a-z0-9\s\-\/&,]+)$"#,
-                #"^\s*i\s+work\s+as\s+(?:an?\s+)?([a-z][a-z0-9\s\-\/&,]+)$"#,
-                #"^\s*my\s+(?:job|profession|occupation|role)\s+is\s+(?:an?\s+)?([a-z][a-z0-9\s\-\/&,]+)$"#
-            ]
-        ) {
-            let phrase = normalizedMemoryPhrase(stableSelfFactPhrase(from: occupation))
-            guard !phrase.isEmpty, !isLowConfidenceSelfDescription(phrase) else { return nil }
-            return "The user is \(article(for: phrase)) \(phrase)."
-        }
-
-        return nil
-    }
-
-    private func highConfidenceFandomTarget(from text: String) -> String? {
-        if let explicitTarget = captureExplicitCommand(
-            in: text,
-            minimumCharacters: 2,
-            patterns: [
-                #".*\bi(?:'|’)?m\s+(?:an?\s+)?(?:(?:big|huge|massive|lifelong)\s+)?fan\s+of\s+([A-Za-z0-9][A-Za-z0-9\s&'\-\.]+)$"#,
-                #".*\bi\s+am\s+(?:an?\s+)?(?:(?:big|huge|massive|lifelong)\s+)?fan\s+of\s+([A-Za-z0-9][A-Za-z0-9\s&'\-\.]+)$"#
-            ]
-        ) {
-            let target = normalizedMemoryPhrase(stableSelfFactPhrase(from: explicitTarget))
-            return target.isEmpty ? nil : target
-        }
-
-        guard let fanRange = rangeOfFanDeclaration(in: text) else { return nil }
-        return fandomTargetFromContext(String(text[..<fanRange.lowerBound]))
-    }
-
-    private func rangeOfFanDeclaration(in text: String) -> Range<String.Index>? {
-        let pattern = #"\bi(?:'|’)?m\s+(?:an?\s+)?(?:(?:big|huge|massive|lifelong)\s+)?fan\b|\bi\s+am\s+(?:an?\s+)?(?:(?:big|huge|massive|lifelong)\s+)?fan\b"#
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.firstMatch(in: text, range: range),
-              let declarationRange = Range(match.range, in: text) else {
-            return nil
-        }
-        return declarationRange
-    }
-
-    private func fandomTargetFromContext(_ context: String) -> String? {
-        let pattern = #"\b(?:[A-Z][A-Za-z0-9]+|[A-Z]{2,})(?:\s+(?:[A-Z][A-Za-z0-9]+|[A-Z]{2,}))*\b"#
-        let range = NSRange(context.startIndex..<context.endIndex, in: context)
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              !context.isEmpty else {
-            return nil
-        }
-
-        let ignoredCandidates = Set([
-            "what",
-            "who",
-            "when",
-            "where",
-            "why",
-            "how",
-            "which",
-            "tell",
-            "can",
-            "could",
-            "would",
-            "please"
-        ])
-
-        let matches = regex.matches(in: context, range: range)
-        for match in matches.reversed() {
-            guard let matchRange = Range(match.range, in: context) else { continue }
-            let candidate = normalizedMemoryPhrase(String(context[matchRange]))
-            guard !candidate.isEmpty, !ignoredCandidates.contains(candidate.lowercased()) else { continue }
-            return candidate
-        }
-
-        return nil
     }
 
     private func captureExplicitCommand(
@@ -1607,136 +1595,15 @@ final class ChatViewModel {
         return nil
     }
 
-    private func normalizedMemoryPhrase(_ phrase: String) -> String {
-        phrase
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!?,;:\"'")))
-    }
-
-    private func stableSelfFactPhrase(from phrase: String) -> String {
-        let markerTrimmedPhrase = phraseByDroppingRequestTailMarkers(from: phrase)
-        let requestTailPatterns = [
-            #"\s+(?:and|but|so|because)\s+(?:i(?:'|’)?m|i\s+am|i(?:'|’)?d|i\s+would|i\s+want|i\s+need|i\s+like|i\s+would\s+like|please|can\s+you|could\s+you|would\s+you|you|we)\b.*$"#,
-            #"\s+(?:and|but|so|because)\s+(?:help|use|prefer|would|want|need|like)\b.*$"#,
-            #"\s*,\s*(?:and|but|so|because)\s+.*$"#
-        ]
-
-        return requestTailPatterns.reduce(markerTrimmedPhrase) { partial, pattern in
-            partial.replacingOccurrences(
-                of: pattern,
-                with: "",
-                options: [.caseInsensitive, .regularExpression]
-            )
-        }
-    }
-
-    private func phraseByDroppingRequestTailMarkers(from phrase: String) -> String {
-        let normalized = phrase.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        let lowercased = normalized.lowercased()
-        let markers = [
-            " and i would like ",
-            " and i'd like ",
-            " and i want ",
-            " and i need ",
-            " and would like ",
-            " and want ",
-            " and need ",
-            " and please ",
-            ", i would like ",
-            ", i'd like ",
-            ", i want ",
-            ", i need ",
-            ", would like ",
-            ", want ",
-            ", need ",
-            ", please ",
-            " but i would like ",
-            " but i'd like ",
-            " but i want ",
-            " but i need ",
-            " but would like ",
-            " but want ",
-            " but need ",
-            " so i would like ",
-            " so i'd like ",
-            " so i want ",
-            " so i need ",
-            " so would like ",
-            " so want ",
-            " so need "
-        ]
-
-        let firstMarkerRange = markers
-            .compactMap { marker in lowercased.range(of: marker) }
-            .min { left, right in left.lowerBound < right.lowerBound }
-
-        guard let firstMarkerRange else { return normalized }
-        return String(normalized[..<firstMarkerRange.lowerBound])
-    }
-
-    private func isLowConfidenceSelfDescription(_ phrase: String) -> Bool {
-        let normalized = phrase.lowercased()
-        let blockedTerms = [
-            "ready",
-            "here",
-            "fine",
-            "good",
-            "ok",
-            "okay",
-            "sure",
-            "happy",
-            "sad",
-            "tired",
-            "hungry",
-            "busy",
-            "bored"
-        ]
-        return blockedTerms.contains(normalized)
-            || normalized.contains("looking for")
-            || normalized.contains("trying to")
-            || normalized.contains("going to")
-    }
-
-    private func article(for phrase: String) -> String {
-        let trimmedPhrase = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let firstWord = trimmedPhrase.split(separator: " ").first else {
-            return "a"
-        }
-
-        let firstWordText = String(firstWord)
-        let isInitialism = firstWordText.count > 1 && firstWordText == firstWordText.uppercased()
-        if isInitialism, ["A", "E", "F", "H", "I", "L", "M", "N", "O", "R", "S", "X"].contains(String(firstWordText.prefix(1))) {
-            return "an"
-        }
-
-        guard let firstCharacter = trimmedPhrase.lowercased().first else { return "a" }
-        return ["a", "e", "i", "o", "u"].contains(firstCharacter) ? "an" : "a"
-    }
-
     private func memoryExtractionSystemPrompt() -> String {
         """
-        You write durable user memories for a private on-device assistant. You are not a topic tagger.
-        Return only a compact JSON array of objects.
-        Read only the provided user message and decide whether it contains anything worth remembering for future conversations.
-        Use only stable user facts, preferences, likes, dislikes, fandoms, goals, ongoing projects, names, roles, or constraints.
+        Extract durable user memories only from the provided user message. Return JSON array only, or [].
         Each object must use exactly these keys: canonicalContent, relation, value, sourceQuote, sourceLanguageCode, confidence.
-        canonicalContent must be English and must start with "The user..." or "The user's...".
         relation must be one of: name, pronouns, residence, timezone, occupation, employer, education, language, likes, dislikes, goal, project, constraint, allergy, diet, identity, general.
-        value must be the short canonical English value for the relation.
-        sourceQuote must be an exact quote copied from the provided user message; never invent or paraphrase the source quote.
-        sourceLanguageCode should be a BCP-47 language code when clear.
-        confidence must be a number from 0 to 1.
-        Example: "Me llamo Alan" becomes {"canonicalContent":"The user's name is Alan.","relation":"name","value":"Alan","sourceQuote":"Me llamo Alan","sourceLanguageCode":"es","confidence":0.98}.
-        Example: "Odio el brócoli" becomes {"canonicalContent":"The user dislikes broccoli.","relation":"dislikes","value":"broccoli","sourceQuote":"Odio el brócoli","sourceLanguageCode":"es","confidence":0.95}.
-        Example: "Quiero apuntarme a un gimnasio" becomes {"canonicalContent":"The user wants to join a gym.","relation":"goal","value":"join a gym","sourceQuote":"Quiero apuntarme a un gimnasio","sourceLanguageCode":"es","confidence":0.90}.
-        If a user message mixes a stable fact with a request, save only the stable fact.
-        Do not output labels, topics, categories, keywords, or request types like "clarification request" or "sports recommendation".
-        Do not save greetings, thanks, acknowledgements, small talk, or descriptions of what the user said, such as "The user says hi."
-        Use only information stated or directly implied by the user message; never turn your own likely answer, price estimate, recommendation, or budget number into a user memory.
-        Do not infer a preference just because the user asks about a topic.
-        Do not include temporary requests, assistant facts, generic advice, secrets, or anything uncertain.
-        If there is nothing worth remembering, return [].
-        Keep each memory under 22 words.
+        canonicalContent must start with "The user" or "The user's". sourceQuote must be an exact quote from the user message.
+        Save only stable user facts, preferences, dislikes, goals, projects, roles, constraints, allergies, or identity.
+        Skip greetings, thanks, questions, temporary requests, assistant facts, guesses, labels, topics, prices, and recommendations.
+        Example: [{"canonicalContent":"The user's name is Alan.","relation":"name","value":"Alan","sourceQuote":"Me llamo Alan","sourceLanguageCode":"es","confidence":0.98}]
         """
     }
 

@@ -1,9 +1,12 @@
 import XCTest
+
 @testable import iMLX
 
 final class ParsedAssistantContentTests: XCTestCase {
     func testParsesTaggedThinkingAndStripsAnswerHeading() {
-        let parsed = ParsedAssistantContent("<think>\nCheck the constraint.\n</think>\n\nFinal answer: I can draft the email, but I cannot send it.")
+        let parsed = ParsedAssistantContent(
+            "<think>\nCheck the constraint.\n</think>\n\nFinal answer: I can draft the email, but I cannot send it."
+        )
 
         XCTAssertEqual(parsed.thinking, "Check the constraint.")
         XCTAssertEqual(parsed.response, "I can draft the email, but I cannot send it.")
@@ -11,25 +14,55 @@ final class ParsedAssistantContentTests: XCTestCase {
     }
 
     func testParsesTrailingClosingTagWithoutOpeningTag() {
-        let parsed = ParsedAssistantContent("I should confirm constraints first.\n</think>\nAnswer: Use read_url for one pasted public URL.")
+        let parsed = ParsedAssistantContent(
+            "I should confirm constraints first.\n</think>\nAnswer: Use read_url for one pasted public URL."
+        )
 
         XCTAssertEqual(parsed.thinking, "I should confirm constraints first.")
         XCTAssertEqual(parsed.response, "Use read_url for one pasted public URL.")
     }
 
     func testStreamingInferenceSplitsReasoningFromAnswerLine() {
-        let parsed = ParsedAssistantContent("Intent: satisfy request\nConstraints: stay local\n\nFinal answer: Keep web search optional.", isStreaming: true)
+        let parsed = ParsedAssistantContent(
+            "Intent: satisfy request\nConstraints: stay local\n\nFinal answer: Keep web search optional.",
+            isStreaming: true)
 
         XCTAssertEqual(parsed.thinking, "Intent: satisfy request\nConstraints: stay local")
         XCTAssertEqual(parsed.response, "Keep web search optional.")
     }
 
     func testParsesChannelMarkerAsThinkingBoundary() {
-        let parsed = ParsedAssistantContent("Review constraints.\n<channel|>That depends on your goal.", isStreaming: true)
+        let parsed = ParsedAssistantContent(
+            "Review constraints.\n<channel|>That depends on your goal.", isStreaming: true)
 
         XCTAssertEqual(parsed.thinking, "Review constraints.")
         XCTAssertEqual(parsed.response, "That depends on your goal.")
         XCTAssertEqual(parsed.copyableText, "That depends on your goal.")
+    }
+
+    func testParsesGemmaBracketedChannelThinkingWithSlashCloseTag() {
+        let parsed = ParsedAssistantContent(
+            "<|channel|>(Self-Correction during drafting: avoid overclaiming.)</channel>This depends on your goal.",
+            isStreaming: true
+        )
+
+        XCTAssertEqual(parsed.thinking, "(Self-Correction during drafting: avoid overclaiming.)")
+        XCTAssertEqual(parsed.response, "This depends on your goal.")
+        XCTAssertEqual(parsed.copyableText, "This depends on your goal.")
+    }
+
+    func testParsesGemmaThoughtChannelThinkingWithAngleCloseMarker() {
+        let parsed = ParsedAssistantContent(
+            "<|channel|>thought Thinking Process:\n\n1. Analyze the request.\n\n(Self-Correction during drafting.)<channel|>This depends on your goal.",
+            isStreaming: true
+        )
+
+        XCTAssertEqual(
+            parsed.thinking,
+            "Thinking Process:\n\n1. Analyze the request.\n\n(Self-Correction during drafting.)"
+        )
+        XCTAssertEqual(parsed.response, "This depends on your goal.")
+        XCTAssertEqual(parsed.copyableText, "This depends on your goal.")
     }
 
     func testPlainChannelTagStaysInResponse() {

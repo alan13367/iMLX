@@ -200,7 +200,9 @@ private struct IMLXChatCodeBlockStyle: StructuredText.CodeBlockStyle {
                 .padding(12)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .background(BrandPalette.accent.opacity(0.10))
+        .background {
+            BrandPalette.accent.opacity(0.10)
+        }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)

@@ -15,20 +15,31 @@ struct ModelBrowserView: View {
     var body: some View {
         List {
             if let error = viewModel.errorMessage {
-                Section {
-                    ModelBrowserErrorRow(message: error, onDismiss: dismissError)
-                }
+                ModelBrowserErrorRow(message: error, onDismiss: dismissError)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
             }
 
             ForEach(viewModel.downloadableModelsGroupedByFamily, id: \.family) { group in
                 Button {
                     selectedFamily = group.family
                 } label: {
-                    ModelFamilyRow(family: group.family, modelCount: group.models.count)
+                    ModelFamilyRow(
+                        family: group.family,
+                        modelCount: group.models.count,
+                        downloadedCount: group.models.count(where: \.isDownloaded)
+                    )
                 }
                 .buttonStyle(.plain)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
         .navigationTitle(String.appLocalized("models.browser.title"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -79,29 +90,70 @@ private struct ModelBrowserErrorRow: View {
             }
             .buttonStyle(.plain)
             .frame(width: 44, height: 44)
-            .accessibilityLabel("Dismiss error")
+            .accessibilityLabel(String.appLocalized("models.browser.dismiss_error_a11y"))
         }
-        .padding(.vertical, 4)
+        .padding(.leading, 14)
+        .padding(.trailing, 4)
+        .padding(.vertical, 6)
+        .liquidGlassSurface(
+            tint: Color.orange.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            fallback: AnyShapeStyle(Color.orange.opacity(0.08))
+        )
     }
 }
 
 private struct ModelFamilyRow: View {
     let family: ModelInfo.ModelFamily
     let modelCount: Int
+    let downloadedCount: Int
 
     var body: some View {
-        HStack(spacing: 12) {
-            ModelLogoView(family: family)
+        HStack(spacing: 14) {
+            ModelLogoView(family: family, size: 44)
+                .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(family.displayName)
                     .font(.headline)
-                Text(String(format: String.appLocalized("models.family.model_count"), modelCount))
+
+                Text(statusText)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+
+            Spacer(minLength: 12)
+
+            Image(systemName: "chevron.forward")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .contentShape(Rectangle())
+        .liquidGlassSurface(
+            tint: downloadedCount > 0 ? Color.green.opacity(0.04) : nil,
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous),
+            fallback: AnyShapeStyle(.thinMaterial)
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private var statusText: String {
+        if downloadedCount > 0 {
+            return String(
+                format: String.appLocalized("models.family.downloaded_count"),
+                downloadedCount,
+                modelCount
+            )
+        }
+
+        return String(
+            format: String.appLocalized("models.family.model_count"),
+            modelCount
+        )
     }
 }
 
@@ -110,41 +162,84 @@ struct FamilyModelsView: View {
     let viewModel: ModelManagerViewModel
 
     var body: some View {
+        let models = viewModel.models(for: family)
+        let progressByModelID = viewModel.downloadProgress
+        let downloadingByModelID = viewModel.isDownloading
+        let isAnyModelDownloading = viewModel.isAnyDownloading
+
         List {
-            familyDescriptionCard
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 12, trailing: 0))
+            if let error = viewModel.errorMessage {
+                ModelBrowserErrorRow(
+                    message: error,
+                    onDismiss: { viewModel.errorMessage = nil }
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+            }
+
+            ModelFamilyOverview(
+                family: family,
+                modelCount: models.count
+            )
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            ForEach(viewModel.models(for: family)) { model in
+            ForEach(models) { model in
                 ModelCardView(
                     model: model,
-                    progress: viewModel.downloadProgress[model.id] ?? 0,
-                    isDownloading: viewModel.isDownloading[model.id] ?? false,
-                    anyModelDownloading: viewModel.isAnyDownloading,
+                    progress: progressByModelID[model.id] ?? 0,
+                    isDownloading: downloadingByModelID[model.id] ?? false,
+                    anyModelDownloading: isAnyModelDownloading,
                     onDownload: {
                         viewModel.errorMessage = nil
                         viewModel.download(model: model)
                     },
+                    onCancelDownload: {
+                        viewModel.errorMessage = nil
+                        viewModel.cancelDownload(model: model)
+                    },
                     onDelete: { viewModel.delete(model: model) }
                 )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
         .navigationTitle(family.displayName)
         .navigationBarTitleDisplayMode(.inline)
     }
+}
 
-    private var familyDescriptionCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("\(family.displayName) Family")
+private struct ModelFamilyOverview: View {
+    let family: ModelInfo.ModelFamily
+    let modelCount: Int
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ModelLogoView(family: family, size: 36)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(
+                    String(
+                        format: String.appLocalized("models.family.model_count"),
+                        modelCount
+                    )
+                )
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
 
-            Text(family.familyDescription)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(family.familyDescription)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .liquidGlassSurface(
@@ -152,5 +247,6 @@ struct FamilyModelsView: View {
             in: RoundedRectangle(cornerRadius: 18, style: .continuous),
             fallback: AnyShapeStyle(.thinMaterial)
         )
+        .accessibilityElement(children: .combine)
     }
 }

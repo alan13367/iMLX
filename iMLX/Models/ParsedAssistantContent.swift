@@ -24,7 +24,7 @@ nonisolated struct ParsedAssistantContent: Equatable {
         "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})final answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
         "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})suggested answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
         "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})answer(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
-        "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})response(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*"
+        "^(?:\\s*#{1,6}\\s*)?(?:\\*{0,2}|_{0,2}|`{0,1})response(?:\\s*[:：])?(?:\\*{0,2}|_{0,2}|`{0,1})\\s*",
     ].compactMap {
         try? NSRegularExpression(pattern: $0, options: [.caseInsensitive])
     }
@@ -48,6 +48,16 @@ nonisolated struct ParsedAssistantContent: Equatable {
                 thinking: trailingTagged.thinking,
                 response: cleanedResponse,
                 copyableText: cleanedResponse.isEmpty ? trailingTagged.thinking : cleanedResponse
+            )
+            return
+        }
+
+        if let gemmaChannel = Self.parseGemmaChannelThinking(normalizedContent) {
+            let cleanedResponse = Self.stripAnswerHeading(gemmaChannel.response)
+            self.init(
+                thinking: gemmaChannel.thinking,
+                response: cleanedResponse,
+                copyableText: cleanedResponse.isEmpty ? gemmaChannel.thinking : cleanedResponse
             )
             return
         }
@@ -81,10 +91,14 @@ nonisolated struct ParsedAssistantContent: Equatable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func parseTaggedThinking(_ rawContent: String) -> (thinking: String, response: String)? {
+    private static func parseTaggedThinking(_ rawContent: String) -> (
+        thinking: String, response: String
+    )? {
         for tagName in ["think", "thinking", "reasoning"] {
             let openTag = "<\(tagName)>"
-            guard let openRange = rawContent.range(of: openTag, options: [.caseInsensitive]) else { continue }
+            guard let openRange = rawContent.range(of: openTag, options: [.caseInsensitive]) else {
+                continue
+            }
 
             let closeTag = "</\(tagName)>"
             if let closeRange = rawContent.range(
@@ -109,10 +123,13 @@ nonisolated struct ParsedAssistantContent: Equatable {
         return nil
     }
 
-    private static func parseTrailingClosingTag(_ rawContent: String) -> (thinking: String, response: String)? {
+    private static func parseTrailingClosingTag(_ rawContent: String) -> (
+        thinking: String, response: String
+    )? {
         for tagName in ["think", "thinking", "reasoning"] {
             let closeTag = "</\(tagName)>"
-            guard let closeRange = rawContent.range(of: closeTag, options: [.caseInsensitive]) else { continue }
+            guard let closeRange = rawContent.range(of: closeTag, options: [.caseInsensitive])
+            else { continue }
 
             let prefix = String(rawContent[..<closeRange.lowerBound])
             let openTag = "<\(tagName)>"
@@ -121,7 +138,8 @@ nonisolated struct ParsedAssistantContent: Equatable {
             }
 
             let thinking = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-            let response = rawContent[closeRange.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            let response = rawContent[closeRange.upperBound...].trimmingCharacters(
+                in: .whitespacesAndNewlines)
             guard !thinking.isEmpty else { return nil }
             return (thinking, response)
         }
@@ -129,12 +147,73 @@ nonisolated struct ParsedAssistantContent: Equatable {
         return nil
     }
 
-    private static func parseChannelDelimitedThinking(_ rawContent: String) -> (thinking: String, response: String)? {
+    /// Handles Gemma 4's channel format: `<|channel|>thought …reasoning…<channel|>…response…`.
+    /// Some checkpoints vary the close marker, so support the known channel boundary spellings.
+    private static func parseGemmaChannelThinking(_ rawContent: String) -> (
+        thinking: String, response: String
+    )? {
+        let openMarker = "<|channel|>"
+        let closeMarkers = ["<channel|>", "</channel>", "<|/channel|>", "<|channel|>"]
+
+        guard let openRange = rawContent.range(of: openMarker, options: .caseInsensitive) else {
+            return nil
+        }
+
+        let afterOpen = rawContent[openRange.upperBound...]
+
+        if let closeRange = closeMarkers.compactMap({ marker in
+            afterOpen.range(of: marker, options: .caseInsensitive)
+        }).min(by: { $0.lowerBound < $1.lowerBound }) {
+            let thinking = stripLeadingChannelName(String(afterOpen[..<closeRange.lowerBound]))
+            let response = afterOpen[closeRange.upperBound...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !thinking.isEmpty else { return nil }
+            return (thinking, response)
+        }
+
+        // Open marker present but close not yet seen — still streaming.
+        let thinking = stripLeadingChannelName(String(afterOpen))
+        guard !thinking.isEmpty else { return nil }
+        return (thinking, "")
+    }
+
+    private static func stripLeadingChannelName(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        for channelName in ["thought", "thinking", "reasoning", "analysis"] {
+            guard trimmed.lowercased().hasPrefix(channelName) else { continue }
+            let index = trimmed.index(trimmed.startIndex, offsetBy: channelName.count)
+            let remainder = trimmed[index...]
+            if remainder.isEmpty {
+                return ""
+            }
+            if let first = remainder.first, first.isWhitespace || first == ":" || first == "|" {
+                return trimmedChannelRemainder(remainder)
+            }
+        }
+
+        return trimmed
+    }
+
+    private static func trimmedChannelRemainder(_ remainder: Substring) -> String {
+        var text = remainder.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let first = text.first, first == ":" || first == "|" {
+            text.removeFirst()
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text
+    }
+
+    private static func parseChannelDelimitedThinking(_ rawContent: String) -> (
+        thinking: String, response: String
+    )? {
         let pattern = #"<(?:\|channel(?:\|[^>]*)?|channel\|)>"#
         let range = NSRange(rawContent.startIndex..<rawContent.endIndex, in: rawContent)
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.firstMatch(in: rawContent, range: range),
-              let markerRange = Range(match.range, in: rawContent) else {
+            let match = regex.firstMatch(in: rawContent, range: range),
+            let markerRange = Range(match.range, in: rawContent)
+        else {
             return nil
         }
 
@@ -146,7 +225,9 @@ nonisolated struct ParsedAssistantContent: Equatable {
         return (thinking, response)
     }
 
-    private static func parseInferredThinking(_ rawContent: String, isStreaming: Bool) -> (thinking: String, response: String)? {
+    private static func parseInferredThinking(_ rawContent: String, isStreaming: Bool) -> (
+        thinking: String, response: String
+    )? {
         let trimmed = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard mightTriggerInferredThinking(trimmed) else { return nil }
@@ -165,10 +246,13 @@ nonisolated struct ParsedAssistantContent: Equatable {
         }
 
         let paragraphs = paragraphs(in: trimmed)
-        guard let firstParagraph = paragraphs.first, paragraphLooksLikeReasoning(firstParagraph) else { return nil }
+        guard let firstParagraph = paragraphs.first, paragraphLooksLikeReasoning(firstParagraph)
+        else { return nil }
 
         if isStreaming {
-            if let answerLineIndex = firstExplicitAnswerLineIndex(in: trimmed.components(separatedBy: .newlines)) {
+            if let answerLineIndex = firstExplicitAnswerLineIndex(
+                in: trimmed.components(separatedBy: .newlines))
+            {
                 let lines = trimmed.components(separatedBy: .newlines)
                 let thinking = lines[..<answerLineIndex]
                     .joined(separator: "\n")
@@ -219,7 +303,9 @@ nonisolated struct ParsedAssistantContent: Equatable {
         for line in text.components(separatedBy: .newlines) {
             if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if !currentLines.isEmpty {
-                    result.append(currentLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines))
+                    result.append(
+                        currentLines.joined(separator: "\n").trimmingCharacters(
+                            in: .whitespacesAndNewlines))
                     currentLines.removeAll()
                 }
             } else {
@@ -228,7 +314,9 @@ nonisolated struct ParsedAssistantContent: Equatable {
         }
 
         if !currentLines.isEmpty {
-            result.append(currentLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines))
+            result.append(
+                currentLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         }
 
         return result
@@ -275,14 +363,15 @@ nonisolated struct ParsedAssistantContent: Equatable {
             "constraints:",
             "need to satisfy",
             "plan:",
-            "approach:"
+            "approach:",
         ]
 
         if directCues.contains(where: lowered.contains) {
             return true
         }
 
-        let lines = text
+        let lines =
+            text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
@@ -297,7 +386,7 @@ nonisolated struct ParsedAssistantContent: Equatable {
             "3.",
             "first,",
             "second,",
-            "finally,"
+            "finally,",
         ]
 
         let structuredLineCount = lines.filter { line in
@@ -312,8 +401,10 @@ nonisolated struct ParsedAssistantContent: Equatable {
         guard !trimmed.isEmpty else { return false }
         // Cheap reject before regex: every answer-heading regex requires the
         // word "answer" or "response" somewhere in the line.
-        guard trimmed.range(of: "answer", options: .caseInsensitive) != nil
-            || trimmed.range(of: "response", options: .caseInsensitive) != nil else {
+        guard
+            trimmed.range(of: "answer", options: .caseInsensitive) != nil
+                || trimmed.range(of: "response", options: .caseInsensitive) != nil
+        else {
             return false
         }
 
@@ -347,7 +438,7 @@ nonisolated struct ParsedAssistantContent: Equatable {
         "constraints:",
         "need to satisfy",
         "plan:",
-        "approach:"
+        "approach:",
     ]
 
     private static let inferredThinkingStructuredHeads: [String] = [
@@ -358,7 +449,7 @@ nonisolated struct ParsedAssistantContent: Equatable {
         "\n3.",
         "\nfirst,",
         "\nsecond,",
-        "\nfinally,"
+        "\nfinally,",
     ]
 
     /// Cheap reject for the heavy `parseInferredThinking` path.
@@ -386,7 +477,8 @@ nonisolated struct ParsedAssistantContent: Equatable {
         let fullRange = NSRange(location: 0, length: (trimmed as NSString).length)
         for regex in answerHeadingRegexes {
             if let match = regex.firstMatch(in: trimmed, options: [], range: fullRange),
-               match.range.location != NSNotFound {
+                match.range.location != NSNotFound
+            {
                 let nsText = trimmed as NSString
                 let stripped = nsText.replacingCharacters(in: match.range, with: "")
                 return stripped.trimmingCharacters(in: .whitespacesAndNewlines)

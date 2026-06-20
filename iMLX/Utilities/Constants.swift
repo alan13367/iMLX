@@ -160,7 +160,7 @@ nonisolated enum Constants {
             ModelInfo(
                 id: "gemma4-e2b-it-4bit",
                 displayName: "Gemma 4 E2B",
-                huggingFaceId: "mlx-community/gemma-4-e2b-it-4bit",
+                huggingFaceId: "deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit",
                 parameterCount: "E2B",
                 quantization: "4-bit",
                 estimatedSizeGB: 3.6,

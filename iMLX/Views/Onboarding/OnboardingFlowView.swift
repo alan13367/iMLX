@@ -74,7 +74,8 @@ struct OnboardingFlowView: View {
                                 pendingStarterModelID: appState.pendingStarterModelId,
                                 modelDownloadSnapshots: appState.modelDownloadSnapshots,
                                 isSelectedModelDownloaded: isSelectedModelDownloaded,
-                                onSelectModel: selectModel
+                                onSelectModel: selectModel,
+                                onCancelDownload: cancelStarterDownload
                             )
                         }
                         .padding(.horizontal, 24)
@@ -92,8 +93,10 @@ struct OnboardingFlowView: View {
                 step: step,
                 isStartingDownload: isStartingDownload,
                 selectedModel: selectedModel,
+                modelDownloadSnapshots: appState.modelDownloadSnapshots,
                 downloadButtonTitle: downloadButtonTitle,
                 onDownloadSelectedModel: startSelectedModelDownload,
+                onCancelDownload: cancelStarterDownload,
                 onSkipModelSelection: advance,
                 onContinue: continueFlow,
                 onBack: goBack
@@ -129,6 +132,12 @@ struct OnboardingFlowView: View {
         guard let selectedModel else { return }
         Task {
             await startStarterDownload(selectedModel)
+        }
+    }
+
+    private func cancelStarterDownload() {
+        Task {
+            await appState.cancelStarterModelDownload()
         }
     }
 
@@ -210,6 +219,7 @@ private struct OnboardingStepContent: View {
     let modelDownloadSnapshots: [String: ModelDownloadSnapshot]
     let isSelectedModelDownloaded: Bool
     let onSelectModel: (String) -> Void
+    let onCancelDownload: () -> Void
 
     var body: some View {
         switch step {
@@ -270,7 +280,8 @@ private struct OnboardingStepContent: View {
                 selectedModelID: selectedModelID,
                 pendingStarterModelID: pendingStarterModelID,
                 modelDownloadSnapshots: modelDownloadSnapshots,
-                isSelectedModelDownloaded: isSelectedModelDownloaded
+                isSelectedModelDownloaded: isSelectedModelDownloaded,
+                onCancelDownload: onCancelDownload
             )
         }
     }
@@ -313,6 +324,7 @@ private struct OnboardingFinishStep: View {
     let pendingStarterModelID: String?
     let modelDownloadSnapshots: [String: ModelDownloadSnapshot]
     let isSelectedModelDownloaded: Bool
+    let onCancelDownload: () -> Void
 
     private var selectedModel: ModelInfo? {
         guard let selectedModelID else { return nil }
@@ -331,14 +343,23 @@ private struct OnboardingFinishStep: View {
 
             if let pendingStarterModelID,
                let snapshot = modelDownloadSnapshots[pendingStarterModelID],
+               snapshot.isActive,
                let model = recommendedModels.first(where: { $0.id == pendingStarterModelID }) {
-                OnboardingFeatureCard(
-                    content: OnboardingCardContent(
-                        icon: "arrow.down.circle.fill",
-                        title: "Starter model downloading",
-                        body: "\(model.displayName) is downloading in the background.\n\n\(snapshot.displayStatus)"
+                VStack(spacing: 12) {
+                    OnboardingFeatureCard(
+                        content: OnboardingCardContent(
+                            icon: "arrow.down.circle.fill",
+                            title: "Starter model downloading",
+                            body: "\(model.displayName) is downloading in the background.\n\n\(snapshot.displayStatus)"
+                        )
                     )
-                )
+
+                    Button(action: onCancelDownload) {
+                        Text(String.appLocalized("models.card.stop_download"))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .liquidGlassButtonStyle(prominent: false)
+                }
             } else if let selectedModel, isSelectedModelDownloaded {
                 OnboardingFeatureCard(
                     content: OnboardingCardContent(
@@ -368,33 +389,55 @@ private struct OnboardingFooter: View {
     let step: OnboardingStep
     let isStartingDownload: Bool
     let selectedModel: ModelInfo?
+    let modelDownloadSnapshots: [String: ModelDownloadSnapshot]
     let downloadButtonTitle: (ModelInfo) -> String
     let onDownloadSelectedModel: () -> Void
+    let onCancelDownload: () -> Void
     let onSkipModelSelection: () -> Void
     let onContinue: () -> Void
     let onBack: () -> Void
     @State private var hapticLightTrigger = 0
     @State private var hapticSelectionTrigger = 0
 
+    private func isDownloading(_ model: ModelInfo) -> Bool {
+        modelDownloadSnapshots[model.id]?.isActive == true
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             if step == .modelSelection {
                 if let selectedModel {
-                    Button(action: {
-                        hapticLightTrigger += 1
-                        onDownloadSelectedModel()
-                    }) {
-                        HStack {
-                            if isStartingDownload {
-                                ProgressView()
-                            } else {
-                                Text(downloadButtonTitle(selectedModel))
-                            }
+                    if isDownloading(selectedModel) {
+                        Text(downloadButtonTitle(selectedModel))
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+
+                        Button(action: {
+                            hapticLightTrigger += 1
+                            onCancelDownload()
+                        }) {
+                            Text(String.appLocalized("models.card.stop_download"))
+                                .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
+                        .liquidGlassButtonStyle(prominent: false)
+                    } else {
+                        Button(action: {
+                            hapticLightTrigger += 1
+                            onDownloadSelectedModel()
+                        }) {
+                            HStack {
+                                if isStartingDownload {
+                                    ProgressView()
+                                } else {
+                                    Text(downloadButtonTitle(selectedModel))
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
+                        .disabled(isStartingDownload)
                     }
-                    .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
-                    .disabled(isStartingDownload)
                 }
 
                 Button(action: {

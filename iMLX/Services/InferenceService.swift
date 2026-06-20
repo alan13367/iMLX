@@ -67,6 +67,8 @@ actor InferenceService {
             await unload()
         }
         lastModelLoadMetrics = nil
+        MLX.Memory.cacheLimit = InferenceOptimizationPolicy.mlxCacheLimitBytes
+        MLX.Memory.clearCache()
 
         let configSupportsVision = detectVisionSupport(in: localDirectory)
         let appSaysVision = appRegistrySupportsVision ?? false
@@ -127,30 +129,19 @@ actor InferenceService {
         profilingContext: LLMProfilingRunContext? = nil
     ) -> AsyncThrowingStream<String, Error> {
         let contextMessageCount = (systemPrompt.isEmpty ? 0 : 1) + history.count + 1
-        let contextCharacterCount = (systemPrompt.isEmpty ? 0 : systemPrompt.count)
-            + history.reduce(0) { partialResult, message in
-                partialResult + message.content.count
+        var contextCharacterCount = systemPrompt.count + prompt.count
+        var contextTextBytes = systemPrompt.utf8.count + prompt.utf8.count
+        var contextMediaBytes = images?.reduce(0) { $0 + $1.data.count } ?? 0
+        var contextMediaAttachmentCount = images?.count ?? 0
+
+        for message in history {
+            contextCharacterCount += message.content.count
+            contextTextBytes += message.content.utf8.count
+            if let attachedImages = message.attachedImages {
+                contextMediaAttachmentCount += attachedImages.count
+                contextMediaBytes += attachedImages.reduce(0) { $0 + $1.data.count }
             }
-            + prompt.count
-        let contextTextBytes = (systemPrompt.isEmpty ? 0 : systemPrompt.utf8.count)
-            + history.reduce(0) { partialResult, message in
-                partialResult + message.content.utf8.count
-            }
-            + prompt.utf8.count
-        let currentMediaBytes = images?.reduce(0) { partialResult, image in
-            partialResult + image.data.count
-        } ?? 0
-        let historyMediaBytes = history.reduce(0) { partialResult, message in
-            partialResult + (message.attachedImages?.reduce(0) { imageResult, image in
-                imageResult + image.data.count
-            } ?? 0)
         }
-        let contextMediaBytes = historyMediaBytes + currentMediaBytes
-        let currentMediaCount = images?.count ?? 0
-        let historyMediaCount = history.reduce(0) { partialResult, message in
-            partialResult + (message.attachedImages?.count ?? 0)
-        }
-        let contextMediaAttachmentCount = historyMediaCount + currentMediaCount
         let contextTotalBytes = contextTextBytes + contextMediaBytes
 
         return AsyncThrowingStream<String, Error> { continuation in
@@ -254,9 +245,6 @@ actor InferenceService {
             let loadMetrics = lastModelLoadMetrics
             let resolvedModelName = modelName ?? loadMetrics?.modelName ?? "Unknown Model"
             let task = Task {
-                defer {
-                    MLX.Memory.clearCache()
-                }
                 await loadPersistedProfilesIfNeeded()
                 lastInProgressSnapshotPersistedAt = nil
                 var profile = makeExecutionProfile(
@@ -273,11 +261,32 @@ actor InferenceService {
                     profilingContext: profilingContext
                 )
                 var peakFootprintBytes = LLMProfiler.currentMemoryFootprintBytes() ?? 0
-                profile.memoryAvailableAtInferenceStart = LLMProfiler.availableMemoryBytes()
+                let availableMemoryAtStart = LLMProfiler.availableMemoryBytes()
+                profile.memoryAvailableAtInferenceStart = availableMemoryAtStart
                 profile.memoryBeforeInference = peakFootprintBytes == 0 ? nil : peakFootprintBytes
                 profile.recordMemoryFootprintSample(peakFootprintBytes: &peakFootprintBytes)
                 profile.thermalStateBeforeInference = LLMProfiler.thermalStateDescription()
                 profile.batteryLevelBeforeInference = await LLMProfiler.coarseBatteryLevel()
+                let optimizationPlan = InferenceOptimizationPolicy.plan(
+                    contextTextBytes: contextTextBytes,
+                    contextMediaAttachmentCount: contextMediaAttachmentCount,
+                    maxTokens: maxTokens,
+                    availableMemoryBytes: availableMemoryAtStart,
+                    allowsKVQuantization: InferenceOptimizationPolicy.allowsKVQuantization(
+                        modelIdentifier: profilingContext?.modelId,
+                        modelName: resolvedModelName,
+                        supportsVision: loadedModelSupportsVision
+                    )
+                )
+                profile.measurementNotes.append(
+                    "Generation tuning: prefillStepSize=\(optimizationPlan.prefillStepSize), " +
+                    "kvBits=\(optimizationPlan.kvBits.map(String.init) ?? "none"), " +
+                    "kvGroupSize=\(optimizationPlan.kvGroupSize), " +
+                    "quantizedKVStart=\(optimizationPlan.quantizedKVStart)."
+                )
+                if optimizationPlan.shouldClearCacheBeforeGeneration {
+                    MLX.Memory.clearCache()
+                }
 
                 let fullTimer = LLMProfiler.Timer()
                 let fullSignpost = LLMProfiler.beginInterval("Full Local LLM Inference")
@@ -316,24 +325,36 @@ actor InferenceService {
                             ["enable_thinking": value]
                         }
 
-                        let session = ChatSession(
-                            modelContainer,
-                            instructions: systemPrompt.isEmpty ? nil : systemPrompt,
-                            history: history.map(\.chatMessage),
-                            additionalContext: additionalContext
-                        )
                         var parameters = GenerateParameters(
                             temperature: temperature,
                             topP: topP
                         )
                         parameters.maxTokens = maxTokens
+                        parameters.prefillStepSize = optimizationPlan.prefillStepSize
+                        parameters.kvBits = optimizationPlan.kvBits
+                        parameters.kvGroupSize = optimizationPlan.kvGroupSize
+                        parameters.quantizedKVStart = optimizationPlan.quantizedKVStart
                         if repetitionPenalty != 1.0 {
                             parameters.repetitionPenalty = repetitionPenalty
                         }
 
-                        session.generateParameters = parameters
+                        let sessionHistory = loadedModelSupportsVision
+                            ? history.map(\.chatMessage)
+                            : history.map(\.chatMessageStrippingImages)
+                        let session = ChatSession(
+                            modelContainer,
+                            instructions: systemPrompt.isEmpty ? nil : systemPrompt,
+                            history: sessionHistory,
+                            generateParameters: parameters,
+                            additionalContext: additionalContext
+                        )
 
-                        let stream = session.streamResponse(to: prompt, role: .user, images: userInputImages, videos: [])
+                        let stream = session.streamDetails(
+                            to: prompt,
+                            role: .user,
+                            images: userInputImages,
+                            videos: []
+                        )
 
                         do {
                             let decodeSignpost = LLMProfiler.beginInterval("Decode / Token Generation")
@@ -346,57 +367,87 @@ actor InferenceService {
                             var emittedTextCharacterCount = 0
                             var lastDecodeProgressSnapshot = 0.0
 
-                            generationLoop: for try await chunk in stream {
+                            generationLoop: for try await generation in stream {
                                 try Task.checkCancellation()
 
-                                if profile.tokenizationDuration == nil {
-                                    profile.tokenizationDuration = streamSetupTimer.elapsedSeconds()
-                                    saveInProgressProfile(
-                                        &profile,
-                                        peakFootprintBytes: &peakFootprintBytes,
-                                        stage: "tokenized_input"
-                                    )
-                                }
-                                emittedTextChunkCount += 1
-                                emittedTextCharacterCount += chunk.count
-                                profile.outputTextChunkCount = emittedTextChunkCount
-                                profile.outputCharacterCount = emittedTextCharacterCount
-                                if profile.timeToFirstOutputChunk == nil {
-                                    profile.timeToFirstOutputChunk = fullTimer.elapsedSeconds()
-                                    LLMProfiler.emitEvent("Detokenization")
-                                    let yieldResult = continuation.yield(chunk)
-                                    lastDecodeProgressSnapshot = fullTimer.elapsedSeconds()
-                                    saveInProgressProfile(
-                                        &profile,
-                                        peakFootprintBytes: &peakFootprintBytes,
-                                        stage: "first_output_chunk",
-                                        emittedTextChunkCount: emittedTextChunkCount,
-                                        emittedTextCharacterCount: emittedTextCharacterCount
-                                    )
-                                    decodeTimer = LLMProfiler.Timer()
-                                    if case .terminated = yieldResult {
+                                switch generation {
+                                case .chunk(let chunk):
+                                    if profile.tokenizationDuration == nil {
+                                        profile.tokenizationDuration = streamSetupTimer.elapsedSeconds()
+                                        saveInProgressProfile(
+                                            &profile,
+                                            peakFootprintBytes: &peakFootprintBytes,
+                                            stage: "tokenized_input"
+                                        )
+                                    }
+                                    emittedTextChunkCount += 1
+                                    emittedTextCharacterCount += chunk.count
+                                    profile.outputTextChunkCount = emittedTextChunkCount
+                                    profile.outputCharacterCount = emittedTextCharacterCount
+                                    if profile.timeToFirstOutputChunk == nil {
+                                        profile.timeToFirstOutputChunk = fullTimer.elapsedSeconds()
+                                        LLMProfiler.emitEvent("Detokenization")
+                                        let yieldResult = continuation.yield(chunk)
+                                        lastDecodeProgressSnapshot = fullTimer.elapsedSeconds()
+                                        saveInProgressProfile(
+                                            &profile,
+                                            peakFootprintBytes: &peakFootprintBytes,
+                                            stage: "first_output_chunk",
+                                            emittedTextChunkCount: emittedTextChunkCount,
+                                            emittedTextCharacterCount: emittedTextCharacterCount
+                                        )
+                                        decodeTimer = LLMProfiler.Timer()
+                                        if case .terminated = yieldResult {
+                                            profile.stopReason = "cancelled"
+                                            break generationLoop
+                                        }
+                                        continue
+                                    }
+                                    if case .terminated = continuation.yield(chunk) {
                                         profile.stopReason = "cancelled"
                                         break generationLoop
                                     }
+                                    let elapsed = fullTimer.elapsedSeconds()
+                                    if elapsed - lastDecodeProgressSnapshot >= 15 {
+                                        profile.decodeGenerationDuration = decodeTimer?.elapsedSeconds()
+                                        profile.decodeGenerationDurationSource = "in_progress_consumer_wall_clock_decode_loop"
+                                        saveInProgressProfile(
+                                            &profile,
+                                            peakFootprintBytes: &peakFootprintBytes,
+                                            stage: "decode_progress",
+                                            emittedTextChunkCount: emittedTextChunkCount,
+                                            emittedTextCharacterCount: emittedTextCharacterCount,
+                                            writeSessionExport: false
+                                        )
+                                        lastDecodeProgressSnapshot = elapsed
+                                    }
+
+                                case .info(let info):
+                                    profile.inputTokenCount = info.promptTokenCount
+                                    profile.outputTokenCount = info.generationTokenCount
+                                    profile.prefillPromptEvaluationDuration = info.promptTime
+                                    profile.prefillPromptEvaluationDurationSource = "mlx_generate_completion_info_prompt_time"
+                                    profile.decodeGenerationDuration = info.generateTime
+                                    profile.decodeGenerationDurationSource = "mlx_generate_completion_info_generate_time"
+                                    profile.stopReason = Self.stopReasonDescription(info.stopReason)
+                                    if info.generateTime > 0 {
+                                        profile.tokensPerSecond = Double(info.generationTokenCount) / info.generateTime
+                                        profile.tokensPerSecondMeasurement = "mlx_generate_completion_info"
+                                    }
+                                    if let firstOutput = profile.timeToFirstOutputChunk {
+                                        profile.tokenizationDuration = max(0, firstOutput - info.promptTime)
+                                        profile.timeToFirstGeneratedToken = firstOutput
+                                        profile.timeToFirstGeneratedTokenSource =
+                                            "first_output_chunk_correlated_with_mlx_completion_info"
+                                    } else {
+                                        profile.tokenizationDuration = max(
+                                            0,
+                                            fullTimer.elapsedSeconds() - info.promptTime - info.generateTime
+                                        )
+                                    }
+
+                                case .toolCall:
                                     continue
-                                }
-                                if case .terminated = continuation.yield(chunk) {
-                                    profile.stopReason = "cancelled"
-                                    break generationLoop
-                                }
-                                let elapsed = fullTimer.elapsedSeconds()
-                                if elapsed - lastDecodeProgressSnapshot >= 15 {
-                                    profile.decodeGenerationDuration = decodeTimer?.elapsedSeconds()
-                                    profile.decodeGenerationDurationSource = "in_progress_consumer_wall_clock_decode_loop"
-                                    saveInProgressProfile(
-                                        &profile,
-                                        peakFootprintBytes: &peakFootprintBytes,
-                                        stage: "decode_progress",
-                                        emittedTextChunkCount: emittedTextChunkCount,
-                                        emittedTextCharacterCount: emittedTextCharacterCount,
-                                        writeSessionExport: false
-                                    )
-                                    lastDecodeProgressSnapshot = elapsed
                                 }
                             }
 
@@ -409,6 +460,13 @@ actor InferenceService {
                     }
 
                     await finishProfile()
+                    if profile.stopReason == "cancelled"
+                        || InferenceOptimizationPolicy.shouldReclaimCache(
+                            availableMemoryBytes: LLMProfiler.availableMemoryBytes()
+                        )
+                    {
+                        MLX.Memory.clearCache()
+                    }
                     continuation.finish()
                 } catch {
                     if Task.isCancelled {
@@ -418,6 +476,7 @@ actor InferenceService {
                         ? InferenceError.generationCancelled
                         : mapError(error)
                     await finishProfile(error: Task.isCancelled ? nil : mappedError)
+                    MLX.Memory.clearCache()
                     if Task.isCancelled {
                         continuation.finish(throwing: InferenceError.generationCancelled)
                     } else {

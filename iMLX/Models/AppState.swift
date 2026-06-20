@@ -232,6 +232,16 @@ final class AppState {
     }
 
     @MainActor
+    func cancelStarterModelDownload() async {
+        if let pendingStarterModelId,
+           let model = modelInfo(id: pendingStarterModelId) {
+            await downloadService.cancelDownload(for: model)
+        }
+        pendingStarterModelId = nil
+        userDefaults.removeObject(forKey: Keys.pendingStarterModelId)
+    }
+
+    @MainActor
     func clearSpeechAssets() async {
         await speechAssetService.clearAllAssets()
         speechAssetStatus = await speechAssetService.status()

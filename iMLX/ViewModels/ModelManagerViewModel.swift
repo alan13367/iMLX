@@ -27,7 +27,8 @@ final class ModelManagerViewModel {
         Task { [weak self] in
             guard let self else { return }
             let downloadedModels = await appState.reconcileModelCatalogState()
-            let downloadedById = Dictionary(uniqueKeysWithValues: downloadedModels.map { ($0.id, $0) })
+            let downloadedById = Dictionary(
+                uniqueKeysWithValues: downloadedModels.map { ($0.id, $0) })
 
             await MainActor.run {
                 var refreshedModels = self.availableModels
@@ -51,11 +52,17 @@ final class ModelManagerViewModel {
     }
 
     var downloadProgress: [String: Float] {
-        Dictionary(uniqueKeysWithValues: appState.modelDownloadSnapshots.map { ($0.key, $0.value.progress) })
+        Dictionary(
+            uniqueKeysWithValues: appState.modelDownloadSnapshots.map {
+                ($0.key, $0.value.progress)
+            })
     }
 
     var isDownloading: [String: Bool] {
-        Dictionary(uniqueKeysWithValues: appState.modelDownloadSnapshots.map { ($0.key, $0.value.isActive) })
+        Dictionary(
+            uniqueKeysWithValues: appState.modelDownloadSnapshots.map {
+                ($0.key, $0.value.isActive)
+            })
     }
 
     var downloadableModels: [ModelInfo] {
@@ -64,8 +71,14 @@ final class ModelManagerViewModel {
 
     var downloadableModelsGroupedByFamily: [(family: ModelInfo.ModelFamily, models: [ModelInfo])] {
         let grouped = Dictionary(grouping: downloadableModels, by: { $0.family })
-        return grouped
-            .map { (family: $0.key, models: $0.value.sorted { $0.estimatedSizeGB < $1.estimatedSizeGB }) }
+        return
+            grouped
+            .map {
+                (
+                    family: $0.key,
+                    models: $0.value.sorted { $0.estimatedSizeGB < $1.estimatedSizeGB }
+                )
+            }
             .sorted { $0.family.sortOrder < $1.family.sortOrder }
     }
 
@@ -93,6 +106,18 @@ final class ModelManagerViewModel {
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func cancelDownload(model: ModelInfo) {
+        Task { [weak self] in
+            guard let self else { return }
+            let succeeded = await self.downloadService.cancelDownload(for: model)
+            if !succeeded {
+                await MainActor.run {
+                    self.errorMessage = String.appLocalized("models.card.cancel_cleanup_failed")
                 }
             }
         }

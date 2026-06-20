@@ -16,17 +16,6 @@ struct ConversationListView: View {
     @State private var isSelectionMode = false
     @State private var selectedConversationIDs: Set<UUID> = []
 
-    private var isShowingDeleteAlert: Binding<Bool> {
-        Binding(
-            get: { conversationPendingDeletion != nil },
-            set: { isPresented in
-                if !isPresented {
-                    conversationPendingDeletion = nil
-                }
-            }
-        )
-    }
-
     private var canClearAllConversations: Bool {
         !appState.conversations.isEmpty
     }
@@ -180,20 +169,12 @@ struct ConversationListView: View {
                 }
             }
         }
-        .alert(
-            String.appLocalized("conversation.delete_title"),
-            isPresented: isShowingDeleteAlert,
-            presenting: conversationPendingDeletion
-        ) { conversation in
-            Button(String.appLocalized("common.delete"), role: .destructive) {
-                deleteConversation(conversation)
-            }
-            Button(String.appLocalized("common.cancel"), role: .cancel) {
-                conversationPendingDeletion = nil
-            }
-        } message: { conversation in
-            Text(String(format: String.appLocalized("conversation.delete_message"), conversation.displayTitle))
-        }
+        .modifier(
+            ConversationDeletionAlert(
+                conversation: $conversationPendingDeletion,
+                onDelete: deleteConversation
+            )
+        )
         .alert(String.appLocalized("conversation.delete_selected_title"), isPresented: $isShowingDeleteSelectedAlert) {
             Button(String.appLocalized("common.delete"), role: .destructive) {
                 deleteSelectedConversations()
@@ -268,6 +249,64 @@ struct ConversationListView: View {
             systemImage: "bubble.left.and.bubble.right"
         )
         .listRowBackground(Color.clear)
+    }
+}
+
+private struct ConversationDeletionAlert: ViewModifier {
+    @Binding var conversation: Conversation?
+    let onDelete: (Conversation) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 27, *) {
+            content.alert(
+                String.appLocalized("conversation.delete_title"),
+                item: $conversation
+            ) { conversation in
+                deleteActions(for: conversation)
+            } message: { conversation in
+                deleteMessage(for: conversation)
+            }
+        } else {
+            content.alert(
+                String.appLocalized("conversation.delete_title"),
+                isPresented: isPresented,
+                presenting: conversation
+            ) { conversation in
+                deleteActions(for: conversation)
+            } message: { conversation in
+                deleteMessage(for: conversation)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func deleteActions(for conversation: Conversation) -> some View {
+        Button(String.appLocalized("common.delete"), role: .destructive) {
+            onDelete(conversation)
+        }
+        Button(String.appLocalized("common.cancel"), role: .cancel) {
+            self.conversation = nil
+        }
+    }
+
+    private func deleteMessage(for conversation: Conversation) -> some View {
+        Text(
+            String(
+                format: String.appLocalized("conversation.delete_message"),
+                conversation.displayTitle
+            )
+        )
+    }
+
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { conversation != nil },
+            set: { isPresented in
+                if !isPresented {
+                    conversation = nil
+                }
+            }
+        )
     }
 }
 

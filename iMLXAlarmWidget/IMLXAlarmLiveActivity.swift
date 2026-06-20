@@ -7,135 +7,390 @@ import WidgetKit
 struct IMLXAlarmLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AlarmAttributes<IMLXTimerMetadata>.self) { context in
-            lockScreenView(attributes: context.attributes, state: context.state)
+            TimerLockScreenView(
+                title: context.attributes.metadata?.title ?? "Timer",
+                presentation: context.attributes.presentation,
+                state: context.state,
+                tint: context.attributes.tintColor
+            )
+            .activityBackgroundTint(TimerPalette.background)
+            .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    title(attributes: context.attributes, state: context.state)
+                    TimerIslandTitle(
+                        title: context.attributes.metadata?.title ?? "Timer",
+                        tint: context.attributes.tintColor
+                    )
                 }
+
+                DynamicIslandExpandedRegion(.trailing) {
+                    TimerCountdownText(mode: context.state.mode)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: 116, alignment: .trailing)
+                }
+
                 DynamicIslandExpandedRegion(.bottom) {
-                    bottomView(attributes: context.attributes, state: context.state)
+                    TimerIslandBottomView(
+                        presentation: context.attributes.presentation,
+                        state: context.state,
+                        tint: context.attributes.tintColor
+                    )
                 }
             } compactLeading: {
-                countdown(state: context.state, maxWidth: 44)
+                Image(systemName: timerSymbol(for: context.state.mode))
+                    .font(.caption.weight(.bold))
                     .foregroundStyle(context.attributes.tintColor)
             } compactTrailing: {
-                progressView(mode: context.state.mode, tint: context.attributes.tintColor)
+                TimerCountdownText(mode: context.state.mode)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: 52, alignment: .trailing)
             } minimal: {
-                progressView(mode: context.state.mode, tint: context.attributes.tintColor)
+                TimerCircularProgress(
+                    mode: context.state.mode,
+                    tint: context.attributes.tintColor
+                )
             }
             .keylineTint(context.attributes.tintColor)
         }
     }
 
-    private func lockScreenView(attributes: AlarmAttributes<IMLXTimerMetadata>, state: AlarmPresentationState) -> some View {
-        VStack(alignment: .leading) {
-            title(attributes: attributes, state: state)
-            bottomView(attributes: attributes, state: state)
-        }
-        .padding(.all, 12)
-    }
-
-    private func bottomView(attributes: AlarmAttributes<IMLXTimerMetadata>, state: AlarmPresentationState) -> some View {
-        HStack {
-            countdown(state: state, maxWidth: 150)
-                .font(.system(size: 40, design: .rounded))
-            Spacer()
-            controls(presentation: attributes.presentation, state: state)
+    private func timerSymbol(for mode: AlarmPresentationState.Mode) -> String {
+        switch mode {
+        case .paused:
+            "pause.fill"
+        default:
+            "timer"
         }
     }
+}
 
-    private func countdown(state: AlarmPresentationState, maxWidth: CGFloat = .infinity) -> some View {
-        Group {
-            switch state.mode {
-            case .countdown(let countdown):
-                Text(timerInterval: Date.now ... countdown.fireDate, countsDown: true)
-            case .paused(let paused):
-                let remaining = Duration.seconds(paused.totalCountdownDuration - paused.previouslyElapsedDuration)
-                let pattern: Duration.TimeFormatStyle.Pattern = remaining > .seconds(60 * 60) ? .hourMinuteSecond : .minuteSecond
-                Text(remaining.formatted(.time(pattern: pattern)))
-            default:
-                EmptyView()
+private struct TimerLockScreenView: View {
+    let title: String
+    let presentation: AlarmPresentation
+    let state: AlarmPresentationState
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            TimerHeader(title: title, mode: state.mode, tint: tint)
+
+            HStack(alignment: .center, spacing: 16) {
+                TimerCountdownText(mode: state.mode)
+                    .font(.system(size: 52, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                TimerControls(
+                    presentation: presentation,
+                    state: state,
+                    tint: tint,
+                    style: .lockScreen
+                )
+            }
+
+            TimerLinearProgress(mode: state.mode, tint: tint)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background {
+            LinearGradient(
+                colors: [
+                    tint.opacity(0.10),
+                    TimerPalette.background.opacity(0.96),
+                    TimerPalette.background
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
+}
+
+private struct TimerHeader: View {
+    let title: String
+    let mode: AlarmPresentationState.Mode
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "timer")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.16), in: Circle())
+
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            if case .paused = mode {
+                Label("Paused", systemImage: "pause.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
             }
         }
-        .monospacedDigit()
-        .lineLimit(1)
-        .minimumScaleFactor(0.6)
-        .frame(maxWidth: maxWidth, alignment: .leading)
+    }
+}
+
+private struct TimerCountdownText: View {
+    let mode: AlarmPresentationState.Mode
+
+    var body: some View {
+        switch mode {
+        case .countdown(let countdown):
+            Text(timerInterval: Date.now ... countdown.fireDate, countsDown: true)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+
+        case .paused(let paused):
+            Text(remainingDuration(for: paused).formatted(.time(pattern: durationPattern(for: paused))))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+
+        default:
+            Text(verbatim: "—:—")
+                .monospacedDigit()
+        }
     }
 
-    private func progressView(mode: AlarmPresentationState.Mode, tint: Color) -> some View {
-        Group {
-            switch mode {
-            case .countdown(let countdown):
-                ProgressView(timerInterval: Date.now ... countdown.fireDate, countsDown: true) {
-                    EmptyView()
-                } currentValueLabel: {
-                    Image(systemName: "timer").scaleEffect(0.9)
-                }
-            case .paused(let paused):
-                let remaining = paused.totalCountdownDuration - paused.previouslyElapsedDuration
-                ProgressView(value: remaining, total: paused.totalCountdownDuration) {
-                    EmptyView()
-                } currentValueLabel: {
-                    Image(systemName: "pause.fill").scaleEffect(0.8)
-                }
-            default:
+    private func remainingDuration(
+        for paused: AlarmPresentationState.Mode.Paused
+    ) -> Duration {
+        .seconds(max(0, paused.totalCountdownDuration - paused.previouslyElapsedDuration))
+    }
+
+    private func durationPattern(
+        for paused: AlarmPresentationState.Mode.Paused
+    ) -> Duration.TimeFormatStyle.Pattern {
+        remainingDuration(for: paused) > .seconds(60 * 60)
+            ? .hourMinuteSecond
+            : .minuteSecond
+    }
+}
+
+private struct TimerLinearProgress: View {
+    let mode: AlarmPresentationState.Mode
+    let tint: Color
+
+    var body: some View {
+        switch mode {
+        case .countdown(let countdown):
+            ProgressView(
+                timerInterval: countdown.startDate ... countdown.fireDate,
+                countsDown: true
+            )
+            .labelsHidden()
+            .tint(tint)
+
+        case .paused(let paused):
+            ProgressView(
+                value: max(0, paused.totalCountdownDuration - paused.previouslyElapsedDuration),
+                total: max(1, paused.totalCountdownDuration)
+            )
+            .labelsHidden()
+            .tint(.orange)
+
+        default:
+            EmptyView()
+        }
+    }
+}
+
+private struct TimerIslandTitle: View {
+    let title: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "timer")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 26, height: 26)
+                .background(tint.opacity(0.18), in: Circle())
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct TimerIslandBottomView: View {
+    let presentation: AlarmPresentation
+    let state: AlarmPresentationState
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 14) {
+            TimerLinearProgress(mode: state.mode, tint: tint)
+                .frame(maxWidth: .infinity)
+
+            TimerControls(
+                presentation: presentation,
+                state: state,
+                tint: tint,
+                style: .dynamicIsland
+            )
+        }
+        .padding(.top, 10)
+    }
+}
+
+private struct TimerCircularProgress: View {
+    let mode: AlarmPresentationState.Mode
+    let tint: Color
+
+    var body: some View {
+        switch mode {
+        case .countdown(let countdown):
+            ProgressView(
+                timerInterval: countdown.startDate ... countdown.fireDate,
+                countsDown: true
+            ) {
                 EmptyView()
+            } currentValueLabel: {
+                Image(systemName: "timer")
+                    .font(.caption2.weight(.bold))
+            }
+            .progressViewStyle(.circular)
+            .tint(tint)
+            .foregroundStyle(tint)
+
+        case .paused(let paused):
+            ProgressView(
+                value: max(0, paused.totalCountdownDuration - paused.previouslyElapsedDuration),
+                total: max(1, paused.totalCountdownDuration)
+            ) {
+                EmptyView()
+            } currentValueLabel: {
+                Image(systemName: "pause.fill")
+                    .font(.caption2.weight(.bold))
+            }
+            .progressViewStyle(.circular)
+            .tint(.orange)
+            .foregroundStyle(.orange)
+
+        default:
+            Image(systemName: "timer")
+                .foregroundStyle(tint)
+        }
+    }
+}
+
+private struct TimerControls: View {
+    enum Style {
+        case lockScreen
+        case dynamicIsland
+
+        var buttonSize: CGFloat {
+            switch self {
+            case .lockScreen: 46
+            case .dynamicIsland: 36
             }
         }
-        .progressViewStyle(.circular)
-        .foregroundStyle(tint)
-        .tint(tint)
-    }
 
-    @ViewBuilder
-    private func title(attributes: AlarmAttributes<IMLXTimerMetadata>, state: AlarmPresentationState) -> some View {
-        let resource: LocalizedStringResource? = switch state.mode {
-        case .countdown: attributes.presentation.countdown?.title
-        case .paused: attributes.presentation.paused?.title
-        default: nil
+        var spacing: CGFloat {
+            switch self {
+            case .lockScreen: 10
+            case .dynamicIsland: 8
+            }
         }
-        Text(resource ?? attributes.presentation.alert.title)
-            .font(.title3)
-            .fontWeight(.semibold)
-            .lineLimit(1)
     }
 
-    private func controls(presentation: AlarmPresentation, state: AlarmPresentationState) -> some View {
-        HStack(spacing: 4) {
+    let presentation: AlarmPresentation
+    let state: AlarmPresentationState
+    let tint: Color
+    let style: Style
+
+    var body: some View {
+        HStack(spacing: style.spacing) {
             switch state.mode {
             case .countdown:
                 if let pauseButton = presentation.countdown?.pauseButton {
-                    button(config: pauseButton, intent: PauseIntent(alarmID: state.alarmID.uuidString), tint: .orange)
+                    TimerControlButton(
+                        config: pauseButton,
+                        intent: PauseIntent(alarmID: state.alarmID.uuidString),
+                        foreground: .orange,
+                        background: Color.white.opacity(0.10),
+                        size: style.buttonSize
+                    )
                 }
+
             case .paused:
                 if let resumeButton = presentation.paused?.resumeButton {
-                    button(config: resumeButton, intent: ResumeIntent(alarmID: state.alarmID.uuidString), tint: .orange)
+                    TimerControlButton(
+                        config: resumeButton,
+                        intent: ResumeIntent(alarmID: state.alarmID.uuidString),
+                        foreground: tint,
+                        background: tint.opacity(0.16),
+                        size: style.buttonSize
+                    )
                 }
+
             default:
                 EmptyView()
             }
-            button(config: presentation.alert.stopButton, intent: StopIntent(alarmID: state.alarmID.uuidString), tint: .red)
+
+            TimerControlButton(
+                config: AlarmButton(
+                    text: "Stop",
+                    textColor: .white,
+                    systemImageName: "xmark"
+                ),
+                intent: StopIntent(alarmID: state.alarmID.uuidString),
+                foreground: .red,
+                background: Color.red.opacity(0.16),
+                size: style.buttonSize
+            )
         }
     }
+}
 
-    private func button<I: AppIntent>(config: AlarmButton, intent: I, tint: Color) -> some View {
+private struct TimerControlButton<Intent: AppIntent>: View {
+    let config: AlarmButton
+    let intent: Intent
+    let foreground: Color
+    let background: Color
+    let size: CGFloat
+
+    var body: some View {
         Button(intent: intent) {
             Label(config.text, systemImage: config.systemImageName)
-                .lineLimit(1)
+                .font(.body.weight(.semibold))
+                .labelStyle(.iconOnly)
+                .foregroundStyle(foreground)
+                .frame(width: size, height: size)
+                .background(background, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.10), lineWidth: 1)
+                }
         }
-        .tint(tint)
-        .buttonStyle(.borderedProminent)
-        .frame(width: 96, height: 30)
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(config.text))
     }
+}
+
+private enum TimerPalette {
+    static let background = Color(red: 0.018, green: 0.024, blue: 0.045)
 }
 
 struct PauseIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Pause"
     @Parameter(title: "alarmID") var alarmID: String
+
     init() {}
     init(alarmID: String) { self.alarmID = alarmID }
+
     func perform() async throws -> some IntentResult {
         if let id = UUID(uuidString: alarmID) {
             try AlarmManager.shared.pause(id: id)
@@ -147,8 +402,10 @@ struct PauseIntent: LiveActivityIntent {
 struct ResumeIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Resume"
     @Parameter(title: "alarmID") var alarmID: String
+
     init() {}
     init(alarmID: String) { self.alarmID = alarmID }
+
     func perform() async throws -> some IntentResult {
         if let id = UUID(uuidString: alarmID) {
             try AlarmManager.shared.resume(id: id)
@@ -160,8 +417,10 @@ struct ResumeIntent: LiveActivityIntent {
 struct StopIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Stop"
     @Parameter(title: "alarmID") var alarmID: String
+
     init() {}
     init(alarmID: String) { self.alarmID = alarmID }
+
     func perform() async throws -> some IntentResult {
         if let id = UUID(uuidString: alarmID) {
             try AlarmManager.shared.stop(id: id)

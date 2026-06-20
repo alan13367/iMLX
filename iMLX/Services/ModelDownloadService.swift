@@ -29,24 +29,33 @@ actor ModelDownloadService {
         self.manifestService = manifestService
 
         let fileManager = FileManager.default
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
-        let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
+        let appSupport =
+            fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        let caches =
+            fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
 
         self.modelsBaseURL = appSupport.appendingPathComponent(Constants.Storage.modelsDirectory)
         self.repoDownloadsBaseURL = self.modelsBaseURL.appendingPathComponent("models")
-        self.hubCacheBaseURL = caches
+        self.hubCacheBaseURL =
+            caches
             .appendingPathComponent("huggingface")
             .appendingPathComponent("hub")
         self.sandboxRootURL = self.modelsBaseURL
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        self.stagingDirectoryURL = appSupport.appendingPathComponent(Constants.Storage.modelDownloadStagingDirectory)
-        self.jobsFileURL = appSupport.appendingPathComponent(Constants.Storage.modelDownloadJobsManifest)
+        self.stagingDirectoryURL = appSupport.appendingPathComponent(
+            Constants.Storage.modelDownloadStagingDirectory)
+        self.jobsFileURL = appSupport.appendingPathComponent(
+            Constants.Storage.modelDownloadJobsManifest)
 
         try? fileManager.createDirectory(at: self.modelsBaseURL, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: self.repoDownloadsBaseURL, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: self.stagingDirectoryURL, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(
+            at: self.repoDownloadsBaseURL, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(
+            at: self.stagingDirectoryURL, withIntermediateDirectories: true)
 
         self.hostURL = URL(string: "https://huggingface.co")!
         let metadataConfiguration = URLSessionConfiguration.ephemeral
@@ -55,22 +64,26 @@ actor ModelDownloadService {
         metadataConfiguration.timeoutIntervalForResource = 60
         self.metadataSession = URLSession(configuration: metadataConfiguration)
 
-        let configuration = URLSessionConfiguration.background(withIdentifier: Self.backgroundSessionIdentifier)
+        let configuration = URLSessionConfiguration.background(
+            withIdentifier: Self.backgroundSessionIdentifier)
         configuration.isDiscretionary = false
         configuration.sessionSendsLaunchEvents = true
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = 60 * 60
         configuration.timeoutIntervalForResource = 60 * 60 * 24
 
-        let delegate = BackgroundDownloadSessionDelegate(stagingDirectoryURL: self.stagingDirectoryURL)
-        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        let delegate = BackgroundDownloadSessionDelegate(
+            stagingDirectoryURL: self.stagingDirectoryURL)
+        let session = URLSession(
+            configuration: configuration, delegate: delegate, delegateQueue: nil)
         self.session = session
         self.jobsByModelId = Self.loadPersistedJobs(from: self.jobsFileURL)
 
         delegate.service = self
 
         Self.migrateOldDownloads(fileManager: fileManager, modelsBaseURL: self.modelsBaseURL)
-        Self.cleanupStagingDirectory(fileManager: fileManager, stagingDirectoryURL: self.stagingDirectoryURL)
+        Self.cleanupStagingDirectory(
+            fileManager: fileManager, stagingDirectoryURL: self.stagingDirectoryURL)
     }
 
     func setSnapshotObserver(_ observer: @escaping SnapshotObserver) async {
@@ -79,7 +92,9 @@ actor ModelDownloadService {
     }
 
     func startDownload(for model: ModelInfo) async throws {
-        let activeJobs = jobsByModelId.values.filter { $0.status == .queued || $0.status == .downloading }
+        let activeJobs = jobsByModelId.values.filter {
+            $0.status == .queued || $0.status == .downloading
+        }
         if let activeJob = activeJobs.first, activeJob.id != model.id {
             throw DownloadError.anotherDownloadInProgress(activeJob.displayName)
         }
@@ -93,7 +108,9 @@ actor ModelDownloadService {
         var job = try await buildJob(for: model)
         let taskDescriptions = Set(await fetchAllSessionTasks().compactMap(\.taskDescription))
 
-        if let existingJob = jobsByModelId[model.id], existingJob.status == .downloading || existingJob.status == .queued {
+        if let existingJob = jobsByModelId[model.id],
+            existingJob.status == .downloading || existingJob.status == .queued
+        {
             job = merge(job, withExistingJob: existingJob, activeTaskDescriptions: taskDescriptions)
         }
 
@@ -112,10 +129,15 @@ actor ModelDownloadService {
         for task in tasks {
             guard let descriptor = parseTaskDescription(task.taskDescription) else { continue }
             guard var job = jobsByModelId[descriptor.modelId] else { continue }
-            guard let index = job.files.firstIndex(where: { $0.relativePath == descriptor.relativePath }) else { continue }
+            guard
+                let index = job.files.firstIndex(where: {
+                    $0.relativePath == descriptor.relativePath
+                })
+            else { continue }
 
             job.files[index].status = .downloading
-            job.files[index].writtenBytes = max(job.files[index].writtenBytes, task.countOfBytesReceived)
+            job.files[index].writtenBytes = max(
+                job.files[index].writtenBytes, task.countOfBytesReceived)
             if task.countOfBytesExpectedToReceive > 0 {
                 job.files[index].expectedBytes = task.countOfBytesExpectedToReceive
             }
@@ -148,7 +170,9 @@ actor ModelDownloadService {
     ) async {
         guard let descriptor = parseTaskDescription(taskDescription) else { return }
         guard var job = jobsByModelId[descriptor.modelId] else { return }
-        guard let index = job.files.firstIndex(where: { $0.relativePath == descriptor.relativePath }) else { return }
+        guard
+            let index = job.files.firstIndex(where: { $0.relativePath == descriptor.relativePath })
+        else { return }
 
         job.files[index].writtenBytes = max(job.files[index].writtenBytes, totalBytesWritten)
         if totalBytesExpectedToWrite > 0 {
@@ -174,15 +198,19 @@ actor ModelDownloadService {
             try? fileManager.removeItem(at: stagedFileURL)
             return
         }
-        guard let index = job.files.firstIndex(where: { $0.relativePath == descriptor.relativePath }) else {
+        guard
+            let index = job.files.firstIndex(where: { $0.relativePath == descriptor.relativePath })
+        else {
             try? fileManager.removeItem(at: stagedFileURL)
             return
         }
 
-        let destinationURL = repositoryDirectory(for: job.huggingFaceId).appending(path: descriptor.relativePath)
+        let destinationURL = repositoryDirectory(for: job.huggingFaceId).appending(
+            path: descriptor.relativePath)
 
         do {
-            try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fileManager.createDirectory(
+                at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             if fileManager.fileExists(atPath: destinationURL.path) {
                 try fileManager.removeItem(at: destinationURL)
             }
@@ -206,14 +234,18 @@ actor ModelDownloadService {
             await notifyObserverIfNeeded(force: true)
         } catch {
             try? fileManager.removeItem(at: stagedFileURL)
-            await failJob(modelId: descriptor.modelId, message: error.localizedDescription, cancelRemainingTasks: true)
+            await failJob(
+                modelId: descriptor.modelId, message: error.localizedDescription,
+                cancelRemainingTasks: true)
         }
     }
 
     func handleTaskFailure(taskDescription: String, message: String, isCancellation: Bool) async {
         guard let descriptor = parseTaskDescription(taskDescription) else { return }
         guard var job = jobsByModelId[descriptor.modelId] else { return }
-        guard let index = job.files.firstIndex(where: { $0.relativePath == descriptor.relativePath }) else { return }
+        guard
+            let index = job.files.firstIndex(where: { $0.relativePath == descriptor.relativePath })
+        else { return }
 
         if isCancellation {
             if job.status == .failed {
@@ -231,8 +263,35 @@ actor ModelDownloadService {
     }
 
     func sizeOfModel(_ model: ModelInfo) -> Int64 {
-        let destination = preferredModelDirectory(for: model) ?? modelsBaseURL.appendingPathComponent(model.id)
+        let destination =
+            preferredModelDirectory(for: model) ?? modelsBaseURL.appendingPathComponent(model.id)
         return sizeOfDirectory(at: destination)
+    }
+
+    @discardableResult
+    func cancelDownload(for model: ModelInfo) async -> Bool {
+        await cancelDownload(modelId: model.id, huggingFaceId: model.huggingFaceId)
+    }
+
+    @discardableResult
+    private func cancelDownload(modelId: String, huggingFaceId: String) async -> Bool {
+        guard jobsByModelId[modelId] != nil else { return true }
+
+        jobsByModelId.removeValue(forKey: modelId)
+        savePersistedJobs()
+
+        await cancelTasks(for: modelId)
+
+        do {
+            try removeDownloadArtifacts(modelId: modelId, huggingFaceId: huggingFaceId)
+        } catch {
+            print("[ModelDownloadService] cancelDownload cleanup failed for \(modelId): \(error)")
+            await notifyObserverIfNeeded(force: true)
+            return false
+        }
+
+        await notifyObserverIfNeeded(force: true)
+        return true
     }
 
     func deleteModel(_ model: ModelInfo) async throws {
@@ -244,28 +303,7 @@ actor ModelDownloadService {
         jobsByModelId.removeValue(forKey: modelId)
         savePersistedJobs()
 
-        let symlinkPath = modelsBaseURL.appendingPathComponent(modelId)
-        if fileManager.fileExists(atPath: symlinkPath.path) {
-            try fileManager.removeItem(at: symlinkPath)
-        }
-
-        let appSupportRepoPath = repositoryDirectory(for: huggingFaceId)
-        if fileManager.fileExists(atPath: appSupportRepoPath.path) {
-            try fileManager.removeItem(at: appSupportRepoPath)
-        }
-
-        let cachePath = hubCacheBaseURL.appendingPathComponent(cacheDirectoryName(for: huggingFaceId))
-        if fileManager.fileExists(atPath: cachePath.path) {
-            try fileManager.removeItem(at: cachePath)
-        }
-
-        let lockPath = hubCacheBaseURL
-            .appendingPathComponent(".locks")
-            .appendingPathComponent(cacheDirectoryName(for: huggingFaceId))
-        if fileManager.fileExists(atPath: lockPath.path) {
-            try fileManager.removeItem(at: lockPath)
-        }
-
+        try removeDownloadArtifacts(modelId: modelId, huggingFaceId: huggingFaceId)
         await manifestService.removeDownloaded(modelId: modelId)
         await notifyObserverIfNeeded(force: true)
     }
@@ -297,12 +335,15 @@ actor ModelDownloadService {
             let destinationURL = repoDirectory.appending(path: filename)
             let existingBytes = fileSizeIfExists(at: destinationURL)
             let expectedBytes = expectedBytesByFile[filename] ?? nil
-            let isComplete = isCompleteFile(existingBytes: existingBytes, expectedBytes: expectedBytes)
+            let isComplete = isCompleteFile(
+                existingBytes: existingBytes, expectedBytes: expectedBytes)
 
             files.append(
                 ModelDownloadFileState(
                     relativePath: filename,
-                    remoteURL: remoteFileURL(for: model.huggingFaceId, revision: Self.defaultRevision, relativePath: filename),
+                    remoteURL: remoteFileURL(
+                        for: model.huggingFaceId, revision: Self.defaultRevision,
+                        relativePath: filename),
                     expectedBytes: expectedBytes,
                     writtenBytes: isComplete ? existingBytes : 0,
                     status: isComplete ? .completed : .pending,
@@ -325,7 +366,8 @@ actor ModelDownloadService {
     }
 
     private func fetchRepositoryFilenames(for model: ModelInfo) async throws -> [String] {
-        let requestURL = hostURL
+        let requestURL =
+            hostURL
             .appending(path: "api")
             .appending(path: "models")
             .appending(path: model.huggingFaceId)
@@ -337,11 +379,13 @@ actor ModelDownloadService {
         do {
             let (data, response) = try await metadataSession.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
-                  (200 ..< 300).contains(httpResponse.statusCode) else {
+                (200..<300).contains(httpResponse.statusCode)
+            else {
                 throw DownloadError.unableToListRepository(model.displayName)
             }
 
-            let repository = try JSONDecoder().decode(HuggingFaceRepositoryResponse.self, from: data)
+            let repository = try JSONDecoder().decode(
+                HuggingFaceRepositoryResponse.self, from: data)
             return repository.siblings
                 .map(\.rfilename)
                 .filter { Self.matchesAnyGlob($0, globs: Self.modelFileGlobs) }
@@ -376,7 +420,8 @@ actor ModelDownloadService {
         huggingFaceId: String,
         revision: String
     ) async -> Int64? {
-        var request = URLRequest(url: remoteFileURL(for: huggingFaceId, revision: revision, relativePath: relativePath))
+        var request = URLRequest(
+            url: remoteFileURL(for: huggingFaceId, revision: revision, relativePath: relativePath))
         request.httpMethod = "HEAD"
         request.timeoutInterval = 60
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -384,12 +429,14 @@ actor ModelDownloadService {
         do {
             let (_, response) = try await metadataSession.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
-                  (200 ..< 300).contains(httpResponse.statusCode) else {
+                (200..<300).contains(httpResponse.statusCode)
+            else {
                 return nil
             }
 
             if let headerValue = httpResponse.value(forHTTPHeaderField: "Content-Length"),
-               let fileSize = Int64(headerValue) {
+                let fileSize = Int64(headerValue)
+            {
                 return fileSize
             }
 
@@ -412,11 +459,16 @@ actor ModelDownloadService {
             let description = taskDescription(modelId: mergedJob.id, relativePath: relativePath)
             if activeTaskDescriptions.contains(description) {
                 mergedJob.files[index].status = .downloading
-            } else if let existingFile = existingJob.files.first(where: { $0.relativePath == relativePath }) {
-                mergedJob.files[index].writtenBytes = max(mergedJob.files[index].writtenBytes, existingFile.writtenBytes)
-                mergedJob.files[index].expectedBytes = mergedJob.files[index].expectedBytes ?? existingFile.expectedBytes
+            } else if let existingFile = existingJob.files.first(where: {
+                $0.relativePath == relativePath
+            }) {
+                mergedJob.files[index].writtenBytes = max(
+                    mergedJob.files[index].writtenBytes, existingFile.writtenBytes)
+                mergedJob.files[index].expectedBytes =
+                    mergedJob.files[index].expectedBytes ?? existingFile.expectedBytes
                 if mergedJob.files[index].status != .completed {
-                    mergedJob.files[index].status = existingFile.status == .completed ? .completed : .pending
+                    mergedJob.files[index].status =
+                        existingFile.status == .completed ? .completed : .pending
                 }
             }
         }
@@ -439,7 +491,9 @@ actor ModelDownloadService {
             for index in job.files.indices {
                 let destinationURL = repoDirectory.appending(path: job.files[index].relativePath)
                 let fileSize = fileSizeIfExists(at: destinationURL)
-                if isCompleteFile(existingBytes: fileSize, expectedBytes: job.files[index].expectedBytes) {
+                if isCompleteFile(
+                    existingBytes: fileSize, expectedBytes: job.files[index].expectedBytes)
+                {
                     job.files[index].writtenBytes = fileSize
                     job.files[index].status = .completed
                     job.files[index].lastErrorMessage = nil
@@ -455,7 +509,9 @@ actor ModelDownloadService {
         savePersistedJobs()
     }
 
-    private func schedulePendingTasks(for modelId: String, activeTaskDescriptions: Set<String>) async {
+    private func schedulePendingTasks(for modelId: String, activeTaskDescriptions: Set<String>)
+        async
+    {
         guard var job = jobsByModelId[modelId] else { return }
         guard job.status != .failed else { return }
 
@@ -482,8 +538,11 @@ actor ModelDownloadService {
             scheduledAnyTask = true
         }
 
-        if scheduledAnyTask || job.files.contains(where: { $0.status == .downloading || $0.status == .queued }) {
-            job.status = job.files.contains(where: { $0.status == .downloading }) ? .downloading : .queued
+        if scheduledAnyTask
+            || job.files.contains(where: { $0.status == .downloading || $0.status == .queued })
+        {
+            job.status =
+                job.files.contains(where: { $0.status == .downloading }) ? .downloading : .queued
         }
         job.updatedAt = Date()
         jobsByModelId[modelId] = job
@@ -494,14 +553,20 @@ actor ModelDownloadService {
         guard let job = jobsByModelId[modelId] else { return }
         guard job.status != .failed else { return }
         guard job.files.allSatisfy({ $0.status == .completed }) else { return }
-        guard let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == modelId }) else {
-            await failJob(modelId: modelId, message: "Unable to find model metadata for \(modelId).", cancelRemainingTasks: false)
+        guard let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == modelId })
+        else {
+            await failJob(
+                modelId: modelId, message: "Unable to find model metadata for \(modelId).",
+                cancelRemainingTasks: false)
             return
         }
 
         let repoDirectory = repositoryDirectory(for: job.huggingFaceId)
         guard isUsableModelDirectory(repoDirectory, for: model) else {
-            await failJob(modelId: modelId, message: DownloadError.corruptedDownload(model.displayName).localizedDescription, cancelRemainingTasks: false)
+            await failJob(
+                modelId: modelId,
+                message: DownloadError.corruptedDownload(model.displayName).localizedDescription,
+                cancelRemainingTasks: false)
             return
         }
 
@@ -523,7 +588,8 @@ actor ModelDownloadService {
             savePersistedJobs()
             await notifyObserverIfNeeded(force: true)
         } catch {
-            await failJob(modelId: modelId, message: error.localizedDescription, cancelRemainingTasks: false)
+            await failJob(
+                modelId: modelId, message: error.localizedDescription, cancelRemainingTasks: false)
         }
     }
 
@@ -552,13 +618,41 @@ actor ModelDownloadService {
         let tasks = await fetchAllSessionTasks()
         for task in tasks {
             guard let descriptor = parseTaskDescription(task.taskDescription),
-                  descriptor.modelId == modelId else { continue }
+                descriptor.modelId == modelId
+            else { continue }
             task.cancel()
         }
     }
 
+    private func removeDownloadArtifacts(modelId: String, huggingFaceId: String) throws {
+        let symlinkPath = modelsBaseURL.appendingPathComponent(modelId)
+        if fileManager.fileExists(atPath: symlinkPath.path) {
+            try fileManager.removeItem(at: symlinkPath)
+        }
+
+        let appSupportRepoPath = repositoryDirectory(for: huggingFaceId)
+        if fileManager.fileExists(atPath: appSupportRepoPath.path) {
+            try fileManager.removeItem(at: appSupportRepoPath)
+        }
+
+        let cachePath = hubCacheBaseURL.appendingPathComponent(
+            cacheDirectoryName(for: huggingFaceId))
+        if fileManager.fileExists(atPath: cachePath.path) {
+            try fileManager.removeItem(at: cachePath)
+        }
+
+        let lockPath =
+            hubCacheBaseURL
+            .appendingPathComponent(".locks")
+            .appendingPathComponent(cacheDirectoryName(for: huggingFaceId))
+        if fileManager.fileExists(atPath: lockPath.path) {
+            try fileManager.removeItem(at: lockPath)
+        }
+    }
+
     private func savePersistedJobs() {
-        let manifest = ModelDownloadJobsManifest(jobs: jobsByModelId.values.sorted { $0.createdAt < $1.createdAt })
+        let manifest = ModelDownloadJobsManifest(
+            jobs: jobsByModelId.values.sorted { $0.createdAt < $1.createdAt })
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: jobsFileURL, options: [.atomic])
         }
@@ -582,7 +676,9 @@ actor ModelDownloadService {
                     ModelDownloadSnapshot(
                         modelId: job.id,
                         displayName: job.displayName,
-                        progress: progress(for: job, bytesWritten: bytesWritten, totalBytesExpected: totalBytesExpected),
+                        progress: progress(
+                            for: job, bytesWritten: bytesWritten,
+                            totalBytesExpected: totalBytesExpected),
                         bytesWritten: bytesWritten,
                         totalBytesExpected: totalBytesExpected,
                         status: snapshotStatus(for: job.status),
@@ -593,7 +689,8 @@ actor ModelDownloadService {
         )
     }
 
-    private func snapshotStatus(for status: ModelDownloadJob.Status) -> ModelDownloadSnapshot.Status {
+    private func snapshotStatus(for status: ModelDownloadJob.Status) -> ModelDownloadSnapshot.Status
+    {
         switch status {
         case .queued:
             return .queued
@@ -614,7 +711,9 @@ actor ModelDownloadService {
         job.files.reduce(0) { $0 + min($1.writtenBytes, $1.expectedBytes ?? $1.writtenBytes) }
     }
 
-    private func progress(for job: ModelDownloadJob, bytesWritten: Int64, totalBytesExpected: Int64?) -> Float {
+    private func progress(
+        for job: ModelDownloadJob, bytesWritten: Int64, totalBytesExpected: Int64?
+    ) -> Float {
         if let totalBytesExpected, totalBytesExpected > 0 {
             return min(max(Float(bytesWritten) / Float(totalBytesExpected), 0), 1)
         }
@@ -650,7 +749,9 @@ actor ModelDownloadService {
         repoDownloadsBaseURL.appendingPathComponent(huggingFaceId)
     }
 
-    private func remoteFileURL(for huggingFaceId: String, revision: String, relativePath: String) -> URL {
+    private func remoteFileURL(for huggingFaceId: String, revision: String, relativePath: String)
+        -> URL
+    {
         hostURL
             .appending(path: huggingFaceId)
             .appending(path: "resolve")
@@ -661,7 +762,8 @@ actor ModelDownloadService {
     private func taskDescription(modelId: String, relativePath: String) -> String {
         let descriptor = TaskDescriptor(modelId: modelId, relativePath: relativePath)
         if let data = try? JSONEncoder().encode(descriptor),
-           let encoded = String(data: data, encoding: .utf8) {
+            let encoded = String(data: data, encoding: .utf8)
+        {
             return encoded
         }
         return "\(modelId)|\(relativePath)"
@@ -670,7 +772,8 @@ actor ModelDownloadService {
     private func parseTaskDescription(_ taskDescription: String?) -> TaskDescriptor? {
         guard let taskDescription else { return nil }
         if let data = taskDescription.data(using: .utf8),
-           let descriptor = try? JSONDecoder().decode(TaskDescriptor.self, from: data) {
+            let descriptor = try? JSONDecoder().decode(TaskDescriptor.self, from: data)
+        {
             return descriptor
         }
 
@@ -748,21 +851,28 @@ actor ModelDownloadService {
     }
 
     private func newestSnapshotDirectory(for model: ModelInfo) -> URL? {
-        let snapshotsDirectory = hubCacheBaseURL
+        let snapshotsDirectory =
+            hubCacheBaseURL
             .appendingPathComponent(cacheDirectoryName(for: model))
             .appendingPathComponent("snapshots")
 
-        guard let snapshots = try? fileManager.contentsOfDirectory(
-            at: snapshotsDirectory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else {
+        guard
+            let snapshots = try? fileManager.contentsOfDirectory(
+                at: snapshotsDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
             return nil
         }
 
         let sortedSnapshots = snapshots.sorted { lhs, rhs in
-            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let lhsDate =
+                (try? lhs.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate) ?? .distantPast
+            let rhsDate =
+                (try? rhs.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate) ?? .distantPast
             return lhsDate > rhsDate
         }
 
@@ -783,14 +893,18 @@ actor ModelDownloadService {
 
     private func usableSymlinkTarget(at symlinkPath: URL, for model: ModelInfo) -> URL? {
         guard let values = try? symlinkPath.resourceValues(forKeys: [.isSymbolicLinkKey]),
-              values.isSymbolicLink == true,
-              let destinationPath = try? fileManager.destinationOfSymbolicLink(atPath: symlinkPath.path) else {
+            values.isSymbolicLink == true,
+            let destinationPath = try? fileManager.destinationOfSymbolicLink(
+                atPath: symlinkPath.path)
+        else {
             return nil
         }
 
-        let destinationURL = URL(fileURLWithPath: destinationPath, relativeTo: symlinkPath.deletingLastPathComponent())
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
+        let destinationURL = URL(
+            fileURLWithPath: destinationPath, relativeTo: symlinkPath.deletingLastPathComponent()
+        )
+        .standardizedFileURL
+        .resolvingSymlinksInPath()
         if isUsableModelDirectory(destinationURL, for: model) {
             return destinationURL
         }
@@ -801,7 +915,9 @@ actor ModelDownloadService {
 
     private func isUsableModelDirectory(_ directory: URL, for model: ModelInfo) -> Bool {
         var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        else {
             return false
         }
 
@@ -811,11 +927,15 @@ actor ModelDownloadService {
         }
 
         guard let configObject = try? JSONSerialization.jsonObject(with: configData),
-              let config = configObject as? [String: Any] else {
+            let config = configObject as? [String: Any]
+        else {
             return false
         }
 
-        guard let contents = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+        guard
+            let contents = try? fileManager.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil)
+        else {
             return false
         }
 
@@ -830,8 +950,10 @@ actor ModelDownloadService {
                 return false
             }
 
-            let hasPreprocessor = fileManager.fileExists(atPath: directory.appendingPathComponent("preprocessor_config.json").path)
-            let hasProcessor = fileManager.fileExists(atPath: directory.appendingPathComponent("processor_config.json").path)
+            let hasPreprocessor = fileManager.fileExists(
+                atPath: directory.appendingPathComponent("preprocessor_config.json").path)
+            let hasProcessor = fileManager.fileExists(
+                atPath: directory.appendingPathComponent("processor_config.json").path)
             if !hasPreprocessor && !hasProcessor {
                 return false
             }
@@ -841,22 +963,26 @@ actor ModelDownloadService {
     }
 
     private func createModelSymlink(at symlinkPath: URL, targetURL: URL) throws {
-        let relativeTarget = relativePath(from: symlinkPath.deletingLastPathComponent(), to: targetURL)
+        let relativeTarget = relativePath(
+            from: symlinkPath.deletingLastPathComponent(), to: targetURL)
         try? fileManager.removeItem(at: symlinkPath)
-        try fileManager.createSymbolicLink(atPath: symlinkPath.path, withDestinationPath: relativeTarget)
+        try fileManager.createSymbolicLink(
+            atPath: symlinkPath.path, withDestinationPath: relativeTarget)
     }
 
     private func relativePath(from baseURL: URL, to targetURL: URL) -> String {
         let baseComponents = baseURL.standardizedFileURL.pathComponents
         let targetComponents = targetURL.standardizedFileURL.pathComponents
 
-        guard targetURL.standardizedFileURL.path.hasPrefix(sandboxRootURL.standardizedFileURL.path) else {
+        guard targetURL.standardizedFileURL.path.hasPrefix(sandboxRootURL.standardizedFileURL.path)
+        else {
             return targetURL.path
         }
 
         var sharedIndex = 0
         while sharedIndex < min(baseComponents.count, targetComponents.count),
-              baseComponents[sharedIndex] == targetComponents[sharedIndex] {
+            baseComponents[sharedIndex] == targetComponents[sharedIndex]
+        {
             sharedIndex += 1
         }
 
@@ -873,15 +999,21 @@ actor ModelDownloadService {
     private nonisolated static func matchesAnyGlob(_ value: String, globs: [String]) -> Bool {
         globs.contains { glob in
             let escaped = NSRegularExpression.escapedPattern(for: glob)
-            let regex = "^" + escaped
+            let regex =
+                "^"
+                + escaped
                 .replacingOccurrences(of: "\\*", with: ".*")
                 .replacingOccurrences(of: "\\?", with: ".") + "$"
             return value.range(of: regex, options: .regularExpression) != nil
         }
     }
 
-    private nonisolated static func migrateOldDownloads(fileManager: FileManager, modelsBaseURL: URL) {
-        let entries = (try? fileManager.contentsOfDirectory(at: modelsBaseURL, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? []
+    private nonisolated static func migrateOldDownloads(
+        fileManager: FileManager, modelsBaseURL: URL
+    ) {
+        let entries =
+            (try? fileManager.contentsOfDirectory(
+                at: modelsBaseURL, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? []
         for entry in entries {
             let name = entry.lastPathComponent
             let attrs = try? entry.resourceValues(forKeys: [.isSymbolicLinkKey])
@@ -895,27 +1027,38 @@ actor ModelDownloadService {
                 continue
             }
             var isDir: ObjCBool = false
-            guard fileManager.fileExists(atPath: entry.path, isDirectory: &isDir), isDir.boolValue else {
+            guard fileManager.fileExists(atPath: entry.path, isDirectory: &isDir), isDir.boolValue
+            else {
                 continue
             }
-            let hasConfigJson = fileManager.fileExists(atPath: entry.appendingPathComponent("config.json").path)
-            let hasSafetensors = (try? fileManager.contentsOfDirectory(at: entry, includingPropertiesForKeys: nil))?.contains { $0.pathExtension == "safetensors" } ?? false
+            let hasConfigJson = fileManager.fileExists(
+                atPath: entry.appendingPathComponent("config.json").path)
+            let hasSafetensors =
+                (try? fileManager.contentsOfDirectory(at: entry, includingPropertiesForKeys: nil))?
+                .contains { $0.pathExtension == "safetensors" } ?? false
             if !hasConfigJson || !hasSafetensors {
                 try? fileManager.removeItem(at: entry)
             }
         }
     }
 
-    private nonisolated static func cleanupStagingDirectory(fileManager: FileManager, stagingDirectoryURL: URL) {
-        let entries = (try? fileManager.contentsOfDirectory(at: stagingDirectoryURL, includingPropertiesForKeys: nil)) ?? []
+    private nonisolated static func cleanupStagingDirectory(
+        fileManager: FileManager, stagingDirectoryURL: URL
+    ) {
+        let entries =
+            (try? fileManager.contentsOfDirectory(
+                at: stagingDirectoryURL, includingPropertiesForKeys: nil)) ?? []
         for entry in entries {
             try? fileManager.removeItem(at: entry)
         }
     }
 
-    private nonisolated static func loadPersistedJobs(from jobsFileURL: URL) -> [String: ModelDownloadJob] {
+    private nonisolated static func loadPersistedJobs(from jobsFileURL: URL) -> [String:
+        ModelDownloadJob]
+    {
         guard let data = try? Data(contentsOf: jobsFileURL),
-              let manifest = try? JSONDecoder().decode(ModelDownloadJobsManifest.self, from: data) else {
+            let manifest = try? JSONDecoder().decode(ModelDownloadJobsManifest.self, from: data)
+        else {
             return [:]
         }
 
@@ -936,7 +1079,9 @@ private nonisolated struct HuggingFaceRepositoryResponse: Decodable, Sendable {
     }
 }
 
-private final class BackgroundDownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, URLSessionDelegate, @unchecked Sendable {
+private final class BackgroundDownloadSessionDelegate: NSObject, URLSessionDownloadDelegate,
+    URLSessionTaskDelegate, URLSessionDelegate, @unchecked Sendable
+{
     weak var service: ModelDownloadService?
 
     private let fileManager = FileManager.default
@@ -954,7 +1099,8 @@ private final class BackgroundDownloadSessionDelegate: NSObject, URLSessionDownl
         totalBytesExpectedToWrite: Int64
     ) {
         guard let taskDescription = downloadTask.taskDescription,
-              let service else { return }
+            let service
+        else { return }
 
         Task {
             await service.handleTaskProgress(
@@ -971,10 +1117,12 @@ private final class BackgroundDownloadSessionDelegate: NSObject, URLSessionDownl
         didFinishDownloadingTo location: URL
     ) {
         guard let taskDescription = downloadTask.taskDescription,
-              let service else { return }
+            let service
+        else { return }
 
         do {
-            try fileManager.createDirectory(at: stagingDirectoryURL, withIntermediateDirectories: true)
+            try fileManager.createDirectory(
+                at: stagingDirectoryURL, withIntermediateDirectories: true)
             let stagedFileURL = stagingDirectoryURL.appendingPathComponent(UUID().uuidString)
             if fileManager.fileExists(atPath: stagedFileURL.path) {
                 try fileManager.removeItem(at: stagedFileURL)
@@ -982,7 +1130,8 @@ private final class BackgroundDownloadSessionDelegate: NSObject, URLSessionDownl
             try fileManager.moveItem(at: location, to: stagedFileURL)
 
             Task {
-                await service.handleDownloadedFile(taskDescription: taskDescription, stagedFileURL: stagedFileURL)
+                await service.handleDownloadedFile(
+                    taskDescription: taskDescription, stagedFileURL: stagedFileURL)
             }
         } catch {
             Task {
@@ -995,13 +1144,16 @@ private final class BackgroundDownloadSessionDelegate: NSObject, URLSessionDownl
         }
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?)
+    {
         guard let error,
-              let taskDescription = task.taskDescription,
-              let service else { return }
+            let taskDescription = task.taskDescription,
+            let service
+        else { return }
 
         let nsError = error as NSError
-        let isCancellation = nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+        let isCancellation =
+            nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
 
         Task {
             await service.handleTaskFailure(

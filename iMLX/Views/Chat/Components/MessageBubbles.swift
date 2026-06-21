@@ -129,22 +129,16 @@ struct MessageDeliveryStatusView: View {
 struct AssistantMessageText: View {
     let text: String
     let isStreaming: Bool
+    let streamID: UUID
     var linkPhoneNumbers: Bool = false
 
     var body: some View {
         if isStreaming {
-            // Streaming layout: render the text then an inline caret right
-            // after the last glyph. Using a `Group` of `Text` doesn't allow
-            // a custom caret view, so we use HStack with `lastTextBaseline`.
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(text)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                MessageStreamingCaret()
-                    .alignmentGuide(.lastTextBaseline) { d in d[VerticalAlignment.center] + 6 }
-            }
+            IncrementalStreamingMarkdownText(
+                text: text,
+                streamID: streamID,
+                linkTint: BrandPalette.accent
+            )
         } else {
             MessageMarkdownText(
                 text: text,
@@ -220,7 +214,8 @@ private struct UserMessageInlineMarkdownText: View {
 
             See [Textual](https://github.com/gonzalezreal/textual).
             """,
-            isStreaming: false
+            isStreaming: false,
+            streamID: UUID()
         )
         .padding()
     }

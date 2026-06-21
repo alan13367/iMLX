@@ -112,6 +112,7 @@ struct MessageRow: View, Equatable {
                 AssistantMessageText(
                     text: resolvedParsed.response,
                     isStreaming: isStreaming,
+                    streamID: message.id,
                     linkPhoneNumbers: shouldLinkPhoneNumbers
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -160,7 +160,7 @@ nonisolated enum Constants {
             ModelInfo(
                 id: "gemma4-e2b-it-4bit",
                 displayName: "Gemma 4 E2B",
-                huggingFaceId: "deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit",
+                huggingFaceId: "mlx-community/gemma-4-e2b-it-4bit",
                 parameterCount: "E2B",
                 quantization: "4-bit",
                 estimatedSizeGB: 3.6,
@@ -419,6 +419,12 @@ nonisolated enum Constants {
         /// Process at most one out of every N tokens through the per-token flush gate.
         /// Reduces per-token Date()/interval work on the @MainActor token loop.
         static let streamingFlushTokenGate = 4
+        /// Near-live Markdown reparses only the active tail and publishes it at most
+        /// twelve times per second. Completed block segments publish immediately.
+        static let streamingMarkdownTailPublishInterval: TimeInterval = 1.0 / 12.0
+        /// Very long unfinished blocks stay plain text until they close so malformed or
+        /// unbounded Markdown cannot monopolize the main actor during generation.
+        static let streamingMarkdownInlineTailCharacterLimit = 2_400
     }
 
     enum WebSearch {

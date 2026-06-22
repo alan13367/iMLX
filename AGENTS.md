@@ -88,7 +88,7 @@ xcodebuild -downloadComponent MetalToolchain
 - Models: curated model entries live in `Constants.swift`. Assistant defaults (system prompt, temperature) live in `AppState` and are edited in `AssistantSettingsView`.
 - Documents: `DocumentLibraryService` imports local PDF/CSV/text files, extracts/chunks/indexes them, and retrieves bounded local context.
 - Memory: `MemorySystem` is the app-facing facade over actor-backed GRDB persistence and retrieval. Persist only facts grounded in user text.
-- Tool calling: `ToolCallingService` plans with the currently loaded local model, executes at most one tool per turn, and fails closed to normal generation on invalid planner output.
+- Tool calling: `ToolCallingService` is the actor-backed façade used by chat orchestration. Tool definitions, routing policy, planner support, argument validation, temporal parsing, and executors live under `iMLX/Services/ToolCalling/`. The service plans with the currently loaded local model, executes at most one tool per turn, and fails closed to normal generation on invalid planner output.
 - Vision/OCR: vision-capable models must load through the VLM path. OCR is local via Vision and only reads images attached to the latest user turn in v1.
 - TTS: Kokoro checkpoint compatibility belongs in `Vendor/KokoroSwift` loader/factory code, not scattered through model math.
 
@@ -104,6 +104,7 @@ iMLX/
 │       ├── ChatView.swift Root chat shell, toolbar, sheets, and orchestration
 │       └── Components/    Transcript, composer, status, attachments, messages
 ├── Services/             Inference, downloads, persistence, memory, documents, tools
+│   └── ToolCalling/      Tool catalog, routing, planner support, validation, parsers, executors
 ├── Utilities/            Constants, localization, styling, helpers
 └── Assets.xcassets/
 iMLXAlarmWidget/          Widget Extension for AlarmKit timer Live Activity
@@ -121,6 +122,7 @@ High-value files and folders:
 - `iMLX/ViewModels/ChatViewModel.swift`
 - `iMLX/Services/InferenceService.swift`
 - `iMLX/Services/ToolCallingService.swift`
+- `iMLX/Services/ToolCalling/`
 - `iMLX/Services/WebSearchService.swift`
 - `iMLX/Services/ImageOCRService.swift`
 - `iMLX/Services/DocumentLibraryService.swift`
@@ -146,7 +148,13 @@ Registered tools include `read_url`, `ocr_image_text`, `web_search`, `document_s
 
 Important behavior:
 
-- Planner output is untrusted. Invalid or ambiguous output must degrade to `.none`, except for deterministic fallbacks already encoded in `ToolCallingService`.
+- `ToolCallingService.swift` remains the small actor façade for context construction, enabled-tool access, planner execution, and tool execution. Do not move routing, parsing, validation, or executor implementations back into it.
+- `ToolCatalog.swift` owns registered `ToolDefinition`s and executor wiring.
+- `ToolRouter.swift`, `ToolFollowUpRouting.swift`, and `ToolIntentHeuristics.swift` own deterministic preflight, contextual follow-ups, and intent matching.
+- `ToolPlannerRuntime.swift` owns planner prompt/runtime support; `ToolPlannerOutputParser.swift` owns untrusted planner-output decoding and recovery.
+- `ToolArgumentValidation.swift` owns argument normalization and validation. Date, due-date, and duration language parsing belongs in the dedicated parser files.
+- Executor implementations belong in the content, web, or personal-data executor files. Service-specific API work stays in underlying services such as `WebSearchService`, `RemindersService`, and `CalendarBriefService`.
+- Planner output is untrusted. Invalid or ambiguous output must degrade to `.none`, except for deterministic fallbacks encoded in the tool-calling routing layer.
 - Enabling Web Search is permission to make internet tools available, not permission to always search. Search remains a tool decision.
 - `web_search` and `read_url` are gated by the Web Search toggle; local OCR can run when the latest user message has attached images.
 - `read_url` v1 supports exactly one public `http/https` URL in the latest user message. Multiple URLs should force clarification, not arbitrary selection.
@@ -189,7 +197,7 @@ Important behavior:
 - Keep UI mutations on `@MainActor`.
 - Use `actor` for MLX or other serialized service boundaries.
 - Use `AsyncThrowingStream` for token streaming.
-- Add new tools through `ToolDefinition`, executor, and context-aware enablement, not ad hoc `ChatViewModel` branches.
+- Add new tools through `ToolCatalog`, the appropriate executor family, argument validation, and context-aware routing/enablement—not ad hoc `ChatViewModel` branches.
 - Preserve backward-compatible decoding for persisted conversations, messages, tool traces, source types, and memory records.
 - Prefer source attribution over opaque assistant claims.
 - Avoid comments unless they clarify non-obvious code.

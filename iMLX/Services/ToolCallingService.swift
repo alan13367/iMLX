@@ -52,6 +52,14 @@ nonisolated enum ToolPreflight: Equatable, Sendable {
     case deliberate
 }
 
+/// Keeps a valid planner decision distinct from output that could not be
+/// interpreted safely. A valid `.none` is respected unless the latest turn
+/// deterministically completes a pending tool clarification from history.
+nonisolated enum ToolPlannerOutcome: Equatable, Sendable {
+    case decision(ToolDecision)
+    case unusable
+}
+
 private enum ToolDueDateParser {
     private static let isoDateFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -112,6 +120,30 @@ private enum ToolDueDateParser {
             return .success(date)
         }
 
+        if lower.range(
+            of: #"^(?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?$"#,
+            options: .regularExpression
+        ) != nil,
+           let date = ToolDateTimeParser.explicitWeekdayStartDate(
+                in: lower,
+                referenceDate: referenceDate,
+                calendar: calendar
+           ) {
+            return .success(date)
+        }
+
+        if lower.range(
+            of: #"^(?:today|tomorrow)\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?$"#,
+            options: .regularExpression
+        ) != nil {
+            switch ToolDateTimeParser.parse(lower, referenceDate: referenceDate, calendar: calendar) {
+            case .success(let date):
+                return .success(date)
+            case .failure:
+                break
+            }
+        }
+
         let compactDate = trimmed.replacingOccurrences(of: " ", with: "")
         if let date = isoDateFormatter.date(from: compactDate) {
             return .success(date)
@@ -132,7 +164,7 @@ private enum ToolDueDateParser {
             return .success(date)
         }
 
-        return .failure(.invalidArguments("Argument `due` must be today, tomorrow, tonight, ISO date/datetime, or in N hours/minutes/days."))
+        return .failure(.invalidArguments("Argument `due` must be today, tomorrow, tonight, a named weekday with an explicit time, ISO date/datetime, or in N hours/minutes/days."))
     }
 
     static func iso8601DueString(from date: Date, timeZone: TimeZone = .current) -> String {
@@ -730,16 +762,17 @@ actor ToolCallingService {
     }
 
     nonisolated func resolvedDecision(
-        plannedDecision: ToolDecision,
+        plannerOutcome: ToolPlannerOutcome,
         userMessage: String,
         context: ToolInputContext,
         tools: [ToolDefinition],
-        preferThinkingFallback: Bool
+        history: [ChatMessage] = []
     ) -> ToolDecision {
         let toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
 
         if let directURL = context.singleDetectedPublicURL,
            let readURLTool = toolsByName["read_url"],
+           shouldForceReadURL(for: userMessage, context: context),
            case .success(let arguments) = validatedArguments(
                 ["url": directURL.absoluteString],
                 for: readURLTool,
@@ -760,8 +793,8 @@ actor ToolCallingService {
             return .call(ToolCallRequest(toolName: documentTool.name, arguments: arguments))
         }
 
-        switch plannedDecision {
-        case .call(let request):
+        switch plannerOutcome {
+        case .decision(.call(let request)):
             guard let normalizedRequest = normalizedRequest(
                 from: request,
                 context: context,
@@ -771,8 +804,28 @@ actor ToolCallingService {
             }
             return .call(normalizedRequest)
 
-        case .none:
+        case .decision(.none):
+            if let contextualDecision = contextualCreateFollowUpDecision(
+                userMessage: userMessage,
+                history: history,
+                context: context,
+                toolsByName: toolsByName
+            ) {
+                return contextualDecision
+            }
+            return .none
+
+        case .unusable:
             break
+        }
+
+        if let contextualDecision = contextualCreateFollowUpDecision(
+            userMessage: userMessage,
+            history: history,
+            context: context,
+            toolsByName: toolsByName
+        ) {
+            return contextualDecision
         }
 
         if let ocrTool = toolsByName["ocr_image_text"],
@@ -808,6 +861,17 @@ actor ToolCallingService {
             return .call(ToolCallRequest(toolName: calendarCreateTool.name, arguments: arguments))
         }
 
+        if let remindersCreateTool = toolsByName["reminders_create"],
+           let raw = heuristicRemindersCreateRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: remindersCreateTool,
+                context: context
+           ) {
+            Self.debugLog("heuristic fallback selected reminders_create for explicit reminder request")
+            return .call(ToolCallRequest(toolName: remindersCreateTool.name, arguments: arguments))
+        }
+
         if let contactsLookupTool = toolsByName["contacts_lookup"],
            let raw = heuristicContactsLookupRawArguments(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -830,17 +894,6 @@ actor ToolCallingService {
             return .call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments))
         }
 
-        if let remindersCreateTool = toolsByName["reminders_create"],
-           let raw = heuristicRemindersCreateRawArguments(for: userMessage),
-           case .success(let arguments) = validatedArguments(
-                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
-                for: remindersCreateTool,
-                context: context
-           ) {
-            Self.debugLog("heuristic fallback selected reminders_create for explicit reminder request")
-            return .call(ToolCallRequest(toolName: remindersCreateTool.name, arguments: arguments))
-        }
-
         if let dateTimeTool = toolsByName["current_datetime"],
            shouldForceCurrentDateTime(for: userMessage),
            case .success(let arguments) = validatedArguments([:], for: dateTimeTool, context: context) {
@@ -859,9 +912,17 @@ actor ToolCallingService {
             return .call(ToolCallRequest(toolName: remindersBriefTool.name, arguments: arguments))
         }
 
-        if preferThinkingFallback,
-           let fallbackDecision = heuristicFallbackDecision(userMessage: userMessage, tools: tools) {
+        if let fallbackDecision = heuristicFallbackDecision(userMessage: userMessage, tools: tools) {
             return fallbackDecision
+        }
+
+        if let contextualDecision = contextualFallbackDecision(
+            userMessage: userMessage,
+            history: history,
+            context: context,
+            toolsByName: toolsByName
+        ) {
+            return contextualDecision
         }
 
         return .none
@@ -873,8 +934,8 @@ actor ToolCallingService {
     /// live-data heuristics) and short-circuits to a final `ToolDecision` when
     /// the answer is unambiguous. Returns `.deliberate` only when the turn has
     /// genuinely ambiguous context that an LLM might disambiguate (attached
-    /// docs/images without a clear request, multiple URLs, web-search-leaning
-    /// language without a strong heuristic match).
+    /// docs/images without a clear request, an ambiguous single URL,
+    /// web-search-leaning language without a strong heuristic match).
     ///
     /// This keeps short, simple questions ("hi", "what's 2+2") from paying for
     /// a full planner inference round-trip just to be told `.none`.
@@ -891,9 +952,18 @@ actor ToolCallingService {
 
         let toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
 
-        // 1. Pasted single public URL → high-confidence read_url.
+        // Multiple URLs cannot be handled safely by read_url v1. Do not let
+        // another web tool arbitrarily choose one; normal generation can ask
+        // the user which URL they want read.
+        if context.detectedPublicURLs.count > 1 {
+            Self.debugLog("preflight skipped tools: multiple URLs require clarification")
+            return .skip(.none)
+        }
+
+        // 1. Explicit request to inspect a pasted single public URL.
         if let directURL = context.singleDetectedPublicURL,
            let readURLTool = toolsByName["read_url"],
+           shouldForceReadURL(for: userMessage, context: context),
            case .success(let arguments) = validatedArguments(
                 ["url": directURL.absoluteString],
                 for: readURLTool,
@@ -903,7 +973,21 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: readURLTool.name, arguments: arguments)))
         }
 
-        // 2. Newly-attached documents or explicit document language.
+        // 2. An explicit request to search the web wins over incidental local
+        // tool keywords such as "events", "reminders", or "contacts".
+        if let webSearchTool = toolsByName["web_search"],
+           shouldForceExplicitWebSearch(for: userMessage),
+           let query = heuristicWebSearchQuery(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                ["query": query],
+                for: webSearchTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected web_search for explicit search request (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: webSearchTool.name, arguments: arguments)))
+        }
+
+        // 3. Newly-attached documents or explicit document language.
         if let documentTool = toolsByName["document_synthesize"],
            shouldForceDocumentSynthesis(for: userMessage, context: context),
            case .success(let arguments) = validatedArguments(
@@ -915,7 +999,7 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: documentTool.name, arguments: arguments)))
         }
 
-        // 3. Text-focused image request with attached images.
+        // 4. Text-focused image request with attached images.
         if let ocrTool = toolsByName["ocr_image_text"],
            shouldForceOCR(for: userMessage, context: context),
            case .success(let arguments) = validatedArguments(
@@ -927,7 +1011,7 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments)))
         }
 
-        // 4. Explicit timer create request.
+        // 5. Explicit timer create request.
         if let timerCreateTool = toolsByName["timer_create"],
            let raw = heuristicTimerCreateRawArguments(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -939,7 +1023,7 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: timerCreateTool.name, arguments: arguments)))
         }
 
-        // 4a. Explicit calendar event create request when all required fields are parseable.
+        // 5a. Explicit calendar event create request when all required fields are parseable.
         if let calendarCreateTool = toolsByName["calendar_create"],
            let raw = heuristicCalendarCreateRawArguments(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -951,31 +1035,9 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: calendarCreateTool.name, arguments: arguments)))
         }
 
-        // 4b. Contact lookup request.
-        if let contactsLookupTool = toolsByName["contacts_lookup"],
-           let raw = heuristicContactsLookupRawArguments(for: userMessage),
-           case .success(let arguments) = validatedArguments(
-                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
-                for: contactsLookupTool,
-                context: context
-           ) {
-            Self.debugLog("preflight selected contacts_lookup (planner skipped)")
-            return .skip(.call(ToolCallRequest(toolName: contactsLookupTool.name, arguments: arguments)))
-        }
-
-        // 4c. Calendar-shaped request.
-        if let calendarTool = toolsByName["calendar_brief"],
-           let range = heuristicCalendarRange(for: userMessage),
-           case .success(let arguments) = validatedArguments(
-                ["range": range.rawValue],
-                for: calendarTool,
-                context: context
-           ) {
-            Self.debugLog("preflight selected calendar_brief range=\(range.rawValue) (planner skipped)")
-            return .skip(.call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments)))
-        }
-
-        // 4d. Explicit create-reminder request (before brief so "remind me to …" does not read the list).
+        // 5b. Explicit create-reminder request. This must run before calendar
+        // reads so nouns such as "meeting" in a reminder title do not hijack
+        // the turn.
         if let remindersCreateTool = toolsByName["reminders_create"],
            let raw = heuristicRemindersCreateRawArguments(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -987,7 +1049,31 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: remindersCreateTool.name, arguments: arguments)))
         }
 
-        // 4e. Device date/time from the system clock.
+        // 5c. Contact lookup request.
+        if let contactsLookupTool = toolsByName["contacts_lookup"],
+           let raw = heuristicContactsLookupRawArguments(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: contactsLookupTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected contacts_lookup (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: contactsLookupTool.name, arguments: arguments)))
+        }
+
+        // 5d. Calendar-shaped request.
+        if let calendarTool = toolsByName["calendar_brief"],
+           let range = heuristicCalendarRange(for: userMessage),
+           case .success(let arguments) = validatedArguments(
+                ["range": range.rawValue],
+                for: calendarTool,
+                context: context
+           ) {
+            Self.debugLog("preflight selected calendar_brief range=\(range.rawValue) (planner skipped)")
+            return .skip(.call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments)))
+        }
+
+        // 5e. Device date/time from the system clock.
         if let dateTimeTool = toolsByName["current_datetime"],
            shouldForceCurrentDateTime(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -999,7 +1085,7 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: dateTimeTool.name, arguments: arguments)))
         }
 
-        // 4f. Reminders list / todo brief for all reminders or a bounded range.
+        // 5f. Reminders list / todo brief for all reminders or a bounded range.
         if let remindersBriefTool = toolsByName["reminders_brief"],
            let range = heuristicReminderRange(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -1011,7 +1097,7 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: remindersBriefTool.name, arguments: arguments)))
         }
 
-        // 4g. Range-only follow-up after a previous brief tool, e.g. "And for tomorrow?"
+        // 5g. Range-only follow-up after a previous brief tool, e.g. "And for tomorrow?"
         if let followUpDecision = contextualBriefFollowUpDecision(
             userMessage: userMessage,
             history: history,
@@ -1021,13 +1107,13 @@ actor ToolCallingService {
             return .skip(followUpDecision)
         }
 
-        // 5. Explicit web requests and strong live-data web_search phrases,
+        // 6. Strong live-data web_search phrases,
         //    but only when no attachments might reframe the request as
         //    document/image-grounded.
         if let webSearchTool = toolsByName["web_search"],
            context.attachedDocuments.isEmpty,
            context.attachedImages.isEmpty,
-           shouldForceWebSearch(for: userMessage) || shouldForceExplicitWebSearch(for: userMessage),
+           shouldForceWebSearch(for: userMessage),
            let query = heuristicWebSearchQuery(for: userMessage),
            case .success(let arguments) = validatedArguments(
                 ["query": query],
@@ -1038,12 +1124,13 @@ actor ToolCallingService {
             return .skip(.call(ToolCallRequest(toolName: webSearchTool.name, arguments: arguments)))
         }
 
-        // 6. Quick reject: nothing in the turn could plausibly need a tool.
+        // 7. Quick reject: nothing in the turn could plausibly need a tool.
         //    Skip the planner entirely and let the model answer directly.
         if !mightBenefitFromPlanner(
             userMessage: userMessage,
             context: context,
-            toolsByName: toolsByName
+            toolsByName: toolsByName,
+            history: history
         ) {
             Self.debugLog("preflight skip: no actionable context or heuristic match (decision=none)")
             return .skip(.none)
@@ -1055,7 +1142,8 @@ actor ToolCallingService {
     private nonisolated func mightBenefitFromPlanner(
         userMessage: String,
         context: ToolInputContext,
-        toolsByName: [String: ToolDefinition]
+        toolsByName: [String: ToolDefinition],
+        history: [ChatMessage]
     ) -> Bool {
         // Attached docs/images without a clear forcing phrase → planner can route.
         if !context.attachedDocuments.isEmpty,
@@ -1066,11 +1154,20 @@ actor ToolCallingService {
            toolsByName["ocr_image_text"] != nil {
             return true
         }
-        // Multiple URLs → planner picks one or returns none (read_url v1
-        // requires exactly one public URL, and we won't guess for the user).
-        if context.detectedPublicURLs.count > 1,
+        // An ambiguous single-URL turn still benefits from planner context.
+        if context.singleDetectedPublicURL != nil,
            toolsByName["read_url"] != nil {
             return true
+        }
+        if pendingToolClarificationPreviousUserMessage(
+            for: userMessage,
+            history: history,
+            toolsByName: toolsByName
+        ) != nil {
+            return true
+        }
+        if isClearlyToolIndependentTurn(userMessage) {
+            return false
         }
         // Web-search-leaning language that didn't satisfy the strong force.
         if toolsByName["web_search"] != nil,
@@ -1084,12 +1181,19 @@ actor ToolCallingService {
            messageLooksLikeFactualQuestion(userMessage) {
             return true
         }
+        if contextualFollowUpToolTrace(for: userMessage, history: history) != nil {
+            return true
+        }
         if toolsByName["current_datetime"] != nil,
            messageLooksDateTimeAdjacent(userMessage) {
             return true
         }
         if toolsByName["calendar_create"] != nil,
            messageLooksCalendarCreateAdjacent(userMessage) {
+            return true
+        }
+        if toolsByName["reminders_create"] != nil,
+           messageLooksReminderCreateAdjacent(userMessage) {
             return true
         }
         if toolsByName["timer_create"] != nil,
@@ -1101,6 +1205,57 @@ actor ToolCallingService {
             return true
         }
         return false
+    }
+
+    private nonisolated func isClearlyToolIndependentTurn(_ userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return true }
+
+        let exactConversationalTurns = [
+            "hi",
+            "hello",
+            "hey",
+            "thanks",
+            "thank you",
+            "ok",
+            "okay",
+            "how are you",
+            "good morning",
+            "good afternoon",
+            "good evening"
+        ]
+        if exactConversationalTurns.contains(normalized) {
+            return true
+        }
+
+        let compactOriginal = userMessage
+            .lowercased()
+            .replacingOccurrences(of: #"[\?!=]"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if compactOriginal.range(
+            of: #"^(?:what(?:'s|\s+is)?\s+)?-?\d+(?:\.\d+)?\s*[\+\-\*/]\s*-?\d+(?:\.\d+)?$"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+
+        let localCreationPhrases = [
+            "write a ",
+            "write me ",
+            "can you write ",
+            "could you write ",
+            "draft a ",
+            "draft me ",
+            "compose a ",
+            "brainstorm ",
+            "rewrite this",
+            "rephrase this",
+            "proofread this",
+            "fix the grammar",
+            "translate this"
+        ]
+        return localCreationPhrases.contains(where: { normalized.hasPrefix($0) })
     }
 
     private nonisolated func messageLooksWebSearchAdjacent(_ userMessage: String) -> Bool {
@@ -1173,6 +1328,73 @@ actor ToolCallingService {
         return explicitPhrases.contains(where: { normalized.contains($0) })
     }
 
+    private nonisolated func shouldForceReadURL(
+        for userMessage: String,
+        context: ToolInputContext
+    ) -> Bool {
+        guard context.singleDetectedPublicURL != nil else { return false }
+        if shouldForceExplicitWebSearch(for: userMessage) {
+            return false
+        }
+
+        let messageWithoutURL = userMessage
+            .replacingOccurrences(
+                of: #"(?i)https?://\S+"#,
+                with: " ",
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if messageWithoutURL.isEmpty {
+            return true
+        }
+
+        let normalized = normalizeForHeuristicMatching(messageWithoutURL)
+        let nonReadingActions = [
+            "save this",
+            "remember this",
+            "bookmark this",
+            "send this",
+            "share this",
+            "add this link"
+        ]
+        if nonReadingActions.contains(where: { normalized.contains($0) }) {
+            return false
+        }
+
+        let directReadingPhrases = [
+            "read this",
+            "read the",
+            "open this",
+            "check this",
+            "inspect this",
+            "review this",
+            "summarize this",
+            "summarise this",
+            "summarize the",
+            "summarise the",
+            "explain this",
+            "analyze this",
+            "analyse this",
+            "what does this say",
+            "what is on this",
+            "what s on this",
+            "what is this link",
+            "what s this link",
+            "is this link safe",
+            "is this site safe"
+        ]
+        if directReadingPhrases.contains(where: { normalized.contains($0) }) {
+            return true
+        }
+
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let readingActions = Set(["read", "open", "check", "inspect", "review", "summarize", "summarise", "explain", "analyze", "analyse"])
+        let pageReferences = Set(["url", "link", "page", "site", "website", "article", "post"])
+        return !tokens.intersection(readingActions).isEmpty
+            && !tokens.intersection(pageReferences).isEmpty
+    }
+
     private nonisolated func messageLooksLikeFactualQuestion(_ userMessage: String) -> Bool {
         let trimmed = userMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
@@ -1216,6 +1438,21 @@ actor ToolCallingService {
             && (!tokens.intersection(calendarHints).isEmpty || normalized.contains("on my calendar"))
     }
 
+    private nonisolated func messageLooksReminderCreateAdjacent(_ userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+
+        if normalized.contains("remind me") {
+            return true
+        }
+
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let createHints = Set(["set", "create", "add", "make"])
+        let reminderHints = Set(["reminder", "reminders", "todo", "todos"])
+        return !tokens.intersection(createHints).isEmpty
+            && !tokens.intersection(reminderHints).isEmpty
+    }
+
     private nonisolated func messageLooksTimerCreateAdjacent(_ userMessage: String) -> Bool {
         let normalized = normalizeForHeuristicMatching(userMessage)
         guard !normalized.isEmpty else { return false }
@@ -1238,6 +1475,203 @@ actor ToolCallingService {
             "number for"
         ]
         return hints.contains(where: { normalized.contains($0) })
+    }
+
+    private nonisolated func pendingToolClarificationPreviousUserMessage(
+        for userMessage: String,
+        history: [ChatMessage],
+        toolsByName: [String: ToolDefinition]
+    ) -> String? {
+        guard !normalizeForHeuristicMatching(userMessage).isEmpty,
+              let assistantIndex = history.lastIndex(where: { $0.role == .assistant }),
+              history[(assistantIndex + 1)...].allSatisfy({ $0.role == .system }),
+              assistantLooksLikeToolClarification(history[assistantIndex].content),
+              let previousUserMessage = history[..<assistantIndex]
+                .last(where: { $0.role == .user })?
+                .content else {
+            return nil
+        }
+
+        if toolsByName["reminders_create"] != nil,
+           messageLooksReminderCreateAdjacent(previousUserMessage) {
+            return previousUserMessage
+        }
+        if toolsByName["calendar_create"] != nil,
+           messageLooksCalendarCreateAdjacent(previousUserMessage) {
+            return previousUserMessage
+        }
+        if toolsByName["timer_create"] != nil,
+           messageLooksTimerCreateAdjacent(previousUserMessage) {
+            return previousUserMessage
+        }
+        if toolsByName["contacts_lookup"] != nil,
+           messageLooksContactsLookupAdjacent(previousUserMessage) {
+            return previousUserMessage
+        }
+        if toolsByName["calendar_brief"] != nil,
+           heuristicCalendarRange(for: previousUserMessage) != nil {
+            return previousUserMessage
+        }
+        if toolsByName["reminders_brief"] != nil,
+           heuristicReminderRange(for: previousUserMessage) != nil {
+            return previousUserMessage
+        }
+        if toolsByName["web_search"] != nil,
+           (messageLooksWebSearchAdjacent(previousUserMessage)
+                || messageLooksLikeFactualQuestion(previousUserMessage)) {
+            return previousUserMessage
+        }
+        return nil
+    }
+
+    private nonisolated func assistantLooksLikeToolClarification(_ assistantMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(assistantMessage)
+        guard !normalized.isEmpty else { return false }
+
+        if assistantMessage.contains("?") {
+            return true
+        }
+
+        let clarificationPhrases = [
+            "please tell me",
+            "please provide",
+            "please specify",
+            "please clarify",
+            "i need the",
+            "i still need",
+            "what time",
+            "which time",
+            "what date",
+            "which date",
+            "how long",
+            "which contact",
+            "which one"
+        ]
+        return clarificationPhrases.contains(where: { normalized.contains($0) })
+    }
+
+    private nonisolated func contextualCreateFollowUpDecision(
+        userMessage: String,
+        history: [ChatMessage],
+        context: ToolInputContext,
+        toolsByName: [String: ToolDefinition]
+    ) -> ToolDecision? {
+        guard let previousUserMessage = pendingToolClarificationPreviousUserMessage(
+            for: userMessage,
+            history: history,
+            toolsByName: toolsByName
+        ) else {
+            return nil
+        }
+
+        if let remindersCreateTool = toolsByName["reminders_create"],
+           let raw = pendingReminderCompletionRawArguments(
+                previousUserMessage: previousUserMessage,
+                userMessage: userMessage
+           ),
+           case .success(let arguments) = validatedArguments(
+                Dictionary(uniqueKeysWithValues: raw.map { ($0.key, $0.value as Any) }),
+                for: remindersCreateTool,
+                context: context
+           ) {
+            Self.debugLog("contextual recovery completed pending reminders_create request")
+            return .call(
+                ToolCallRequest(
+                    toolName: remindersCreateTool.name,
+                    arguments: arguments
+                )
+            )
+        }
+
+        return nil
+    }
+
+    private nonisolated func pendingReminderCompletionRawArguments(
+        previousUserMessage: String,
+        userMessage: String
+    ) -> [String: String]? {
+        guard let time = standaloneTimeExpression(in: userMessage),
+              let draft = reminderDraftRequiringTime(from: previousUserMessage) else {
+            return nil
+        }
+
+        return [
+            "title": draft.title,
+            "due": "\(draft.day) at \(time)"
+        ]
+    }
+
+    private nonisolated func reminderDraftRequiringTime(
+        from userMessage: String
+    ) -> (title: String, day: String)? {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return nil }
+
+        let dayPattern = #"(?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|today|tomorrow"#
+        let dayBeforeTitlePatterns = [
+            #"\bremind me\s+(?:for|on)\s+("# + dayPattern + #")\s+to\s+(.+)$"#,
+            #"\b(?:set|create|add|make)\s+(?:a\s+)?reminder\s+(?:for|on)\s+("# + dayPattern + #")\s+to\s+(.+)$"#
+        ]
+        for pattern in dayBeforeTitlePatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
+                  let match = regex.firstMatch(
+                    in: normalized,
+                    options: [],
+                    range: NSRange(normalized.startIndex..., in: normalized)
+                  ),
+                  match.numberOfRanges > 2,
+                  let dayRange = Range(match.range(at: 1), in: normalized),
+                  let titleRange = Range(match.range(at: 2), in: normalized) else {
+                continue
+            }
+            let day = String(normalized[dayRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = String(normalized[titleRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !day.isEmpty, !title.isEmpty {
+                return (title, day)
+            }
+        }
+
+        let titleBeforeDayPatterns = [
+            #"\bremind me to\s+(.+?)\s+(?:for|on)\s+("# + dayPattern + #")$"#,
+            #"\bremind me to\s+(.+?)\s+("# + dayPattern + #")$"#,
+            #"\b(?:set|create|add|make)\s+(?:a\s+)?reminder\s+to\s+(.+?)\s+(?:for|on)\s+("# + dayPattern + #")$"#
+        ]
+        for pattern in titleBeforeDayPatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
+                  let match = regex.firstMatch(
+                    in: normalized,
+                    options: [],
+                    range: NSRange(normalized.startIndex..., in: normalized)
+                  ),
+                  match.numberOfRanges > 2,
+                  let titleRange = Range(match.range(at: 1), in: normalized),
+                  let dayRange = Range(match.range(at: 2), in: normalized) else {
+                continue
+            }
+            let title = String(normalized[titleRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let day = String(normalized[dayRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !day.isEmpty, !title.isEmpty {
+                return (title, day)
+            }
+        }
+
+        return nil
+    }
+
+    private nonisolated func standaloneTimeExpression(in userMessage: String) -> String? {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty,
+              normalized.range(
+                of: #"^(?:at\s+)?(?:\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)|(?:[01]?\d|2[0-3]):[0-5]\d)$"#,
+                options: .regularExpression
+              ) != nil else {
+            return nil
+        }
+
+        if normalized.hasPrefix("at ") {
+            return String(normalized.dropFirst(3))
+        }
+        return normalized
     }
 
     private nonisolated func contextualBriefFollowUpDecision(
@@ -1279,6 +1713,126 @@ actor ToolCallingService {
             }
             Self.debugLog("preflight selected calendar_brief follow-up range=\(calendarRange.rawValue) (planner skipped)")
             return .call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments))
+
+        default:
+            return nil
+        }
+    }
+
+    private nonisolated func contextualFollowUpToolTrace(
+        for userMessage: String,
+        history: [ChatMessage]
+    ) -> ToolCallTrace? {
+        guard let trace = history.reversed().compactMap(\.toolTrace).first(where: { $0.success }) else {
+            return nil
+        }
+
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        let words = normalized.split(separator: " ")
+        guard !words.isEmpty, words.count <= 16 else { return nil }
+
+        let acknowledgements = [
+            "thanks",
+            "thank you",
+            "ok",
+            "okay",
+            "got it",
+            "perfect",
+            "great"
+        ]
+        if acknowledgements.contains(normalized) {
+            return nil
+        }
+
+        let commandStarts = [
+            "write ",
+            "draft ",
+            "create ",
+            "set ",
+            "start ",
+            "translate ",
+            "rewrite ",
+            "summarize ",
+            "summarise "
+        ]
+        if commandStarts.contains(where: { normalized.hasPrefix($0) }) {
+            return nil
+        }
+
+        let followUpStarts = [
+            "and ",
+            "also ",
+            "what about",
+            "how about",
+            "does ",
+            "do ",
+            "is ",
+            "are ",
+            "was ",
+            "were ",
+            "why ",
+            "when ",
+            "where ",
+            "which ",
+            "who ",
+            "what ",
+            "how ",
+            "any "
+        ]
+        if userMessage.contains("?")
+            || followUpStarts.contains(where: { normalized.hasPrefix($0) }) {
+            return trace
+        }
+
+        if ["web_search", "read_url", "contacts_lookup"].contains(trace.toolName),
+           words.count <= 5 {
+            return trace
+        }
+
+        return nil
+    }
+
+    private nonisolated func contextualFallbackDecision(
+        userMessage: String,
+        history: [ChatMessage],
+        context: ToolInputContext,
+        toolsByName: [String: ToolDefinition]
+    ) -> ToolDecision? {
+        guard let trace = contextualFollowUpToolTrace(for: userMessage, history: history) else {
+            return nil
+        }
+
+        switch trace.toolName {
+        case "web_search", "read_url":
+            guard let webSearchTool = toolsByName["web_search"],
+                  let previousUserMessage = history.reversed().first(where: { $0.role == .user })?.content else {
+                return nil
+            }
+            let combinedQuery = "\(previousUserMessage) Follow-up: \(userMessage)"
+            guard let query = heuristicWebSearchQuery(for: combinedQuery),
+                  case .success(let arguments) = validatedArguments(
+                    ["query": query],
+                    for: webSearchTool,
+                    context: context
+                  ) else {
+                return nil
+            }
+            Self.debugLog("heuristic fallback selected web_search for contextual follow-up")
+            return .call(ToolCallRequest(toolName: webSearchTool.name, arguments: arguments))
+
+        case "contacts_lookup":
+            guard let contactsTool = toolsByName["contacts_lookup"],
+                  let previousQuery = trace.displayInput,
+                  messageLooksContactsLookupAdjacent(userMessage),
+                  case .success(let arguments) = validatedArguments(
+                    ["query": previousQuery],
+                    for: contactsTool,
+                    context: context
+                  ) else {
+                return nil
+            }
+            Self.debugLog("heuristic fallback reused contacts_lookup for contextual follow-up")
+            return .call(ToolCallRequest(toolName: contactsTool.name, arguments: arguments))
 
         default:
             return nil
@@ -1369,10 +1923,10 @@ actor ToolCallingService {
         tools: [ToolDefinition],
         context: ToolInputContext,
         using inferenceService: InferenceService
-    ) async throws -> ToolDecision {
+    ) async throws -> ToolPlannerOutcome {
         guard !tools.isEmpty else {
             Self.debugLog("planner skipped: no enabled tools")
-            return .none
+            return .decision(.none)
         }
 
         Self.debugLog(
@@ -1420,7 +1974,7 @@ actor ToolCallingService {
                     break
                 }
             }
-            let decision = parsePlannerDecision(
+            let outcome = parsePlannerOutcome(
                 from: rawOutput,
                 userMessage: userMessage,
                 tools: tools,
@@ -1428,15 +1982,15 @@ actor ToolCallingService {
             )
             Self.debugLog(
                 "planner output: raw=\(Self.sanitizedSnippet(rawOutput, limit: 280)) " +
-                "earlyStop=\(sawCompleteToolDecisionJSON) decision=\(Self.describe(decision))"
+                "earlyStop=\(sawCompleteToolDecisionJSON) outcome=\(Self.describe(outcome))"
             )
-            return decision
+            return outcome
         } catch is CancellationError {
             Self.debugLog("planner cancelled")
             throw CancellationError()
         } catch {
             Self.debugLog("planner failed with error: \(String(describing: error))")
-            return .none
+            return .unusable
         }
     }
 
@@ -1568,6 +2122,25 @@ actor ToolCallingService {
         tools: [ToolDefinition],
         context: ToolInputContext
     ) -> ToolDecision {
+        switch parsePlannerOutcome(
+            from: text,
+            userMessage: userMessage,
+            tools: tools,
+            context: context
+        ) {
+        case .decision(let decision):
+            return decision
+        case .unusable:
+            return .none
+        }
+    }
+
+    nonisolated func parsePlannerOutcome(
+        from text: String,
+        userMessage: String? = nil,
+        tools: [ToolDefinition],
+        context: ToolInputContext
+    ) -> ToolPlannerOutcome {
         let toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
 
         for payload in jsonPayloads(in: text) {
@@ -1578,16 +2151,22 @@ actor ToolCallingService {
                 continue
             }
 
-            let toolName = rawToolName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let toolName = rawToolName
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "-", with: "_")
+                .replacingOccurrences(of: " ", with: "_")
             if toolName == "none" {
-                return .none
+                return .decision(.none)
             }
 
             guard let toolDefinition = toolsByName[toolName] else {
                 continue
             }
 
-            let rawArguments = dictionary["args"] as? [String: Any] ?? [:]
+            let rawArguments = (dictionary["args"] as? [String: Any])
+                ?? (dictionary["arguments"] as? [String: Any])
+                ?? [:]
             guard case .success(let arguments) = validatedArguments(
                 rawArguments,
                 for: toolDefinition,
@@ -1596,10 +2175,12 @@ actor ToolCallingService {
                 continue
             }
 
-            return .call(
-                ToolCallRequest(
-                    toolName: toolName,
-                    arguments: arguments
+            return .decision(
+                .call(
+                    ToolCallRequest(
+                        toolName: toolName,
+                        arguments: arguments
+                    )
                 )
             )
         }
@@ -1610,10 +2191,10 @@ actor ToolCallingService {
             context: context,
             toolsByName: toolsByName
         ) {
-            return fallbackDecision
+            return .decision(fallbackDecision)
         }
 
-        return .none
+        return .unusable
     }
 
     nonisolated func validatedArguments(
@@ -1820,11 +2401,26 @@ actor ToolCallingService {
                     .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let boundedContent = String(compactContent.prefix(220))
-                return "\(message.role.rawValue): \(boundedContent)"
+                let toolSummary: String
+                if let trace = message.toolTrace, trace.success {
+                    let input = trace.displayInput.map {
+                        String($0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).prefix(100))
+                    }
+                    let inputSummary = input.map { ", input: \($0)" } ?? ""
+                    toolSummary = " [successful tool: \(trace.toolName)\(inputSummary)]"
+                } else {
+                    toolSummary = ""
+                }
+                return "\(message.role.rawValue): \(boundedContent)\(toolSummary)"
             }
             .joined(separator: "\n")
 
+        let currentDateTimeFormatter = ISO8601DateFormatter()
+        currentDateTimeFormatter.formatOptions = [.withInternetDateTime]
+        currentDateTimeFormatter.timeZone = .current
+        let currentLocalDateTime = currentDateTimeFormatter.string(from: Date())
         let currentTurnContext = [
+            "- Current local datetime: \(currentLocalDateTime) (\(TimeZone.current.identifier))",
             "- Attached image count: \(context.attachedImages.count)",
             "- Attached document count: \(context.attachedDocuments.count)",
             "- Newly attached documents this turn: \(context.hasNewlyAttachedDocuments ? "yes" : "no")",
@@ -1965,7 +2561,9 @@ actor ToolCallingService {
             guard !trimmed.isEmpty else {
                 return .failure(.invalidArguments("Argument `query` must not be empty."))
             }
-            let clamped = String(trimmed.prefix(Constants.ToolCalling.maxQueryLength))
+            let clamped = toolDefinition.name == "web_search"
+                ? boundedWebSearchQuery(trimmed)
+                : String(trimmed.prefix(Constants.ToolCalling.maxQueryLength))
             guard !clamped.isEmpty else {
                 return .failure(.invalidArguments("Argument `query` must not be empty."))
             }
@@ -2075,6 +2673,19 @@ actor ToolCallingService {
 
     private nonisolated func normalizedStringValue(from rawValue: Any?) -> String? {
         rawValue as? String
+    }
+
+    private nonisolated func boundedWebSearchQuery(_ query: String) -> String {
+        let limit = Constants.ToolCalling.maxQueryLength
+        guard query.count > limit else { return query }
+
+        let separator = " … "
+        let available = max(2, limit - separator.count)
+        let headCount = Int(Double(available) * 0.65)
+        let tailCount = available - headCount
+        return String(query.prefix(headCount))
+            + separator
+            + String(query.suffix(tailCount))
     }
 
     private nonisolated func normalizedPublicURL(from candidate: String) -> URL? {
@@ -2197,8 +2808,24 @@ actor ToolCallingService {
         toolsByName: [String: ToolDefinition]
     ) -> ToolDecision? {
         let lowercasedText = text.lowercased()
+        let recoveryPriority = [
+            "read_url",
+            "ocr_image_text",
+            "document_synthesize",
+            "timer_create",
+            "calendar_create",
+            "reminders_create",
+            "contacts_lookup",
+            "calendar_brief",
+            "reminders_brief",
+            "current_datetime",
+            "web_search"
+        ]
+        let orderedToolNames = recoveryPriority.filter { toolsByName[$0] != nil }
+            + toolsByName.keys.filter { !recoveryPriority.contains($0) }.sorted()
 
-        for (toolName, toolDefinition) in toolsByName {
+        for toolName in orderedToolNames {
+            guard let toolDefinition = toolsByName[toolName] else { continue }
             guard proseSuggestsUsingTool(named: toolName, in: lowercasedText) else { continue }
 
             switch toolName {
@@ -2347,6 +2974,20 @@ actor ToolCallingService {
     private nonisolated func proseSuggestsUsingTool(named toolName: String, in lowercasedText: String) -> Bool {
         let underscored = toolName.lowercased()
         let spaced = underscored.replacingOccurrences(of: "_", with: " ")
+        let negativePatterns = [
+            "do not use \(underscored)",
+            "don't use \(underscored)",
+            "should not use \(underscored)",
+            "without using \(underscored)",
+            "do not use \(spaced)",
+            "don't use \(spaced)",
+            "should not use \(spaced)",
+            "without using \(spaced)"
+        ]
+        if negativePatterns.contains(where: { lowercasedText.contains($0) }) {
+            return false
+        }
+
         let positivePatterns = [
             "use the \(underscored) tool",
             "use \(underscored)",
@@ -2367,7 +3008,7 @@ actor ToolCallingService {
 
     private nonisolated func inferredWebSearchQuery(from text: String, userMessage: String?) -> String? {
         if let explicitQuery = firstRegexCapture(
-            pattern: #"(?i)\bsearch for\s+["“]?(.+?)["”]?(?:[.!?\n]|$)"#,
+            pattern: #"(?i)\bsearch for\s+["“]?(.+?)["”]?(?:\n|$)"#,
             in: text
         ) {
             let sanitized = sanitizeRecoveredQuery(explicitQuery)
@@ -2377,7 +3018,7 @@ actor ToolCallingService {
         }
 
         if let explicitQuery = firstRegexCapture(
-            pattern: #"(?i)\bquery\s*[:=]\s*["“]?(.+?)["”]?(?:[.!?\n]|$)"#,
+            pattern: #"(?i)\bquery\s*[:=]\s*["“]?(.+?)["”]?(?:\n|$)"#,
             in: text
         ) {
             let sanitized = sanitizeRecoveredQuery(explicitQuery)
@@ -2416,86 +3057,96 @@ actor ToolCallingService {
         let normalized = normalizeForHeuristicMatching(userMessage)
         guard !normalized.isEmpty else { return false }
 
-        let liveDataPhrases = [
-            "latest news",
-            "breaking news",
-            "weather today",
-            "weather tomorrow",
-            "current weather",
-            "stock price",
-            "share price",
-            "exchange rate",
-            "next game",
-            "next match",
-            "live score",
-            "score today",
-            "price today",
-            "recently happened",
-            "news about",
-            "latest on",
-            "latest about"
-        ]
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let recencyMarkers = Set([
+            "latest", "current", "today", "tomorrow", "tonight", "now",
+            "live", "recent", "recently", "upcoming"
+        ])
+        let hasRecency = !tokens.intersection(recencyMarkers).isEmpty
 
-        if liveDataPhrases.contains(where: { normalized.contains($0) }) {
+        let newsMarkers = Set(["news", "headline", "headlines", "breaking"])
+        if !tokens.intersection(newsMarkers).isEmpty,
+           hasRecency
+            || normalized.contains("news about")
+            || normalized.contains("news on")
+            || normalized.contains("what happened") {
             return true
         }
 
-        let tokens = Set(normalized.split(separator: " ").map(String.init))
-        let currentInfoMarkers = Set(["latest", "current", "today", "tomorrow", "now", "live", "recent", "recently"])
-        let topicalMarkers = Set([
-            "news",
-            "weather",
-            "forecast",
-            "score",
-            "scores",
-            "match",
-            "matches",
-            "game",
-            "games",
-            "price",
-            "prices",
-            "stock",
-            "stocks",
-            "rate",
-            "rates",
-            "schedule",
-            "ranking",
-            "rankings",
-            "result",
-            "results",
-            "update",
-            "updates",
-            "event",
-            "events",
-            "standings",
-            "market",
-            "markets"
+        let weatherMarkers = Set([
+            "weather", "forecast", "temperature", "temperatures",
+            "rain", "raining", "snow", "storm", "storms"
         ])
-        let inherentlyLiveMarkers = Set([
-            "weather",
-            "forecast",
-            "score",
-            "scores",
-            "price",
-            "prices",
-            "stock",
-            "stocks",
-            "rate",
-            "rates",
-            "schedule",
-            "standings"
+        if !tokens.intersection(weatherMarkers).isEmpty {
+            if hasRecency {
+                return true
+            }
+            let asksForConditions = normalized.contains("weather in")
+                || normalized.contains("weather for")
+                || normalized.contains("forecast in")
+                || normalized.contains("forecast for")
+                || normalized.contains("temperature in")
+                || normalized.contains("temperature for")
+            if asksForConditions {
+                return true
+            }
+            let conceptualWeatherMarkers = Set([
+                "pattern", "patterns", "climate", "science", "definition",
+                "meaning", "works", "work", "causes"
+            ])
+            if tokens.count <= 6,
+               tokens.count > 1,
+               tokens.intersection(conceptualWeatherMarkers).isEmpty {
+                return true
+            }
+        }
+
+        let marketMarkers = Set([
+            "price", "prices", "stock", "stocks", "share", "shares",
+            "rate", "rates", "market", "markets", "exchange"
         ])
+        let conceptualMarketQuestion = [
+            "why do ",
+            "why does ",
+            "how do ",
+            "how does ",
+            "what causes ",
+            "explain how "
+        ].contains(where: { normalized.hasPrefix($0) })
+        if !conceptualMarketQuestion,
+           !tokens.intersection(marketMarkers).isEmpty,
+           hasRecency
+            || normalized.contains("price of")
+            || normalized.contains("share price")
+            || normalized.contains("exchange rate")
+            || normalized.contains("how much is")
+            || (tokens.count <= 6
+                && !tokens.intersection(Set(["price", "prices", "rate", "rates", "stock", "stocks", "share", "shares"])).isEmpty) {
+            return true
+        }
 
-        let hasCurrentInfo = !tokens.intersection(currentInfoMarkers).isEmpty
-        let hasTopical = !tokens.intersection(topicalMarkers).isEmpty
+        let sportsMarkers = Set([
+            "score", "scores", "match", "matches", "game", "games",
+            "standings", "ranking", "rankings", "fixture", "fixtures"
+        ])
+        if !tokens.intersection(sportsMarkers).isEmpty,
+           hasRecency
+            || normalized.contains("next match")
+            || normalized.contains("next game")
+            || normalized.contains("live score")
+            || normalized.contains("standings") {
+            return true
+        }
 
-        if hasCurrentInfo && hasTopical { return true }
+        let alertMarkers = Set(["warning", "warnings", "alert", "alerts", "advisory", "advisories"])
+        if hasRecency, !tokens.intersection(alertMarkers).isEmpty {
+            return true
+        }
 
-        let questionWords = Set(["who", "what", "where", "when", "why", "how"])
-        let hasQuestionWord = !tokens.intersection(questionWords).isEmpty
-        let hasInherentlyLiveTopic = !tokens.intersection(inherentlyLiveMarkers).isEmpty
-
-        if hasQuestionWord && hasInherentlyLiveTopic { return true }
+        let transportMarkers = Set(["flight", "flights", "train", "trains", "traffic", "delay", "delays", "status"])
+        if hasRecency, !tokens.intersection(transportMarkers).isEmpty {
+            return true
+        }
 
         return false
     }
@@ -2545,12 +3196,11 @@ actor ToolCallingService {
 
     private nonisolated func shouldForceDocumentSynthesis(for userMessage: String, context: ToolInputContext) -> Bool {
         guard !context.attachedDocuments.isEmpty else { return false }
-        if context.hasNewlyAttachedDocuments {
-            return true
-        }
 
         let normalized = normalizeForHeuristicMatching(userMessage)
-        guard !normalized.isEmpty else { return false }
+        if normalized.isEmpty {
+            return context.hasNewlyAttachedDocuments
+        }
 
         let documentPhrases = [
             "this document",
@@ -2590,25 +3240,47 @@ actor ToolCallingService {
         let normalized = normalizeForHeuristicMatching(userMessage)
         guard !normalized.isEmpty else { return nil }
 
-        let calendarMarkers = [
-            "calendar",
-            "schedule",
-            "agenda",
-            "availability",
-            "available",
-            "busy",
-            "free",
-            "appointment",
-            "appointments",
-            "meeting",
-            "meetings",
-            "event",
-            "events",
-            "conflicts",
+        let strongCalendarPhrases = [
+            "my calendar",
+            "my schedule",
+            "my agenda",
+            "my availability",
+            "my appointment",
+            "my appointments",
+            "my meeting",
+            "my meetings",
+            "my event",
+            "my events",
             "what do i have",
-            "what's on"
+            "what s on",
+            "do i have",
+            "am i free",
+            "am i busy",
+            "am i available",
+            "any upcoming appointment",
+            "any upcoming meeting",
+            "any upcoming event"
         ]
-        guard calendarMarkers.contains(where: { normalized.contains($0) }) else {
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let calendarNouns = Set([
+            "calendar", "schedule", "agenda", "availability", "appointment",
+            "appointments", "meeting", "meetings", "event", "events"
+        ])
+        let readCues = Set(["show", "list", "check", "see", "have", "any", "upcoming"])
+        let statusCues = Set(["available", "availability", "busy", "free", "conflict", "conflicts"])
+        let temporalCues = Set(["today", "tomorrow", "week", "upcoming"])
+        let hasStrongPhrase = strongCalendarPhrases.contains(where: { normalized.contains($0) })
+        let hasReadShapedNounRequest = !tokens.intersection(calendarNouns).isEmpty
+            && !tokens.intersection(readCues).isEmpty
+        let hasAvailabilityRequest = !tokens.intersection(statusCues).isEmpty
+            && (tokens.contains("i") || tokens.contains("my"))
+        let hasTerseTemporalRequest = tokens.count <= 4
+            && !tokens.intersection(Set(["calendar", "agenda"])).isEmpty
+            && !tokens.intersection(temporalCues).isEmpty
+        guard hasStrongPhrase
+            || hasReadShapedNounRequest
+            || hasAvailabilityRequest
+            || hasTerseTemporalRequest else {
             return nil
         }
 
@@ -2632,6 +3304,15 @@ actor ToolCallingService {
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = normalizeForHeuristicMatching(compact)
+        let reminderPrefixes = [
+            "remind me to ",
+            "set a reminder to ",
+            "add a reminder to ",
+            "create a reminder to "
+        ]
+        guard !reminderPrefixes.contains(where: { normalized.contains($0) }) else {
+            return nil
+        }
         guard messageLooksCalendarCreateAdjacent(normalized) else { return nil }
 
         guard let weekdayWithParticipantRegex = try? NSRegularExpression(
@@ -2814,6 +3495,8 @@ actor ToolCallingService {
 
         var arguments: [String: String] = [:]
         let duePatterns = [
+            #"(?i)\s+((?:today|tomorrow)\s+(?:at\s+)?\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)?)$"#,
+            #"(?i)\s+((?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:at\s+)?\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)?)?)$"#,
             #"(?i)\s+(today|tomorrow|tonight)$"#,
             #"(?i)\s+(in\s+\d+\s+(?:minutes?|hours?|days?))$"#,
             #"(?i)\s+(\d{4}-\d{2}-\d{2}(?:t\d{2}:\d{2}(?::\d{2})?(?:z|[+-]\d{2}:\d{2})?)?)$"#
@@ -2875,20 +3558,41 @@ actor ToolCallingService {
         let normalized = normalizeForHeuristicMatching(userMessage)
         guard !normalized.isEmpty else { return nil }
 
-        let markers = [
-            "reminder",
-            "reminders",
-            "todo",
-            "to do",
-            "to-do",
-            "todos",
-            "task",
-            "tasks",
-            "overdue",
+        let strongReminderPhrases = [
+            "my reminder",
+            "my reminders",
+            "my todo",
+            "my todos",
+            "my task",
+            "my tasks",
             "what do i have to do",
-            "what i need to do"
+            "what i need to do",
+            "what reminders i have",
+            "what reminders do i have",
+            "what tasks i have",
+            "what tasks do i have",
+            "show reminders",
+            "show tasks",
+            "list reminders",
+            "list tasks",
+            "overdue reminders",
+            "overdue tasks",
+            "any upcoming reminder",
+            "any upcoming reminders",
+            "any upcoming task",
+            "any upcoming tasks"
         ]
-        guard markers.contains(where: { normalized.contains($0) }) else {
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        let reminderNouns = Set(["reminder", "reminders", "todo", "todos", "task", "tasks"])
+        let readCues = Set(["show", "list", "check", "have", "any", "upcoming", "overdue"])
+        let temporalCues = Set(["today", "tomorrow", "week", "upcoming", "overdue"])
+        let hasStrongPhrase = strongReminderPhrases.contains(where: { normalized.contains($0) })
+        let hasReadShapedRequest = !tokens.intersection(reminderNouns).isEmpty
+            && !tokens.intersection(readCues).isEmpty
+        let hasTerseTemporalRequest = tokens.count <= 4
+            && !tokens.intersection(reminderNouns).isEmpty
+            && !tokens.intersection(temporalCues).isEmpty
+        guard hasStrongPhrase || hasReadShapedRequest || hasTerseTemporalRequest else {
             return nil
         }
 
@@ -2920,8 +3624,8 @@ actor ToolCallingService {
         let compact = sanitized.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
 
         let explicitSearchPatterns = [
-            #"(?i)\b(?:please\s+)?(?:web search|search the web|search online|search the internet|search internet|google|find online|look up online|look it up online)\s+(?:for\s+)?(.+?)(?:[.!?\n]|$)"#,
-            #"(?i)\bcan you (?:search the web|search online|find online)\s+(?:for\s+)?(.+?)(?:[.!?\n]|$)"#
+            #"(?i)\b(?:please\s+)?(?:web search|search the web|search online|search the internet|search internet|google|find online|look up online|look it up online)\s+(?:for\s+)?(.+?)(?:\n|$)"#,
+            #"(?i)\bcan you (?:search the web|search online|find online)\s+(?:for\s+)?(.+?)(?:\n|$)"#
         ]
         for pattern in explicitSearchPatterns {
             if let explicitQuery = firstRegexCapture(pattern: pattern, in: compact) {
@@ -2932,37 +3636,9 @@ actor ToolCallingService {
             }
         }
 
-        if let weatherLocation = firstRegexCapture(
-            pattern: #"(?i)\bweather(?:\s+for|\s+in)?\s+(.+?)(?:\s+for\s+(today|tomorrow)|\s+(today|tomorrow)|\?|$)"#,
-            in: compact
-        ) {
-            let timeframe = firstRegexCapture(
-                pattern: #"(?i)\b(today|tomorrow)\b"#,
-                in: compact
-            )
-            let query = ["weather", sanitizeRecoveredQuery(weatherLocation), timeframe].compactMap { value in
-                guard let value, !value.isEmpty else { return nil }
-                return value
-            }.joined(separator: " ")
-            let finalQuery = sanitizeRecoveredQuery(query)
-            if !finalQuery.isEmpty {
-                return finalQuery
-            }
-        }
-
-        if compact.range(of: #"(?i)\b(latest|breaking)\s+news\b"#, options: .regularExpression) != nil {
-            if let location = firstRegexCapture(
-                pattern: #"(?i)\bnews(?:\s+in|\s+for|\s+about)?\s+(.+?)(?:\?|$)"#,
-                in: compact
-            ) {
-                let query = sanitizeRecoveredQuery("latest news \(location)")
-                if !query.isEmpty {
-                    return query
-                }
-            }
-            return "latest news"
-        }
-
+        // Natural-language search engines handle complete questions well.
+        // Preserve every entity, location, date, and qualifier instead of
+        // performing a lossy topic-specific rewrite.
         return compact
     }
 
@@ -3481,6 +4157,15 @@ private extension ToolCallingService {
             return "none"
         case .call(let request):
             return "call(tool=\(request.toolName), args=\(formatted(arguments: request.arguments)))"
+        }
+    }
+
+    static func describe(_ outcome: ToolPlannerOutcome) -> String {
+        switch outcome {
+        case .decision(let decision):
+            return describe(decision)
+        case .unusable:
+            return "unusable"
         }
     }
 

@@ -365,6 +365,9 @@ nonisolated enum Constants {
         static let liveVoiceConciseInstruction = """
         Be concise.
         """
+        static let toolActionGroundingInstruction = """
+        Never claim that you searched, read, created, changed, scheduled, started, sent, or saved anything unless a tool result in the current request confirms that action succeeded. If no confirming tool result is present, do not imply success; ask for any missing detail or explain that the action was not performed. Treat normalized dates and times in a successful tool result as authoritative and do not ask the user to clarify information that result already resolved.
+        """
         static let finalAnswerOnlyInstruction = """
         Provide only the final answer to the user's last request. Do not include reasoning, planning, hidden thoughts, or meta commentary.
         """
@@ -470,21 +473,23 @@ nonisolated enum Constants {
         - The tools listed under "Available tools" below are the only valid tool targets.
         - If NO internet-accessing tools (web_search, read_url) appear in the Available tools list, default to {"tool":"none"} for questions about external facts, recent events, website content, or live data — these require internet access which is currently unavailable.
         - If internet-accessing tools DO appear, strongly prefer them over guessing for any factual question where the model's training data alone might not be accurate or current. The model can easily hallucinate facts it was never trained on; grounded web or URL results prevent that. Err on the side of searching whenever the user asks about specific facts, figures, named entities, recent events, real-world data, or anything beyond common knowledge.
+        - Use Recent conversation to resolve short follow-ups such as "Any warning?", "What about tomorrow?", "And their email?", or an answer such as "5 am" after the assistant asked for a missing tool argument. Combine the latest answer with the pending request instead of treating it as unrelated chat.
         - Only call non-internet tools when the message clearly requires: the contents of an attached image/document, the user's local calendar, reminders, contacts, a timer, or the device's current date and time.
         - Do NOT call tools for greetings, thanks, casual chat, math, opinions, coding help, or translations the model can handle directly.
+        - Do NOT invent missing required arguments. Return {"tool":"none"} when the user must clarify.
 
         TOOL GUIDANCE:
-        - read_url: latest message includes one specific public URL and the user wants that page read or summarized.
+        - read_url: the latest message includes exactly one specific public URL and the user wants that page read, checked, explained, or summarized. Do not use it merely because a URL appears. If multiple URLs appear, return none so the assistant can ask which one to read.
         - ocr_image_text: the user wants visible text extracted, translated, or summarized from attached images. Skip when a vision-capable model can already see the picture and the user is just asking what is in it.
         - document_synthesize: attached documents are needed for summaries, comparisons, extraction, key points, action items, or document Q&A.
         - calendar_brief: the user asks about their schedule, agenda, availability, conflicts, events, appointments, or meetings. Range must be one of: today, tomorrow, this_week, next_7_days.
         - calendar_create: the user explicitly asks to create/schedule/add one calendar event, and title, start datetime, and end time or duration are explicit. Args: title (required), start (required: ISO datetime, yyyy-MM-dd HH:mm, today HH:mm, or tomorrow HH:mm), end_or_duration (required: explicit end datetime or duration), location (optional), notes (optional), alert_minutes_before (optional integer). Skip if any required field is vague or missing.
         - reminders_brief: the user asks about todos, tasks, or reminders (not calendar events). Range must be one of: all, today, tomorrow, this_week, next_7_days, overdue. Use all when the user does not specify a date or range.
-        - reminders_create: the user explicitly asks to create or add a reminder or todo (e.g. "remind me to …"). Args: title (required), due (optional: today, tomorrow, tonight, ISO date/datetime, or "in N hours/minutes/days"), notes (optional).
+        - reminders_create: the user explicitly asks to create or add a reminder or todo (e.g. "remind me to …" or "remind me on Tuesday to …"). Args: title (required), due (optional: today, tomorrow, tonight, a named weekday with an explicit time, ISO date/datetime, or "in N hours/minutes/days"), notes (optional). If an earlier turn supplied the title/day and the latest reply supplies the missing time, combine them and call this tool.
         - timer_create: the user explicitly asks to set/start/create one timer and gives a concrete duration. Args: duration (required: e.g. "10 minutes", "1 hour 30 minutes", "05:00", seconds), title (optional). Skip alarms, reminders, and calendar events.
         - contacts_lookup: the user asks to search local Contacts, asks whether someone is in their contacts/phone/address book, or asks for a contact's phone number or email address. Args: query (required name). Return none if the request needs postal addresses, birthdays, notes, photos, or full contact cards.
         - current_datetime: when the user asks for the current time, date, day of week, or timezone on this device. Skip otherwise — the model knows historical dates and eras from training.
-        - web_search: for any factual question where the model's training data may be outdated, incomplete, or unreliable. Rewrite the user's question into a short, specific, entity-focused search query. Use web_search generously — internet results prevent hallucination and provide grounded, up-to-date answers.
+        - web_search: for any factual question where the model's training data may be outdated, incomplete, or unreliable. Produce a concise search query, but NEVER drop named entities, locations, dates, timeframes, negations, or qualifiers from the user's request or its conversation context. Use web_search generously — internet results prevent hallucination and provide grounded, up-to-date answers.
 
         At most one tool call is allowed per turn.
         """

@@ -14,6 +14,46 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertEqual(decision, .none)
     }
 
+    func testPlannerOutcomeDistinguishesValidNoneFromUnusableOutput() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let validNone = service.parsePlannerOutcome(
+            from: #"{"tool":"none"}"#,
+            tools: [webSearchTool],
+            context: emptyContext
+        )
+        let unusable = service.parsePlannerOutcome(
+            from: "I am not sure which tool to use.",
+            tools: [webSearchTool],
+            context: emptyContext
+        )
+
+        XCTAssertEqual(validNone, .decision(.none))
+        XCTAssertEqual(unusable, .unusable)
+    }
+
+    func testPlannerAcceptsNormalizedToolNameAndArgumentsKey() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let outcome = service.parsePlannerOutcome(
+            from: #"{"tool":"WEB SEARCH","arguments":{"query":"Barcelona weather warnings"}}"#,
+            tools: [webSearchTool],
+            context: emptyContext
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .decision(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "Barcelona weather warnings"]
+                    )
+                )
+            )
+        )
+    }
+
     func testParsesToolDecisionFromFencedJSONBlock() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
@@ -103,6 +143,34 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
+    func testProseRecoveryHonorsExplicitToolNegation() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Read https://example.com/article",
+            attachedImages: [],
+            detectedPublicURLs: [URL(string: "https://example.com/article")!]
+        )
+
+        let outcome = service.parsePlannerOutcome(
+            from: "Do not use web_search. I should use the read_url tool.",
+            userMessage: context.latestUserMessage,
+            tools: [webSearchTool, readURLTool],
+            context: context
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .decision(
+                .call(
+                    ToolCallRequest(
+                        toolName: "read_url",
+                        arguments: ["url": "https://example.com/article"]
+                    )
+                )
+            )
+        )
+    }
+
     func testParsesReadURLDecisionUsingDetectedURLContext() {
         let service = ToolCallingService(webSearchService: WebSearchService())
         let context = ToolInputContext(
@@ -167,7 +235,7 @@ final class ToolPlannerParsingTests: XCTestCase {
             .call(
                 ToolCallRequest(
                     toolName: "web_search",
-                    arguments: ["query": "latest news Spain"]
+                    arguments: ["query": "What are the latest News in Spain"]
                 )
             )
         )
@@ -186,7 +254,54 @@ final class ToolPlannerParsingTests: XCTestCase {
             .call(
                 ToolCallRequest(
                     toolName: "web_search",
-                    arguments: ["query": "weather Barcelona today"]
+                    arguments: ["query": "What is the weather in Barcelona for today"]
+                )
+            )
+        )
+    }
+
+    func testHeuristicFallbackPreservesLocationAfterWeatherTimeframe() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.heuristicFallbackDecision(
+            userMessage: "What is the weather forecast for tomorrow in Barcelona?",
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .call(
+                ToolCallRequest(
+                    toolName: "web_search",
+                    arguments: ["query": "What is the weather forecast for tomorrow in Barcelona"]
+                )
+            )
+        )
+    }
+
+    func testPreflightPreservesLocationAfterWeatherTimeframe() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let message = "What is the weather forecast for tomorrow in Barcelona?"
+        let context = ToolInputContext(
+            latestUserMessage: message,
+            attachedImages: [],
+            detectedPublicURLs: []
+        )
+
+        let decision = service.preflightDecision(
+            userMessage: message,
+            context: context,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "What is the weather forecast for tomorrow in Barcelona"]
+                    )
                 )
             )
         )
@@ -201,6 +316,30 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
 
         XCTAssertNil(decision)
+    }
+
+    func testPreflightSkipsPlannerForSimpleMath() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What's 2+2?",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
+    }
+
+    func testPreflightSkipsPlannerForCreativeWritingRequest() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Can you write a poem about summer?",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
     }
 
     func testHeuristicFallbackDoesNotTriggerForPersonalTodayMessage() {
@@ -253,7 +392,7 @@ final class ToolPlannerParsingTests: XCTestCase {
                 .call(
                     ToolCallRequest(
                         toolName: "web_search",
-                        arguments: ["query": "weather Barcelona today"]
+                        arguments: ["query": "What is the weather in Barcelona for today"]
                     )
                 )
             )
@@ -282,6 +421,216 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
+    func testExplicitWebSearchTakesPrecedenceOverLocalCalendarKeywords() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Search the web for upcoming events in Barcelona",
+            context: emptyContext,
+            tools: [calendarTool, webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "upcoming events in Barcelona"]
+                    )
+                )
+            )
+        )
+    }
+
+    func testPreflightReadsSingleURLOnlyForPageReadingIntent() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let url = URL(string: "https://example.com/article")!
+        let context = ToolInputContext(
+            latestUserMessage: "Please summarize this article https://example.com/article",
+            attachedImages: [],
+            detectedPublicURLs: [url]
+        )
+
+        let decision = service.preflightDecision(
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [readURLTool, webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "read_url",
+                        arguments: ["url": url.absoluteString]
+                    )
+                )
+            )
+        )
+    }
+
+    func testPreflightDoesNotReadURLForNonReadingIntent() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Remember this link https://example.com/article",
+            attachedImages: [],
+            detectedPublicURLs: [URL(string: "https://example.com/article")!]
+        )
+
+        let decision = service.preflightDecision(
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [readURLTool]
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
+    func testPreflightUsesWebSearchWhenURLIsSearchSubject() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Search the web for discussions about https://example.com/article",
+            attachedImages: [],
+            detectedPublicURLs: [URL(string: "https://example.com/article")!]
+        )
+
+        let decision = service.preflightDecision(
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [readURLTool, webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "discussions about https://example.com/article"]
+                    )
+                )
+            )
+        )
+    }
+
+    func testPreflightRejectsMultipleURLsForClarification() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let context = ToolInputContext(
+            latestUserMessage: "Compare https://example.com and https://openai.com",
+            attachedImages: [],
+            detectedPublicURLs: [
+                URL(string: "https://example.com")!,
+                URL(string: "https://openai.com")!
+            ]
+        )
+
+        let decision = service.preflightDecision(
+            userMessage: context.latestUserMessage,
+            context: context,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
+    }
+
+    func testConceptualMarketQuestionUsesPlannerInsteadOfForcedSearch() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Why do exchange rates fluctuate?",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
+    func testTerseWeatherLookupForcesSearchWithoutLosingLocation() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Weather Barcelona",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "Weather Barcelona"]
+                    )
+                )
+            )
+        )
+    }
+
+    func testConceptualWeatherQuestionUsesPlannerInsteadOfForcedSearch() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "How do weather patterns work?",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
+    func testWeatherWarningWithTimeframeForcesSearch() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Any yellow warning tomorrow in Barcelona?",
+            context: emptyContext,
+            tools: [webSearchTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "Any yellow warning tomorrow in Barcelona"]
+                    )
+                )
+            )
+        )
+    }
+
+    func testShortWebFollowUpUsesPlannerEvenWithoutQuestionMark() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "What is the weather tomorrow in Barcelona?"),
+            ChatMessage(
+                role: .assistant,
+                content: "It will be hot.",
+                toolTrace: ToolCallTrace(
+                    toolName: "web_search",
+                    displayInput: "What is the weather tomorrow in Barcelona",
+                    status: .success,
+                    durationSeconds: 0.2,
+                    success: true,
+                    sourceCount: 2
+                )
+            )
+        ]
+
+        let decision = service.preflightDecision(
+            userMessage: "Yellow warning",
+            context: emptyContext,
+            tools: [webSearchTool],
+            history: history
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
     func testResolvedDecisionPrefersReadURLOverPlannerWebSearchWhenSingleURLIsPresent() {
         let service = ToolCallingService(webSearchService: WebSearchService())
         let context = ToolInputContext(
@@ -291,16 +640,17 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
 
         let decision = service.resolvedDecision(
-            plannedDecision: .call(
-                ToolCallRequest(
-                    toolName: "web_search",
-                    arguments: ["query": "example article summary"]
+            plannerOutcome: .decision(
+                .call(
+                    ToolCallRequest(
+                        toolName: "web_search",
+                        arguments: ["query": "example article summary"]
+                    )
                 )
             ),
             userMessage: context.latestUserMessage,
             context: context,
-            tools: [readURLTool, webSearchTool],
-            preferThinkingFallback: false
+            tools: [readURLTool, webSearchTool]
         )
 
         XCTAssertEqual(
@@ -314,7 +664,7 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
-    func testResolvedDecisionForcesOCRForTextFocusedImageRequestWhenPlannerReturnsNone() {
+    func testResolvedDecisionRecoversOCRForTextFocusedImageRequestWhenPlannerIsUnusable() {
         let service = ToolCallingService(webSearchService: WebSearchService())
         let context = ToolInputContext(
             latestUserMessage: "What does this screenshot say?",
@@ -323,11 +673,10 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
 
         let decision = service.resolvedDecision(
-            plannedDecision: .none,
+            plannerOutcome: .unusable,
             userMessage: context.latestUserMessage,
             context: context,
-            tools: [ocrTool],
-            preferThinkingFallback: false
+            tools: [ocrTool]
         )
 
         XCTAssertEqual(
@@ -352,16 +701,17 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
 
         let decision = service.resolvedDecision(
-            plannedDecision: .call(
-                ToolCallRequest(
-                    toolName: "calendar_brief",
-                    arguments: ["range": "today"]
+            plannerOutcome: .decision(
+                .call(
+                    ToolCallRequest(
+                        toolName: "calendar_brief",
+                        arguments: ["range": "today"]
+                    )
                 )
             ),
             userMessage: context.latestUserMessage,
             context: context,
-            tools: [documentTool, calendarTool],
-            preferThinkingFallback: false
+            tools: [documentTool, calendarTool]
         )
 
         XCTAssertEqual(
@@ -370,6 +720,36 @@ final class ToolPlannerParsingTests: XCTestCase {
                 ToolCallRequest(
                     toolName: "document_synthesize",
                     arguments: ["query": "Please summarize this"]
+                )
+            )
+        )
+    }
+
+    func testNewlyAttachedDocumentDoesNotOverrideExplicitTimerRequest() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let message = "Set a timer for 10 minutes"
+        let context = ToolInputContext(
+            latestUserMessage: message,
+            attachedImages: [],
+            attachedDocuments: [sampleDocument],
+            hasNewlyAttachedDocuments: true,
+            detectedPublicURLs: []
+        )
+
+        let decision = service.preflightDecision(
+            userMessage: message,
+            context: context,
+            tools: [documentTool, timerCreateTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(
+                .call(
+                    ToolCallRequest(
+                        toolName: "timer_create",
+                        arguments: ["duration": "600"]
+                    )
                 )
             )
         )
@@ -386,11 +766,10 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
 
         let decision = service.resolvedDecision(
-            plannedDecision: .none,
+            plannerOutcome: .unusable,
             userMessage: context.latestUserMessage,
             context: context,
-            tools: [readURLTool, documentTool],
-            preferThinkingFallback: false
+            tools: [readURLTool, documentTool]
         )
 
         XCTAssertEqual(
@@ -414,25 +793,23 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
 
         let decision = service.resolvedDecision(
-            plannedDecision: .none,
+            plannerOutcome: .decision(.none),
             userMessage: context.latestUserMessage,
             context: context,
-            tools: [documentTool],
-            preferThinkingFallback: false
+            tools: [documentTool]
         )
 
         XCTAssertEqual(decision, .none)
     }
 
-    func testResolvedDecisionRecoversCalendarBriefForScheduleRequest() {
+    func testResolvedDecisionRecoversCalendarBriefWhenPlannerIsUnusable() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
         let decision = service.resolvedDecision(
-            plannedDecision: .none,
+            plannerOutcome: .unusable,
             userMessage: "What is on my calendar tomorrow?",
             context: emptyContext,
-            tools: [calendarTool],
-            preferThinkingFallback: false
+            tools: [calendarTool]
         )
 
         XCTAssertEqual(
@@ -446,15 +823,61 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
-    func testThinkingFallbackDoesNotTriggerWithoutEligibleWebSearchTool() {
+    func testResolvedDecisionRespectsValidNoneInsteadOfApplyingCalendarFallback() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
         let decision = service.resolvedDecision(
-            plannedDecision: .none,
+            plannerOutcome: .decision(.none),
+            userMessage: "What is on my calendar tomorrow?",
+            context: emptyContext,
+            tools: [calendarTool]
+        )
+
+        XCTAssertEqual(decision, .none)
+    }
+
+    func testResolvedDecisionRecoversContextualWebFollowUpWhenPlannerIsUnusable() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "What is the weather tomorrow in Barcelona?"),
+            ChatMessage(
+                role: .assistant,
+                content: "It will be hot.",
+                toolTrace: ToolCallTrace(
+                    toolName: "web_search",
+                    displayInput: "What is the weather tomorrow in Barcelona",
+                    status: .success,
+                    durationSeconds: 0.2,
+                    success: true,
+                    sourceCount: 2
+                )
+            )
+        ]
+
+        let decision = service.resolvedDecision(
+            plannerOutcome: .unusable,
+            userMessage: "Yellow warning",
+            context: emptyContext,
+            tools: [webSearchTool],
+            history: history
+        )
+
+        guard case .call(let request) = decision else {
+            return XCTFail("Expected contextual web search fallback")
+        }
+        XCTAssertEqual(request.toolName, "web_search")
+        XCTAssertTrue(request.arguments["query"]?.contains("Barcelona") == true)
+        XCTAssertTrue(request.arguments["query"]?.contains("Yellow warning") == true)
+    }
+
+    func testUnusablePlannerDoesNotTriggerWebFallbackWithoutEligibleTool() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.resolvedDecision(
+            plannerOutcome: .unusable,
             userMessage: "What are the latest news in Spain?",
             context: emptyContext,
-            tools: [ocrTool],
-            preferThinkingFallback: true
+            tools: [ocrTool]
         )
 
         XCTAssertEqual(decision, .none)
@@ -486,7 +909,7 @@ final class ToolPlannerParsingTests: XCTestCase {
 
     func testQueryLengthIsClamped() {
         let service = ToolCallingService(webSearchService: WebSearchService())
-        let oversizedQuery = String(repeating: "q", count: Constants.ToolCalling.maxQueryLength + 25)
+        let oversizedQuery = "Barcelona weather " + String(repeating: "detail ", count: 30) + "yellow warning tomorrow"
 
         let decision = service.parsePlannerDecision(
             from: #"{"tool":"web_search","args":{"query":"\#(oversizedQuery)"}}"#,
@@ -499,6 +922,8 @@ final class ToolPlannerParsingTests: XCTestCase {
         }
 
         XCTAssertEqual(request.arguments["query"]?.count, Constants.ToolCalling.maxQueryLength)
+        XCTAssertTrue(request.arguments["query"]?.hasPrefix("Barcelona weather") == true)
+        XCTAssertTrue(request.arguments["query"]?.hasSuffix("yellow warning tomorrow") == true)
     }
 
     func testParsesCurrentDateTimeDecisionWithEmptyArgs() {
@@ -550,15 +975,14 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertTrue(request.arguments["due"]!.contains("T"))
     }
 
-    func testResolvedDecisionRecoversRemindersBriefForOverdueRequest() {
+    func testResolvedDecisionRecoversRemindersBriefWhenPlannerIsUnusable() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
         let decision = service.resolvedDecision(
-            plannedDecision: .none,
+            plannerOutcome: .unusable,
             userMessage: "Show me my overdue reminders",
             context: emptyContext,
-            tools: [remindersBriefTool],
-            preferThinkingFallback: false
+            tools: [remindersBriefTool]
         )
 
         XCTAssertEqual(
@@ -705,6 +1129,54 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
+    func testCalendarHeuristicDoesNotHijackProgrammingEventQuestion() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What is an event loop?",
+            context: emptyContext,
+            tools: [calendarTool]
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
+    }
+
+    func testCalendarHeuristicDoesNotHijackConceptualCalendarQuestion() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What is a calendar?",
+            context: emptyContext,
+            tools: [calendarTool]
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
+    }
+
+    func testCalendarCreateAdjacentButIncompleteRequestUsesPlanner() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "How do I schedule a meeting?",
+            context: emptyContext,
+            tools: [calendarTool, calendarCreateTool]
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
+    func testReminderHeuristicDoesNotHijackGenericTaskQuestion() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Explain task decomposition",
+            context: emptyContext,
+            tools: [remindersBriefTool]
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
+    }
+
     func testPreflightRangeFollowUpDoesNotReuseUnrelatedTool() {
         let service = ToolCallingService(webSearchService: WebSearchService())
         let history = [
@@ -737,11 +1209,10 @@ final class ToolPlannerParsingTests: XCTestCase {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
         let decision = service.resolvedDecision(
-            plannedDecision: .none,
+            plannerOutcome: .decision(.none),
             userMessage: "Please remind me of our trip to Paris",
             context: emptyContext,
-            tools: [remindersCreateTool],
-            preferThinkingFallback: false
+            tools: [remindersCreateTool]
         )
 
         XCTAssertEqual(decision, .none)
@@ -766,6 +1237,23 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertTrue(request.arguments["due"]?.contains("T") == true)
     }
 
+    func testReminderCreationTakesPrecedenceOverCalendarKeywordsInTitle() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Remind me to prepare for the meeting tomorrow",
+            context: emptyContext,
+            tools: [calendarTool, calendarCreateTool, remindersCreateTool]
+        )
+
+        guard case .skip(.call(let request)) = decision else {
+            return XCTFail("Expected reminder creation")
+        }
+        XCTAssertEqual(request.toolName, "reminders_create")
+        XCTAssertEqual(request.arguments["title"], "prepare for the meeting")
+        XCTAssertNotNil(request.arguments["due"])
+    }
+
     func testPreflightReminderCreateExtractsRelativeDueDateFromTail() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
@@ -783,6 +1271,144 @@ final class ToolPlannerParsingTests: XCTestCase {
         XCTAssertEqual(request.arguments["title"], "check the oven")
         XCTAssertNotNil(request.arguments["due"])
         XCTAssertTrue(request.arguments["due"]?.contains("T") == true)
+    }
+
+    func testIncompleteReminderRequestUsesPlanner() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Now remind me for next Tuesday to wake up",
+            context: emptyContext,
+            tools: [remindersCreateTool]
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
+    func testReminderWithNamedDayButNoTimeUsesPlanner() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Remind me to wake up next Tuesday",
+            context: emptyContext,
+            tools: [remindersCreateTool]
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
+    func testReminderWithNamedDayAndTimeCreatesReminder() throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Remind me to wake up next Tuesday at 5 am",
+            context: emptyContext,
+            tools: [remindersCreateTool]
+        )
+
+        guard case .skip(.call(let request)) = decision,
+              let due = request.arguments["due"],
+              let dueDate = ISO8601DateFormatter().date(from: due) else {
+            return XCTFail("Expected preflight to create a dated reminder")
+        }
+
+        let components = Calendar.current.dateComponents([.weekday, .hour, .minute], from: dueDate)
+        XCTAssertEqual(request.arguments["title"], "wake up")
+        XCTAssertEqual(components.weekday, 3)
+        XCTAssertEqual(components.hour, 5)
+        XCTAssertEqual(components.minute, 0)
+    }
+
+    func testReminderClarificationAnswerUsesPlanner() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "Now remind me for next Tuesday to wake up"),
+            ChatMessage(
+                role: .assistant,
+                content: "I can set a reminder for you. What time next Tuesday should I remind you?"
+            )
+        ]
+
+        let decision = service.preflightDecision(
+            userMessage: "5 am",
+            context: emptyContext,
+            tools: [remindersCreateTool],
+            history: history
+        )
+
+        XCTAssertEqual(decision, .deliberate)
+    }
+
+    func testReminderClarificationAnswerRecoversWhenPlannerReturnsNone() throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "Now remind me for next Tuesday to wake up"),
+            ChatMessage(
+                role: .assistant,
+                content: "I can set a reminder for you. Could you tell me what time next Tuesday?"
+            )
+        ]
+
+        let decision = service.resolvedDecision(
+            plannerOutcome: .decision(.none),
+            userMessage: "5 am",
+            context: emptyContext,
+            tools: [remindersCreateTool],
+            history: history
+        )
+
+        guard case .call(let request) = decision,
+              let due = request.arguments["due"],
+              let dueDate = ISO8601DateFormatter().date(from: due) else {
+            return XCTFail("Expected the pending reminder to be completed")
+        }
+
+        let components = Calendar.current.dateComponents([.weekday, .hour, .minute], from: dueDate)
+        XCTAssertEqual(request.toolName, "reminders_create")
+        XCTAssertEqual(request.arguments["title"], "wake up")
+        XCTAssertEqual(components.weekday, 3)
+        XCTAssertEqual(components.hour, 5)
+        XCTAssertEqual(components.minute, 0)
+        XCTAssertGreaterThan(dueDate, Date())
+    }
+
+    func testPlannerReminderDecisionAcceptsNamedWeekdayWithTime() throws {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.parsePlannerDecision(
+            from: #"{"tool":"reminders_create","args":{"title":"wake up","due":"next Tuesday at 5 am"}}"#,
+            tools: [remindersCreateTool],
+            context: emptyContext
+        )
+
+        guard case .call(let request) = decision,
+              let due = request.arguments["due"],
+              let dueDate = ISO8601DateFormatter().date(from: due) else {
+            return XCTFail("Expected a reminders_create call")
+        }
+
+        let components = Calendar.current.dateComponents([.weekday, .hour, .minute], from: dueDate)
+        XCTAssertEqual(request.arguments["title"], "wake up")
+        XCTAssertEqual(components.weekday, 3)
+        XCTAssertEqual(components.hour, 5)
+        XCTAssertEqual(components.minute, 0)
+    }
+
+    func testUnrelatedConversationalAnswerDoesNotUsePlanner() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let history = [
+            ChatMessage(role: .user, content: "What is your favorite color?"),
+            ChatMessage(role: .assistant, content: "Probably blue. What about yours?")
+        ]
+
+        let decision = service.preflightDecision(
+            userMessage: "Green",
+            context: emptyContext,
+            tools: [remindersCreateTool],
+            history: history
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
     }
 
     func testPreflightTimezoneRequestUsesCurrentDateTime() {

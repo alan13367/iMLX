@@ -313,7 +313,7 @@ final class ChatViewModel {
 
                 case .deliberate:
                     toolActivityStatus = .planning
-                    let plannedDecision = try await appState.toolCallingService.plan(
+                    let plannerOutcome = try await appState.toolCallingService.plan(
                         userMessage: text,
                         history: history,
                         tools: tools,
@@ -321,11 +321,11 @@ final class ChatViewModel {
                         using: inferenceService
                     )
                     decision = appState.toolCallingService.resolvedDecision(
-                        plannedDecision: plannedDecision,
+                        plannerOutcome: plannerOutcome,
                         userMessage: text,
                         context: toolContext,
                         tools: tools,
-                        preferThinkingFallback: loadedModel?.supportsThinking == true
+                        history: history
                     )
                 }
 
@@ -1510,6 +1510,7 @@ final class ChatViewModel {
         if !trimmedToolContext.isEmpty {
             parts.append(trimmedToolContext)
         }
+        parts.append(Constants.Generation.toolActionGroundingInstruction)
         if thinkingEnabled {
             parts.append(Constants.Generation.conciseThinkingInstruction)
         }
@@ -1533,6 +1534,7 @@ final class ChatViewModel {
         if !trimmedToolContext.isEmpty {
             parts.append(trimmedToolContext)
         }
+        parts.append(Constants.Generation.toolActionGroundingInstruction)
         if replyMode == .liveVoice {
             parts.append(Constants.Generation.liveVoiceConciseInstruction)
         }

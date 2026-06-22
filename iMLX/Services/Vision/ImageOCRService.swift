@@ -78,15 +78,10 @@ actor ImageOCRService {
     }
 
     private func compactExcerpt(from text: String) -> String {
-        let normalized = normalizeWhitespace(text)
-        let maxLength = 240
-        guard normalized.count > maxLength else { return normalized }
-        return String(normalized.prefix(maxLength)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+        GroundingText.excerpt(from: text, maximumCharacters: 240, suffix: "…")
     }
 
     private func normalizeWhitespace(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        GroundingText.normalizeWhitespace(text)
     }
 }

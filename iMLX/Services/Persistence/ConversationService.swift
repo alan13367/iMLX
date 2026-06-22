@@ -1,12 +1,25 @@
 import Foundation
 
 nonisolated final class ConversationService: @unchecked Sendable {
-    private let fileManager = FileManager.default
+    private let fileManager: FileManager
     private let conversationsDirectory: URL
 
     init() {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
-        self.conversationsDirectory = appSupport.appendingPathComponent(Constants.Storage.conversationsDirectory)
+        let fileManager = FileManager.default
+        self.fileManager = fileManager
+        let appSupport = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.temporaryDirectory
+        self.conversationsDirectory = appSupport.appendingPathComponent(
+            Constants.Storage.conversationsDirectory
+        )
+        try? fileManager.createDirectory(at: conversationsDirectory, withIntermediateDirectories: true)
+    }
+
+    init(conversationsDirectory: URL, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        self.conversationsDirectory = conversationsDirectory
         try? fileManager.createDirectory(at: conversationsDirectory, withIntermediateDirectories: true)
     }
 

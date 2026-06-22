@@ -50,7 +50,10 @@ extension MemoryService {
         }
 
         guard containsLLMMemoryFactCue(searchable) else { return false }
-        guard !isRequestOnlyMemoryCue(searchable) || containsDeclarativeSelfFactCue(searchable) else { return false }
+        guard !isRequestOnlyMemoryCue(searchable)
+            || containsDeclarativeSelfFactCue(removingRequestOnlyMemoryCues(from: searchable)) else {
+            return false
+        }
 
         return true
     }
@@ -872,13 +875,22 @@ extension MemoryService {
 
     private nonisolated func isRequestOnlyMemoryCue(_ searchable: String) -> Bool {
         let padded = " \(searchable) "
-        let requestOnlyCues = [
+        return requestOnlyMemoryCues.contains { padded.contains($0) }
+    }
+
+    private nonisolated func removingRequestOnlyMemoryCues(from searchable: String) -> String {
+        requestOnlyMemoryCues.reduce(" \(searchable) ") { result, cue in
+            result.replacingOccurrences(of: cue, with: " ")
+        }
+    }
+
+    private nonisolated var requestOnlyMemoryCues: [String] {
+        [
             " i want to know ", " i want to find out ", " i want to understand ",
             " i want to ask ", " i want to check ", " i need help ", " i need you to ",
             " i would like to know ", " quiero saber ", " quiero entender ",
             " necesito ayuda ", " necesito que "
         ]
-        return requestOnlyCues.contains { padded.contains($0) }
     }
 
     private nonisolated func sourceContainsExplicitPreference(_ sourceText: String) -> Bool {

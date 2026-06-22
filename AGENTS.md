@@ -82,12 +82,14 @@ xcodebuild -downloadComponent MetalToolchain
 
 - App state: `AppState` owns shared services, model and conversation selection, assistant generation settings (system prompt and temperature), and persisted app-level state.
 - Chat orchestration: `ChatViewModel` owns transcript state, send/generation flow, streaming UI state, attachments, tool traces, and save/update behavior.
-- Inference: `InferenceService` is an actor; it loads models and streams tokens via `AsyncThrowingStream<String, Error>` into `@MainActor` UI state.
+- Service boundaries: app-facing services remain stable façades. Domain folders contain focused policy, transport, parsing, persistence, and support types; callers should not assemble those internals directly.
+- Inference: `InferenceService` is the serialized MLX façade. Loading, streaming, profiling, input policy, and support code live under `Services/Inference/`; pure helpers must not own MLX state.
 - Prompt/session policy: every generation rebuilds prompt/session state from visible conversation history instead of relying on hidden long-lived chat state.
 - UI: SwiftUI + `@Observable`. Root chat orchestration lives in `ChatView`; extracted chat UI lives under `iMLX/Views/Chat/Components`.
 - Models: curated model entries live in `Constants.swift`. Assistant defaults (system prompt, temperature) live in `AppState` and are edited in `AssistantSettingsView`.
-- Documents: `DocumentLibraryService` imports local PDF/CSV/text files, extracts/chunks/indexes them, and retrieves bounded local context.
-- Memory: `MemorySystem` is the app-facing facade over actor-backed GRDB persistence and retrieval. Persist only facts grounded in user text.
+- Model management: `ModelDownloadService` owns download-job state and background-session callbacks. Repository metadata, manifests, delegates, filesystem policy, and support types live under `Services/ModelManagement/`.
+- Documents and web: `DocumentLibraryService` and `WebSearchService` remain separate actor façades because their transport, language, embedding, and ranking policies differ. Exact shared text/scoring primitives live under `Services/Grounding/`.
+- Memory: `MemorySystem` is the app-facing façade over extraction, retrieval, and actor-backed GRDB persistence organized under `Services/Memory/`. Persist only facts grounded in user text.
 - Tool calling: `ToolCallingService` is the actor-backed façade used by chat orchestration. Tool definitions, routing policy, planner support, argument validation, temporal parsing, and executors live under `iMLX/Services/ToolCalling/`. The service plans with the currently loaded local model, executes at most one tool per turn, and fails closed to normal generation on invalid planner output.
 - Vision/OCR: vision-capable models must load through the VLM path. OCR is local via Vision and only reads images attached to the latest user turn in v1.
 - TTS: Kokoro checkpoint compatibility belongs in `Vendor/KokoroSwift` loader/factory code, not scattered through model math.
@@ -103,8 +105,19 @@ iMLX/
 │   └── Chat/
 │       ├── ChatView.swift Root chat shell, toolbar, sheets, and orchestration
 │       └── Components/    Transcript, composer, status, attachments, messages
-├── Services/             Inference, downloads, persistence, memory, documents, tools
-│   └── ToolCalling/      Tool catalog, routing, planner support, validation, parsers, executors
+├── Services/             Stable app-facing service façades grouped by domain
+│   ├── Device/           Device capability policy
+│   ├── Documents/        Document import, indexing, persistence, retrieval
+│   ├── Grounding/        Shared text normalization and scoring primitives
+│   ├── Inference/        Serialized MLX inference, profiling, input policy
+│   ├── Memory/           Façade, extraction, retrieval, GRDB persistence, support
+│   ├── ModelManagement/  Downloads, manifests, background URLSession support
+│   ├── Persistence/      Conversation persistence
+│   ├── Platform/         Calendar, reminders, contacts, AlarmKit
+│   ├── Speech/           Speech assets, recognition, playback
+│   ├── ToolCalling/      Tool catalog, routing, planner, validation, executors
+│   ├── Vision/           Local OCR
+│   └── Web/              Web search, URL reading, page extraction, ranking
 ├── Utilities/            Constants, localization, styling, helpers
 └── Assets.xcassets/
 iMLXAlarmWidget/          Widget Extension for AlarmKit timer Live Activity
@@ -120,18 +133,15 @@ High-value files and folders:
 - `iMLX/Models/MessageSource.swift`
 - `iMLX/Models/UserMemory.swift`
 - `iMLX/ViewModels/ChatViewModel.swift`
-- `iMLX/Services/InferenceService.swift`
+- `iMLX/Services/Inference/`
 - `iMLX/Services/ToolCallingService.swift`
 - `iMLX/Services/ToolCalling/`
-- `iMLX/Services/WebSearchService.swift`
-- `iMLX/Services/ImageOCRService.swift`
-- `iMLX/Services/DocumentLibraryService.swift`
-- `iMLX/Services/MemoryService*.swift`
-- `iMLX/Services/MemoryStore.swift`
-- `iMLX/Services/MemoryDatabase.swift`
-- `iMLX/Services/MemorySupport.swift`
-- `iMLX/Services/TimerService.swift`
-- `iMLX/Services/IMLXTimerMetadata.swift`
+- `iMLX/Services/ModelManagement/`
+- `iMLX/Services/Documents/`
+- `iMLX/Services/Web/`
+- `iMLX/Services/Grounding/`
+- `iMLX/Services/Memory/`
+- `iMLX/Services/Platform/`
 - `iMLX/Views/Chat/ChatView.swift`
 - `iMLX/Views/Chat/Components/`
 - `iMLX/Utilities/Constants.swift`
@@ -166,7 +176,7 @@ Important behavior:
 
 - Persisted memories must be grounded in user-provided text with source quotes. Never store facts from assistant answers, generated recommendations, prices, or unquoted inferred details.
 - Prefer structured `factRelation` + `factValue` for deduplication and contradiction handling.
-- `MemoryStore` is the GRDB actor/persistence boundary; `MemoryDatabase` owns schema/migrations; `MemoryService+Extraction/Retrieval/Shared` split extraction, retrieval, and shared normalization.
+- `MemoryStore` is the GRDB actor/persistence boundary; `MemoryDatabase` owns schema/migrations. Extraction, retrieval, persistence, and support code stay in their matching `Services/Memory/` subfolders.
 - Retrieval should remain synchronous and local: use FTS + typed fact lookup + bounded reranking, not a mutable whole-corpus in-memory index.
 - `UserMemory` is a UI projection. Rich detail lives in `MemoryDetail`, `MemoryEvidence`, `MemoryEvent`, and retrieval explanation types.
 

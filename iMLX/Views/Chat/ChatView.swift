@@ -586,7 +586,7 @@ private extension View {
     @ViewBuilder
     func chatNavigationToolbarBehavior() -> some View {
         if #available(iOS 27, *) {
-            toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
+            toolbarMinimizeBehavior(.never, for: .navigationBar)
         } else {
             self
         }

@@ -15,11 +15,10 @@ struct ChatMessageListSection: View {
     let onOpenSourceURL: (URL?) -> Void
 
     @State private var streamingScrollTask: Task<Void, Never>?
+    @State private var streamingScrollTaskToken: UUID?
     @State private var streamingAutoscrollEnabled = true
     @State private var canScrollToBottom = false
     @State private var scrollPinnedToBottom = true
-    @State private var finalizationStickToBottomTask: Task<Void, Never>?
-    @State private var shouldStickToBottomDuringFinalization = false
     @State private var isStreamingThinkingExpanded = true
     @State private var streamingMessageId = UUID()
     @State private var streamingMessageTimestamp = Date()
@@ -127,10 +126,9 @@ struct ChatMessageListSection: View {
                         return
                     }
                     guard newPhase == .tracking || newPhase == .interacting else { return }
+                    cancelScheduledAutoscroll()
                     guard isGenerating else { return }
                     guard streamingAutoscrollEnabled else { return }
-                    streamingScrollTask?.cancel()
-                    streamingScrollTask = nil
                     streamingAutoscrollEnabled = false
                 }
                 .task(id: conversationResetKey) {
@@ -157,11 +155,10 @@ struct ChatMessageListSection: View {
                     }
                     guard streamingAutoscrollEnabled else { return }
                     guard !messages.isEmpty else { return }
-                    stickToBottomDuringFinalization(using: proxy)
+                    scheduleAutoscroll(using: proxy, repeatAfterLayoutChange: true)
                 }
                 .onDisappear {
-                    streamingScrollTask?.cancel()
-                    finalizationStickToBottomTask?.cancel()
+                    cancelScheduledAutoscroll()
                 }
 
                 scrollToBottomOverlay(using: proxy)
@@ -257,10 +254,7 @@ struct ChatMessageListSection: View {
 
     private func jumpToBottomFromButton(using proxy: ScrollViewProxy) {
         hapticSelectionTrigger += 1
-        streamingScrollTask?.cancel()
-        streamingScrollTask = nil
-        finalizationStickToBottomTask?.cancel()
-        finalizationStickToBottomTask = nil
+        cancelScheduledAutoscroll()
         streamingAutoscrollEnabled = true
         scrollToBottom(using: proxy, animated: true)
     }
@@ -270,7 +264,7 @@ struct ChatMessageListSection: View {
     }
 
     private func resumeAutoscroll(using proxy: ScrollViewProxy, animated: Bool) {
-        streamingScrollTask?.cancel()
+        cancelScheduledAutoscroll()
         streamingAutoscrollEnabled = true
         scrollToBottom(using: proxy, animated: animated)
         scheduleAutoscroll(using: proxy)
@@ -285,8 +279,15 @@ struct ChatMessageListSection: View {
 
     private func scheduleAutoscroll(using proxy: ScrollViewProxy, repeatAfterLayoutChange: Bool = false) {
         streamingScrollTask?.cancel()
+        let taskToken = UUID()
+        streamingScrollTaskToken = taskToken
         streamingScrollTask = Task { @MainActor in
-            defer { streamingScrollTask = nil }
+            defer {
+                if streamingScrollTaskToken == taskToken {
+                    streamingScrollTask = nil
+                    streamingScrollTaskToken = nil
+                }
+            }
             try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled else { return }
             scrollToBottom(using: proxy)
@@ -295,6 +296,12 @@ struct ChatMessageListSection: View {
             guard !Task.isCancelled else { return }
             scrollToBottom(using: proxy)
         }
+    }
+
+    private func cancelScheduledAutoscroll() {
+        streamingScrollTask?.cancel()
+        streamingScrollTask = nil
+        streamingScrollTaskToken = nil
     }
 
     private func scrollToBottom(using proxy: ScrollViewProxy) {
@@ -319,24 +326,4 @@ struct ChatMessageListSection: View {
         }
     }
 
-    private func stickToBottomDuringFinalization(using proxy: ScrollViewProxy) {
-        finalizationStickToBottomTask?.cancel()
-        shouldStickToBottomDuringFinalization = true
-        scheduleAutoscroll(using: proxy, repeatAfterLayoutChange: true)
-        finalizationStickToBottomTask = Task { @MainActor in
-            defer {
-                shouldStickToBottomDuringFinalization = false
-                finalizationStickToBottomTask = nil
-            }
-            try? await Task.sleep(for: .milliseconds(50))
-            guard !Task.isCancelled else { return }
-            scrollToBottom(using: proxy, animated: false)
-            try? await Task.sleep(for: .milliseconds(180))
-            guard !Task.isCancelled else { return }
-            scrollToBottom(using: proxy, animated: false)
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            scrollToBottom(using: proxy, animated: false)
-        }
-    }
 }

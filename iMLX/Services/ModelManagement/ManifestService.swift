@@ -8,18 +8,20 @@ final class ManifestService {
     init() {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
-        let modelsDir = appSupport.appendingPathComponent(Constants.Storage.modelsDirectory)
-        
-        try? fileManager.createDirectory(at: modelsDir, withIntermediateDirectories: true)
-        
         self.manifestURL = appSupport.appendingPathComponent(Constants.Storage.downloadedModelsManifest)
-        
-        if let data = try? Data(contentsOf: manifestURL),
-           let decoded = try? JSONDecoder().decode(DownloadedModelManifest.self, from: data) {
-            self.manifest = decoded
-        } else {
-            self.manifest = DownloadedModelManifest()
-        }
+        self.manifest = Self.loadManifest(from: manifestURL)
+
+        let modelsDir = appSupport.appendingPathComponent(Constants.Storage.modelsDirectory)
+        try? fileManager.createDirectory(at: modelsDir, withIntermediateDirectories: true)
+    }
+
+    init(manifestURL: URL) {
+        self.manifestURL = manifestURL
+        self.manifest = Self.loadManifest(from: manifestURL)
+        try? FileManager.default.createDirectory(
+            at: manifestURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
     }
     
     func addDownloaded(modelId: String, displayName: String, huggingFaceId: String, localPath: String, sizeOnDiskBytes: Int64) {
@@ -67,5 +69,13 @@ final class ManifestService {
         if let encoded = try? JSONEncoder().encode(manifest) {
             try? encoded.write(to: manifestURL, options: [.atomic])
         }
+    }
+
+    private static func loadManifest(from url: URL) -> DownloadedModelManifest {
+        guard let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(DownloadedModelManifest.self, from: data) else {
+            return DownloadedModelManifest()
+        }
+        return decoded
     }
 }

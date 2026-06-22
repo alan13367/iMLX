@@ -394,53 +394,27 @@ actor WebSearchService {
     }
 
     private func score(queryVector: [Double]?, chunkVector: [Double]?) -> Double {
-        guard let queryVector, let chunkVector, queryVector.count == chunkVector.count else {
-            return 0
-        }
-
-        var dotProduct = 0.0
-        var queryMagnitude = 0.0
-        var chunkMagnitude = 0.0
-
-        for index in queryVector.indices {
-            dotProduct += queryVector[index] * chunkVector[index]
-            queryMagnitude += queryVector[index] * queryVector[index]
-            chunkMagnitude += chunkVector[index] * chunkVector[index]
-        }
-
-        let denominator = sqrt(queryMagnitude) * sqrt(chunkMagnitude)
-        guard denominator > 0 else { return 0 }
-        return max(0, dotProduct / denominator)
+        GroundingText.cosineSimilarity(queryVector, chunkVector)
     }
 
     private func lexicalSimilarity(query: String, text: String) -> Double {
-        let queryTerms = Set(tokenize(query))
-        let textTerms = Set(tokenize(text))
-        guard !queryTerms.isEmpty, !textTerms.isEmpty else { return 0 }
-        let overlap = queryTerms.intersection(textTerms).count
-        guard overlap > 0 else { return 0 }
-        return Double(overlap) / Double(queryTerms.count)
+        GroundingText.lexicalSimilarity(query: query, text: text)
     }
 
     private func tokenize(_ text: String) -> [String] {
-        normalizeWhitespace(text)
-            .lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count > 2 }
+        GroundingText.tokens(in: text)
     }
 
     private func compactExcerpt(from text: String) -> String {
-        guard text.count > Constants.WebSearch.maxPreviewCharacters else {
-            return text
-        }
-        let endIndex = text.index(text.startIndex, offsetBy: Constants.WebSearch.maxPreviewCharacters)
-        return String(text[..<endIndex]) + "..."
+        GroundingText.excerpt(
+            from: text,
+            maximumCharacters: Constants.WebSearch.maxPreviewCharacters,
+            normalizingWhitespace: false
+        )
     }
 
     private func normalizeWhitespace(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        GroundingText.normalizeWhitespace(text)
     }
 
     private func normalizedReadURLQuery(_ query: String, url: URL) -> String {

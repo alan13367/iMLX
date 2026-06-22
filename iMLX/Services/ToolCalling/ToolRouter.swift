@@ -147,6 +147,7 @@ extension ToolCallingService {
         }
 
         if let calendarTool = toolsByName["calendar_brief"],
+           !isBriefRangeOnlyFollowUp(userMessage),
            let range = heuristicCalendarRange(for: userMessage),
            case .success(let arguments) = validatedArguments(
                 ["range": range.rawValue],
@@ -165,6 +166,7 @@ extension ToolCallingService {
         }
 
         if let remindersBriefTool = toolsByName["reminders_brief"],
+           !isBriefRangeOnlyFollowUp(userMessage),
            let range = heuristicReminderRange(for: userMessage),
            case .success(let arguments) = validatedArguments(
                 ["range": range.rawValue],
@@ -444,7 +446,8 @@ extension ToolCallingService {
            messageLooksLikeFactualQuestion(userMessage) {
             return true
         }
-        if contextualFollowUpToolTrace(for: userMessage, history: history) != nil {
+        if let trace = contextualFollowUpToolTrace(for: userMessage, history: history),
+           toolsByName[trace.toolName] != nil {
             return true
         }
         if toolsByName["current_datetime"] != nil,
@@ -653,9 +656,7 @@ extension ToolCallingService {
 
         let tokens = Set(normalized.split(separator: " ").map(String.init))
         let readingActions = Set(["read", "open", "check", "inspect", "review", "summarize", "summarise", "explain", "analyze", "analyse"])
-        let pageReferences = Set(["url", "link", "page", "site", "website", "article", "post"])
         return !tokens.intersection(readingActions).isEmpty
-            && !tokens.intersection(pageReferences).isEmpty
     }
 
     nonisolated func messageLooksLikeFactualQuestion(_ userMessage: String) -> Bool {

@@ -77,6 +77,14 @@ final class MemoryDeterministicExtractionTests: XCTestCase {
         XCTAssertTrue(service.shouldRunLLMMemoryExtraction(for: "I'm trying to become a better runner"))
     }
 
+    func testGateAllowsMixedRequestAndDurableSelfFact() {
+        let service = makeMemoryService()
+        let message = "I need help choosing a plan because I'm trying to become a better runner"
+
+        XCTAssertTrue(service.deterministicCandidates(from: message).isEmpty)
+        XCTAssertTrue(service.shouldRunLLMMemoryExtraction(for: message))
+    }
+
     func testGateSkipsWhenDeterministicCandidatesExist() {
         let service = makeMemoryService()
         let candidates = service.deterministicCandidates(from: "I live in Madrid. What should I do this weekend?")

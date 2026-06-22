@@ -1,5 +1,4 @@
 import Foundation
-import Accelerate
 import NaturalLanguage
 import PDFKit
 
@@ -28,10 +27,23 @@ actor DocumentLibraryService {
     init() {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
+        self.init(baseDirectory: appSupport, fileManager: fileManager)
+    }
+
+    init(baseDirectory: URL, fileManager: FileManager = .default) {
         self.fileManager = fileManager
-        documentsDirectory = appSupport.appendingPathComponent(Constants.Storage.documentsDirectory, isDirectory: true)
-        metadataDirectory = appSupport.appendingPathComponent(Constants.Storage.documentMetadataDirectory, isDirectory: true)
-        indexesDirectory = appSupport.appendingPathComponent(Constants.Storage.documentIndexesDirectory, isDirectory: true)
+        documentsDirectory = baseDirectory.appendingPathComponent(
+            Constants.Storage.documentsDirectory,
+            isDirectory: true
+        )
+        metadataDirectory = baseDirectory.appendingPathComponent(
+            Constants.Storage.documentMetadataDirectory,
+            isDirectory: true
+        )
+        indexesDirectory = baseDirectory.appendingPathComponent(
+            Constants.Storage.documentIndexesDirectory,
+            isDirectory: true
+        )
 
         try? fileManager.createDirectory(at: documentsDirectory, withIntermediateDirectories: true)
         try? fileManager.createDirectory(at: metadataDirectory, withIntermediateDirectories: true)
@@ -306,7 +318,7 @@ actor DocumentLibraryService {
             throw DocumentImportError.emptyDocument
         }
 
-        let header = splitCSVRow(rows[0])
+        let header = DocumentCSVParser.fields(in: rows[0])
         let dataRows = rows.dropFirst()
 
         if dataRows.isEmpty {
@@ -314,8 +326,9 @@ actor DocumentLibraryService {
         }
 
         return dataRows.enumerated().compactMap { index, row in
-            let columns = splitCSVRow(row)
-            let pairs = zipLongest(header, columns).compactMap { headerValue, rowValue -> String? in
+            let columns = DocumentCSVParser.fields(in: row)
+            let pairs = DocumentCSVParser.pair(headers: header, values: columns)
+                .compactMap { headerValue, rowValue -> String? in
                 let trimmedValue = rowValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmedValue.isEmpty else { return nil }
                 let trimmedHeader = headerValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -461,48 +474,26 @@ actor DocumentLibraryService {
     }
 
     private func score(queryVector: [Double]?, chunkVector: [Double]?) -> Double {
-        guard let queryVector, let chunkVector, queryVector.count == chunkVector.count else {
-            return 0
-        }
-
-        let dotProduct = vDSP.dot(queryVector, chunkVector)
-        let queryMagnitude = vDSP.sumOfSquares(queryVector)
-        let chunkMagnitude = vDSP.sumOfSquares(chunkVector)
-
-        let denominator = sqrt(queryMagnitude) * sqrt(chunkMagnitude)
-        guard denominator > 0 else { return 0 }
-        return max(0, dotProduct / denominator)
+        GroundingText.cosineSimilarity(queryVector, chunkVector)
     }
 
     private func lexicalSimilarity(query: String, text: String) -> Double {
-        let queryTerms = Set(tokenize(query))
-        let textTerms = Set(tokenize(text))
-        guard !queryTerms.isEmpty, !textTerms.isEmpty else { return 0 }
-        let overlap = queryTerms.intersection(textTerms).count
-        guard overlap > 0 else { return 0 }
-        return Double(overlap) / Double(queryTerms.count)
+        GroundingText.lexicalSimilarity(query: query, text: text)
     }
 
     private func tokenize(_ text: String) -> [String] {
-        normalizeWhitespace(text)
-            .lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count > 2 }
+        GroundingText.tokens(in: text)
     }
 
     private func compactExcerpt(from text: String) -> String {
-        let normalized = normalizeWhitespace(text)
-        guard normalized.count > Constants.RAG.maxPreviewCharacters else {
-            return normalized
-        }
-        let index = normalized.index(normalized.startIndex, offsetBy: Constants.RAG.maxPreviewCharacters)
-        return String(normalized[..<index]) + "..."
+        GroundingText.excerpt(
+            from: text,
+            maximumCharacters: Constants.RAG.maxPreviewCharacters
+        )
     }
 
     private func normalizeWhitespace(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        GroundingText.normalizeWhitespace(text)
     }
 
     private func wantsDocumentOverview(for query: String) -> Bool {
@@ -613,34 +604,4 @@ actor DocumentLibraryService {
         return selected.sorted { $0.ordinal < $1.ordinal }
     }
 
-    private func splitCSVRow(_ row: String) -> [String] {
-        var values: [String] = []
-        var current = ""
-        var isInsideQuotes = false
-
-        for character in row {
-            if character == "\"" {
-                isInsideQuotes.toggle()
-                continue
-            }
-            if character == ",", !isInsideQuotes {
-                values.append(current)
-                current = ""
-            } else {
-                current.append(character)
-            }
-        }
-
-        values.append(current)
-        return values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-    }
-
-    private func zipLongest(_ left: [String], _ right: [String]) -> [(String, String)] {
-        let maxCount = max(left.count, right.count)
-        return (0..<maxCount).map { index in
-            let leftValue = index < left.count ? left[index] : ""
-            let rightValue = index < right.count ? right[index] : ""
-            return (leftValue, rightValue)
-        }
-    }
 }

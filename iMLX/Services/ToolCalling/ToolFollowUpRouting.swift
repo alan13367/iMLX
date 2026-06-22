@@ -441,5 +441,32 @@ extension ToolCallingService {
         return nil
     }
 
+    nonisolated func isBriefRangeOnlyFollowUp(_ userMessage: String) -> Bool {
+        guard briefFollowUpRange(for: userMessage) != nil else {
+            return false
+        }
 
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        let followUpPrefixes = [
+            "and ",
+            "what about",
+            "how about",
+            "for "
+        ]
+        if followUpPrefixes.contains(where: { normalized.hasPrefix($0) }) {
+            return true
+        }
+
+        let standaloneRanges: Set<String> = [
+            "today",
+            "tomorrow",
+            "overdue",
+            "this week",
+            "next week",
+            "next seven days",
+            "next 7 days",
+            "upcoming"
+        ]
+        return standaloneRanges.contains(normalized)
+    }
 }

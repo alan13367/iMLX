@@ -64,7 +64,7 @@
 		E7A1A10A2F9001000001A10A /* Exceptions for "iMLX" folder in "iMLXAlarmWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Services/IMLXTimerMetadata.swift,
+				Services/Platform/IMLXTimerMetadata.swift,
 			);
 			target = E7A1A1022F9001000001A102 /* iMLXAlarmWidgetExtension */;
 		};

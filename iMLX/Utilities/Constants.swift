@@ -284,6 +284,20 @@ nonisolated enum Constants {
                 prefersThinkingEnabled: false
             ),
             ModelInfo(
+                id: "lfm2.5-230m-8bit",
+                displayName: "LFM2.5 230M",
+                huggingFaceId: "LiquidAI/LFM2.5-230M-MLX-8bit",
+                parameterCount: "230M",
+                quantization: "8-bit",
+                estimatedSizeGB: 0.3,
+                minDeviceRAM: 8,
+                family: .lfm25,
+                logoName: "lfm_logo",
+                supportsThinking: false,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
+            ModelInfo(
                 id: "lfm2.5-350m-4bit",
                 displayName: "LFM2.5 350M",
                 huggingFaceId: "LiquidAI/LFM2.5-350M-MLX-4bit",

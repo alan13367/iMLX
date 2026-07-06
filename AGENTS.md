@@ -8,6 +8,12 @@ Use this file for build commands, architecture boundaries, runtime constraints, 
 
 ## Quick Commands
 
+If `xcodebuild` reports that the active developer directory is Command Line Tools and only `Xcode-beta.app` is installed, prefix the same command with:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
+```
+
 ```bash
 # Simulator build: UI/build verification only; simulator cannot run MLX inference.
 xcodebuild build \

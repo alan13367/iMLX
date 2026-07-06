@@ -39,11 +39,14 @@ struct ConversationListView: View {
     }
 
     var body: some View {
+        let conversations = appState.conversations
+        let conversationIDs = conversations.map(\.id)
+
         List {
-            if appState.conversations.isEmpty {
+            if conversations.isEmpty {
                 emptyContent
             } else {
-                ForEach(appState.conversations) { conversation in
+                ForEach(conversations) { conversation in
                     ConversationListItem(
                         conversation: conversation,
                         isActive: appState.activeConversationId == conversation.id,
@@ -86,6 +89,7 @@ struct ConversationListView: View {
                 }
             }
         }
+        .id(conversationIDs)
         .navigationTitle(navigationTitle)
         .toolbar {
             if presentation == .modalSheet {
@@ -185,12 +189,19 @@ struct ConversationListView: View {
         } message: {
             Text(String(format: String.appLocalized("conversation.delete_selected_message"), selectedConversationIDs.count))
         }
+        .onChange(of: conversationIDs) { _, ids in
+            selectedConversationIDs.formIntersection(Set(ids))
+        }
     }
 
     private func deleteConversation(_ conversation: Conversation) {
-        appState.deleteConversation(conversation.id)
+        let id = conversation.id
         if conversationPendingDeletion?.id == conversation.id {
             conversationPendingDeletion = nil
+        }
+        selectedConversationIDs.remove(id)
+        performDeferredConversationMutation {
+            appState.deleteConversation(id)
         }
     }
 
@@ -232,14 +243,25 @@ struct ConversationListView: View {
 
     private func deleteSelectedConversations() {
         let ids = selectedConversationIDs
-        for id in ids {
-            appState.deleteConversation(id)
-        }
         isShowingDeleteSelectedAlert = false
         conversationPendingDeletion = nil
         stopSelecting()
-        if let id = appState.activeConversationId {
-            onSelect(id)
+        performDeferredConversationMutation {
+            let activeConversationId = appState.deleteConversations(ids)
+            if let activeConversationId {
+                onSelect(activeConversationId)
+            }
+        }
+    }
+
+    private func performDeferredConversationMutation(_ mutation: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            await Task.yield()
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                mutation()
+            }
         }
     }
 

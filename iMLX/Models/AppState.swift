@@ -580,27 +580,55 @@ final class AppState {
         }
     }
 
-    func deleteConversation(_ id: UUID) {
-        conversationService.delete(id: id)
-        conversations.removeAll { $0.id == id }
-        conversationsByID[id] = nil
+    @discardableResult
+    func deleteConversation(_ id: UUID) -> UUID? {
+        deleteConversations([id])
+    }
+
+    @discardableResult
+    func deleteConversations(_ ids: Set<UUID>) -> UUID? {
+        let existingIDs = Set(conversations.map(\.id))
+        let deletedIDs = ids.intersection(existingIDs)
+        guard !deletedIDs.isEmpty else { return activeConversationId }
+
+        for id in deletedIDs {
+            conversationService.delete(id: id)
+        }
+
+        let previousActiveConversationId = activeConversationId
+        let remainingConversations = conversations.filter { !deletedIDs.contains($0.id) }
+
         Task {
-            await documentLibraryService.deleteDocuments(for: id)
+            for id in deletedIDs {
+                await documentLibraryService.deleteDocuments(for: id)
+            }
         }
-        if conversations.isEmpty {
-            _ = createNewConversation()
-        } else if activeConversationId == id {
-            activeConversationId = conversations.first?.id
+
+        if remainingConversations.isEmpty {
+            let conversation = Conversation(modelId: loadedModelId)
+            conversations = [conversation]
+            conversationsByID = [conversation.id: conversation]
+            activeConversationId = conversation.id
+        } else {
+            conversations = remainingConversations
+            rebuildConversationLookup()
+            if let previousActiveConversationId,
+               deletedIDs.contains(previousActiveConversationId) {
+                activeConversationId = conversations.first?.id
+            }
         }
+
         Haptics.impactMedium()
+        return activeConversationId
     }
 
     func clearAllConversations() {
         let conversationIDs = conversations.map(\.id)
         conversationService.deleteAll()
-        conversations.removeAll()
-        conversationsByID.removeAll()
-        activeConversationId = nil
+        let conversation = Conversation(modelId: loadedModelId)
+        conversations = [conversation]
+        conversationsByID = [conversation.id: conversation]
+        activeConversationId = conversation.id
 
         Task {
             for id in conversationIDs {
@@ -608,7 +636,6 @@ final class AppState {
             }
         }
 
-        _ = createNewConversation()
         Haptics.notificationSuccess()
     }
 

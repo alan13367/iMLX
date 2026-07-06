@@ -531,6 +531,67 @@ actor InferenceService {
         return LLMBenchmarkResult(prompt: prompt, profiles: profiles)
     }
 
+    func runIFBench(
+        prompts: [IFBenchPrompt],
+        systemPrompt: String,
+        maxTokens: Int,
+        temperature: Float = 0,
+        topP: Float = 1.0,
+        repetitionPenalty: Float = 1.0,
+        modelName: String? = nil,
+        profilingContext: LLMProfilingRunContext? = nil,
+        progress: (@MainActor @Sendable (_ completedPrompts: Int, _ totalPrompts: Int) -> Void)? = nil
+    ) async throws -> IFBenchRunResult {
+        var responseRecords: [IFBenchResponseRecord] = []
+        var profiles: [LLMExecutionProfile] = []
+        responseRecords.reserveCapacity(prompts.count)
+        profiles.reserveCapacity(prompts.count)
+
+        for item in prompts {
+            var response = ""
+            let stream = generate(
+                prompt: item.prompt,
+                history: [],
+                systemPrompt: systemPrompt,
+                maxTokens: maxTokens,
+                temperature: temperature,
+                topP: topP,
+                repetitionPenalty: repetitionPenalty,
+                modelName: modelName,
+                profileRunLabel: "IFBench",
+                profilingContext: profilingContext
+            )
+
+            for try await chunk in stream {
+                try Task.checkCancellation()
+                response += chunk
+            }
+
+            let profile = latestProfile
+            if let profile {
+                profiles.append(profile)
+            }
+            responseRecords.append(
+                IFBenchResponseRecord(
+                    key: item.key,
+                    prompt: item.prompt,
+                    response: response,
+                    profileID: profile?.id
+                )
+            )
+            if let progress {
+                await progress(responseRecords.count, prompts.count)
+            }
+        }
+
+        return IFBenchRunResult(
+            modelName: modelName ?? lastModelLoadMetrics?.modelName ?? "Unknown Model",
+            runContext: profilingContext,
+            responseRecords: responseRecords,
+            profiles: profiles
+        )
+    }
+
     func unload() async {
         let wasLoaded = modelContainer != nil
         modelContainer = nil

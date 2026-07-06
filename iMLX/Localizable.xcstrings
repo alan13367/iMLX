@@ -1042,6 +1042,16 @@
         }
       }
     },
+    "Completed %@ of %@ prompts" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Completed %1$@ of %2$@ prompts"
+          }
+        }
+      }
+    },
     "Confidence" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1440,6 +1450,9 @@
 
     },
     "Copy JSON" : {
+
+    },
+    "Copy Responses JSONL" : {
 
     },
     "Delete" : {
@@ -2141,6 +2154,15 @@
         }
       }
     },
+    "IFBench" : {
+
+    },
+    "Import IFBench JSONL" : {
+
+    },
+    "Imports the official IFBench test JSONL, runs every loaded prompt on-device at temperature 0, and exports response JSONL for the AllenAI evaluator." : {
+
+    },
     "Iterations: %lld" : {
 
     },
@@ -2191,6 +2213,9 @@
       }
     },
     "Latest Benchmark" : {
+
+    },
+    "Latest IFBench Run" : {
 
     },
     "Latest Run" : {
@@ -2270,6 +2295,9 @@
           }
         }
       }
+    },
+    "Max tokens: %lld" : {
+
     },
     "Memory Detail" : {
       "extractionState" : "manual",
@@ -3260,29 +3288,6 @@
         }
       }
     },
-    "models.browser.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Models"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Modelos"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型"
-          }
-        }
-      }
-    },
     "models.browser.dismiss_error_a11y" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3302,6 +3307,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭错误"
+          }
+        }
+      }
+    },
+    "models.browser.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Models"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modelos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型"
           }
         }
       }
@@ -4307,10 +4335,16 @@
     "Run Benchmark" : {
 
     },
+    "Run IFBench" : {
+
+    },
     "Run local generation once, then return here." : {
 
     },
     "Running Benchmark…" : {
+
+    },
+    "Running IFBench…" : {
 
     },
     "Runs repeated local generation with an empty system prompt. Load a model before starting. Exports omit the raw prompt text." : {
@@ -4340,6 +4374,12 @@
       }
     },
     "Save JSON" : {
+
+    },
+    "Save Responses JSONL" : {
+
+    },
+    "Save Run JSON" : {
 
     },
     "Scroll to bottom" : {

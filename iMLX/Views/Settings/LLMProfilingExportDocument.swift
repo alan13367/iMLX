@@ -2,8 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LLMProfilingExportDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    static var writableContentTypes: [UTType] { [.json] }
+    static var readableContentTypes: [UTType] { [.json, .plainText] }
+    static var writableContentTypes: [UTType] { [.json, .plainText] }
 
     var text: String
 

@@ -44,33 +44,16 @@ struct ChatView: View {
             chatAccessoryInset
         }
         .toolbar {
-            if #available(iOS 27, *) {
-                ToolbarItem(placement: .topBarLeading) {
-                    leadingToolbarContent
-                }
-                .visibilityPriority(.high)
-
-                ToolbarItem(placement: .principal) {
-                    principalToolbarContent
-                }
-                .visibilityPriority(.low)
-
-                ToolbarItem(placement: .topBarPinnedTrailing) {
-                    trailingToolbarContent
-                }
-            } else {
-                ToolbarItem(placement: .topBarLeading) {
-                    leadingToolbarContent
-                }
-                ToolbarItem(placement: .principal) {
-                    principalToolbarContent
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    trailingToolbarContent
-                }
+            ToolbarItem(placement: .topBarLeading) {
+                leadingToolbarContent
+            }
+            ToolbarItem(placement: .principal) {
+                principalToolbarContent
+            }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                trailingToolbarContent
             }
         }
-        .chatNavigationToolbarBehavior()
         .scrollDismissesKeyboard(.interactively)
         .simultaneousGesture(openConversationHistoryGesture)
         .task(id: appState.selectedModel?.id) {
@@ -579,17 +562,6 @@ struct ChatView: View {
         #else
         false
         #endif
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func chatNavigationToolbarBehavior() -> some View {
-        if #available(iOS 27, *) {
-            toolbarMinimizeBehavior(.never, for: .navigationBar)
-        } else {
-            self
-        }
     }
 }
 

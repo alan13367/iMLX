@@ -12,6 +12,16 @@ struct LLMProfilingView: View {
     @State private var benchmarkIterations = 3
     @State private var isRunningBenchmark = false
     @State private var benchmarkErrorMessage: String?
+    @State private var isImportingIFBenchJSONL = false
+    @State private var ifBenchPrompts: [IFBenchPrompt] = []
+    @State private var ifBenchMaxTokens = 1024
+    @State private var isRunningIFBench = false
+    @State private var ifBenchCompletedPrompts = 0
+    @State private var ifBenchTotalPrompts = 0
+    @State private var ifBenchErrorMessage: String?
+    @State private var ifBenchExportDocument = LLMProfilingExportDocument()
+    @State private var ifBenchExportFilename = "imlx-ifbench-responses.jsonl"
+    @State private var isExportingIFBenchFile = false
 
     var body: some View {
         Form {
@@ -159,6 +169,79 @@ struct LLMProfilingView: View {
                     Label("Latest Benchmark", systemImage: "chart.xyaxis.line")
                 }
             }
+
+            Section {
+                Button {
+                    isImportingIFBenchJSONL = true
+                } label: {
+                    Label("Import IFBench JSONL", systemImage: "doc.badge.plus")
+                }
+                if !ifBenchPrompts.isEmpty {
+                    metricRow("Loaded prompts", ifBenchPrompts.count.formatted())
+                    Stepper(value: $ifBenchMaxTokens, in: 128...4096, step: 128) {
+                        Text("Max tokens: \(ifBenchMaxTokens)")
+                    }
+                    Button {
+                        Task {
+                            await runIFBench()
+                        }
+                    } label: {
+                        if isRunningIFBench {
+                            Label("Running IFBench…", systemImage: "hourglass")
+                        } else {
+                            Label("Run IFBench", systemImage: "play.fill")
+                        }
+                    }
+                    .disabled(isRunningIFBench || !canRunBenchmark)
+                }
+                if isRunningIFBench {
+                    ProgressView(
+                        value: Double(ifBenchCompletedPrompts),
+                        total: Double(max(ifBenchTotalPrompts, 1))
+                    )
+                    Text("Completed \(ifBenchCompletedPrompts.formatted()) of \(ifBenchTotalPrompts.formatted()) prompts")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let ifBenchErrorMessage {
+                    Text(ifBenchErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Label("IFBench", systemImage: "checklist.checked")
+            } footer: {
+                Text("Imports the official IFBench test JSONL, runs every loaded prompt on-device at temperature 0, and exports response JSONL for the AllenAI evaluator.")
+            }
+
+            if let ifBench = appState.latestIFBenchRunResult {
+                Section {
+                    metricRow("Model", ifBench.modelName)
+                    metricRow("Prompts", ifBench.promptCount.formatted())
+                    metricRow("Mean total", LLMProfileFormatters.duration(ifBench.totalInferenceTime?.mean))
+                    metricRow("Median first output", LLMProfileFormatters.duration(ifBench.timeToFirstToken?.median))
+                    metricRow("Mean tokens/sec", LLMProfileFormatters.rate(ifBench.tokensPerSecond?.mean))
+                    metricRow("Mean memory peak", benchmarkMemory(ifBench.memoryPeakDuringInference))
+                    Button("Copy Responses JSONL") {
+                        UIPasteboard.general.string = ifBench.officialResponsesJSONL
+                        copiedMessage = "Copied IFBench responses"
+                    }
+                    Button("Save Responses JSONL") {
+                        prepareIFBenchExport(
+                            text: ifBench.officialResponsesJSONL,
+                            filename: "imlx-ifbench-\(ifBench.modelName.fileSafeName)-responses.jsonl"
+                        )
+                    }
+                    Button("Save Run JSON") {
+                        prepareIFBenchExport(
+                            text: ifBench.jsonString,
+                            filename: "imlx-ifbench-\(ifBench.modelName.fileSafeName)-run.json"
+                        )
+                    }
+                } header: {
+                    Label("Latest IFBench Run", systemImage: "checklist.checked")
+                }
+            }
         }
         .navigationTitle("LLM Profiling")
         .toolbar {
@@ -185,6 +268,26 @@ struct LLMProfilingView: View {
                 copiedMessage = "Export failed: \(error.localizedDescription)"
             }
         }
+        .fileImporter(
+            isPresented: $isImportingIFBenchJSONL,
+            allowedContentTypes: Self.ifBenchImportTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            importIFBenchJSONL(result)
+        }
+        .fileExporter(
+            isPresented: $isExportingIFBenchFile,
+            document: ifBenchExportDocument,
+            contentType: ifBenchExportFilename.hasSuffix(".jsonl") ? .plainText : .json,
+            defaultFilename: ifBenchExportFilename
+        ) { result in
+            switch result {
+            case .success:
+                copiedMessage = "Saved IFBench export"
+            case .failure(let error):
+                copiedMessage = "IFBench export failed: \(error.localizedDescription)"
+            }
+        }
         .task {
             await appState.refreshLLMExecutionProfiles()
         }
@@ -202,6 +305,13 @@ struct LLMProfilingView: View {
             return "n/a"
         }
         return LLMProfileFormatters.memoryDelta(Int64(summary.mean))
+    }
+
+    private func benchmarkMemory(_ summary: LLMBenchmarkMetricSummary?) -> String {
+        guard let summary else {
+            return "n/a"
+        }
+        return LLMProfileFormatters.memory(UInt64(summary.mean))
     }
 
     private func sessionRow(_ session: LLMProfilingSessionRecord) -> some View {
@@ -293,6 +403,15 @@ struct LLMProfilingView: View {
             .replacingOccurrences(of: ":", with: "-")
     }
 
+    private static var ifBenchImportTypes: [UTType] {
+        [
+            UTType(filenameExtension: "jsonl") ?? .plainText,
+            .json,
+            .plainText,
+            .data
+        ]
+    }
+
     private var canRunBenchmark: Bool {
         appState.loadedModelId != nil
     }
@@ -318,5 +437,83 @@ struct LLMProfilingView: View {
         } catch {
             benchmarkErrorMessage = error.localizedDescription
         }
+    }
+
+    @MainActor
+    private func importIFBenchJSONL(_ result: Result<[URL], Error>) {
+        ifBenchErrorMessage = nil
+        do {
+            guard let url = try result.get().first else { return }
+            let didStartAccessing = url.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccessing {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8) else {
+                ifBenchErrorMessage = "The selected file is not valid UTF-8 text."
+                return
+            }
+            let prompts = try IFBenchPrompt.decodeJSONL(text)
+            ifBenchPrompts = prompts
+            ifBenchCompletedPrompts = 0
+            ifBenchTotalPrompts = 0
+            copiedMessage = "Imported IFBench JSONL"
+        } catch {
+            ifBenchErrorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func prepareIFBenchExport(text: String, filename: String) {
+        ifBenchExportDocument = LLMProfilingExportDocument(text: text)
+        ifBenchExportFilename = filename
+        isExportingIFBenchFile = true
+    }
+
+    @MainActor
+    private func runIFBench() async {
+        ifBenchErrorMessage = nil
+        guard canRunBenchmark else {
+            ifBenchErrorMessage = "Load a model before running IFBench."
+            return
+        }
+        guard !ifBenchPrompts.isEmpty else {
+            ifBenchErrorMessage = "Import IFBench_test.jsonl before running IFBench."
+            return
+        }
+
+        ifBenchCompletedPrompts = 0
+        ifBenchTotalPrompts = ifBenchPrompts.count
+        isRunningIFBench = true
+        defer { isRunningIFBench = false }
+
+        do {
+            try await appState.runIFBench(
+                prompts: ifBenchPrompts,
+                maxTokens: ifBenchMaxTokens,
+                progress: { completedPrompts, totalPrompts in
+                    ifBenchCompletedPrompts = completedPrompts
+                    ifBenchTotalPrompts = totalPrompts
+                }
+            )
+            await appState.refreshLLMExecutionProfiles()
+            copiedMessage = "IFBench finished"
+        } catch {
+            ifBenchErrorMessage = error.localizedDescription
+        }
+    }
+}
+
+private extension String {
+    var fileSafeName: String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        return unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? String(scalar) : "-"
+        }
+        .joined()
+        .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        .lowercased()
     }
 }

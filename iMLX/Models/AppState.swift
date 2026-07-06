@@ -32,10 +32,12 @@ final class AppState {
     var llmProfilingSessions: [LLMProfilingSessionRecord] = []
     var llmInferenceCrashReports: [LLMInferenceCrashReport] = []
     var latestLLMBenchmarkResult: LLMBenchmarkResult?
+    var latestIFBenchRunResult: IFBenchRunResult?
 
     private static let preferredLatestProfileRunLabels: Set<String> = [
         "Chat Response",
-        "Benchmark"
+        "Benchmark",
+        "IFBench"
     ]
 
     let conversationService = ConversationService()
@@ -300,6 +302,14 @@ final class AppState {
     }
 
     @MainActor
+    func recordIFBenchRunResult(_ result: IFBenchRunResult) {
+        latestIFBenchRunResult = result
+        for profile in result.profiles.reversed() {
+            recordLLMExecutionProfile(profile, updateLatest: profile.runLabel == "IFBench")
+        }
+    }
+
+    @MainActor
     func runLLMBenchmark(
         prompt: String,
         iterations: Int,
@@ -326,6 +336,39 @@ final class AppState {
             )
         )
         recordLLMBenchmarkResult(result)
+    }
+
+    @MainActor
+    func runIFBench(
+        prompts: [IFBenchPrompt],
+        systemPrompt: String = "",
+        maxTokens: Int = 1024,
+        progress: (@MainActor @Sendable (_ completedPrompts: Int, _ totalPrompts: Int) -> Void)? = nil
+    ) async throws {
+        guard let modelId = loadedModelId,
+              let model = selectedModel ?? modelInfo(id: modelId) else {
+            throw InferenceError.noModelLoaded
+        }
+        let profilingContext = LLMProfilingRunContext(
+            model: model,
+            maxTokens: maxTokens,
+            temperature: 0,
+            topP: Constants.Generation.defaultTopP,
+            repetitionPenalty: Constants.Generation.defaultRepetitionPenalty,
+            thinkingEnabled: false
+        )
+        let result = try await inferenceService.runIFBench(
+            prompts: prompts,
+            systemPrompt: systemPrompt,
+            maxTokens: maxTokens,
+            temperature: 0,
+            topP: Constants.Generation.defaultTopP,
+            repetitionPenalty: Constants.Generation.defaultRepetitionPenalty,
+            modelName: model.displayName,
+            profilingContext: profilingContext,
+            progress: progress
+        )
+        recordIFBenchRunResult(result)
     }
 
     @MainActor

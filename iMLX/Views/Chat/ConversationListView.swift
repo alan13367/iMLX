@@ -279,25 +279,14 @@ private struct ConversationDeletionAlert: ViewModifier {
     let onDelete: (Conversation) -> Void
 
     func body(content: Content) -> some View {
-        if #available(iOS 27, *) {
-            content.alert(
-                String.appLocalized("conversation.delete_title"),
-                item: $conversation
-            ) { conversation in
-                deleteActions(for: conversation)
-            } message: { conversation in
-                deleteMessage(for: conversation)
-            }
-        } else {
-            content.alert(
-                String.appLocalized("conversation.delete_title"),
-                isPresented: isPresented,
-                presenting: conversation
-            ) { conversation in
-                deleteActions(for: conversation)
-            } message: { conversation in
-                deleteMessage(for: conversation)
-            }
+        content.alert(
+            String.appLocalized("conversation.delete_title"),
+            isPresented: isPresented,
+            presenting: conversation
+        ) { conversation in
+            deleteActions(for: conversation)
+        } message: { conversation in
+            deleteMessage(for: conversation)
         }
     }
 

@@ -9,3 +9,4 @@ training/artifacts/*
 !training/artifacts/README.md
 training/runs/*
 training/
+IFBench/

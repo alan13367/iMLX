@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import CoreImage
+import CryptoKit
 import ImageIO
 import MLX
 import MLXFFT
@@ -9,7 +10,18 @@ import MLXLMTokenizers
 import MLXVLM
 
 actor InferenceService {
+    private struct ConversationSessionCache {
+        let key: String
+        let modelId: String
+        let historyFingerprint: String
+        let systemPrompt: String
+        let thinkingEnabled: Bool?
+        let generationCacheSignature: String
+        let session: ChatSession
+    }
+
     private var modelContainer: ModelContainer?
+    private var loadedModelId: String?
     private var loadedModelSupportsVision = false
     private var visionFeaturesEnabled = false
     private var kokoroTTS: KokoroTTS?
@@ -25,6 +37,7 @@ actor InferenceService {
     private var didLoadPersistedProfiles = false
     private var lastInProgressSnapshotPersistedAt: ContinuousClock.Instant?
     private let inProgressSnapshotMinInterval: Duration = .seconds(15)
+    private var conversationSessionCache: ConversationSessionCache?
 
     var isModelLoaded: Bool {
         modelContainer != nil
@@ -67,7 +80,7 @@ actor InferenceService {
             await unload()
         }
         lastModelLoadMetrics = nil
-        MLX.Memory.cacheLimit = InferenceOptimizationPolicy.mlxCacheLimitBytes
+        MLX.Memory.cacheLimit = InferenceOptimizationPolicy.defaultMLXCacheLimitBytes
         MLX.Memory.clearCache()
 
         let configSupportsVision = detectVisionSupport(in: localDirectory)
@@ -95,6 +108,7 @@ actor InferenceService {
             }
 
             modelContainer = container
+            loadedModelId = modelId
             loadedModelSupportsVision = shouldPreferVisionLoader
             visionFeaturesEnabled = shouldPreferVisionLoader
             lastModelLoadMetrics = LLMModelLoadMetrics(
@@ -113,6 +127,10 @@ actor InferenceService {
         #endif
     }
 
+    func invalidateConversationSessionCache() {
+        conversationSessionCache = nil
+    }
+
     func generate(
         prompt: String,
         images: [ChatAttachmentImage]? = nil,
@@ -126,7 +144,9 @@ actor InferenceService {
         modelName: String? = nil,
         profileRunLabel: String = "Local LLM Inference",
         promptConstructionDuration: TimeInterval? = nil,
-        profilingContext: LLMProfilingRunContext? = nil
+        profilingContext: LLMProfilingRunContext? = nil,
+        conversationCacheKey: String? = nil,
+        conversationCacheUserText: String? = nil
     ) -> AsyncThrowingStream<String, Error> {
         let contextMessageCount = (systemPrompt.isEmpty ? 0 : 1) + history.count + 1
         var contextCharacterCount = systemPrompt.count + prompt.count
@@ -272,6 +292,10 @@ actor InferenceService {
                     contextMediaAttachmentCount: contextMediaAttachmentCount,
                     maxTokens: maxTokens,
                     availableMemoryBytes: availableMemoryAtStart,
+                    modelIdentifier: profilingContext?.modelId,
+                    modelName: resolvedModelName,
+                    estimatedModelSizeGB: profilingContext?.estimatedSizeGB,
+                    supportsVision: loadedModelSupportsVision,
                     allowsKVQuantization: InferenceOptimizationPolicy.allowsKVQuantization(
                         modelIdentifier: profilingContext?.modelId,
                         modelName: resolvedModelName,
@@ -280,10 +304,14 @@ actor InferenceService {
                 )
                 profile.measurementNotes.append(
                     "Generation tuning: prefillStepSize=\(optimizationPlan.prefillStepSize), " +
+                    "maxKVSize=\(optimizationPlan.maxKVSize.map(String.init) ?? "none"), " +
                     "kvBits=\(optimizationPlan.kvBits.map(String.init) ?? "none"), " +
                     "kvGroupSize=\(optimizationPlan.kvGroupSize), " +
-                    "quantizedKVStart=\(optimizationPlan.quantizedKVStart)."
+                    "quantizedKVStart=\(optimizationPlan.quantizedKVStart), " +
+                    "mlxCacheLimit=\(optimizationPlan.mlxCacheLimitBytes), " +
+                    "visionInputSize=\(optimizationPlan.visionInputSize)."
                 )
+                MLX.Memory.cacheLimit = optimizationPlan.mlxCacheLimitBytes
                 if optimizationPlan.shouldClearCacheBeforeGeneration {
                     MLX.Memory.clearCache()
                 }
@@ -331,6 +359,7 @@ actor InferenceService {
                         )
                         parameters.maxTokens = maxTokens
                         parameters.prefillStepSize = optimizationPlan.prefillStepSize
+                        parameters.maxKVSize = optimizationPlan.maxKVSize
                         parameters.kvBits = optimizationPlan.kvBits
                         parameters.kvGroupSize = optimizationPlan.kvGroupSize
                         parameters.quantizedKVStart = optimizationPlan.quantizedKVStart
@@ -341,13 +370,52 @@ actor InferenceService {
                         let sessionHistory = loadedModelSupportsVision
                             ? history.map(\.chatMessage)
                             : history.map(\.chatMessageStrippingImages)
-                        let session = ChatSession(
-                            modelContainer,
-                            instructions: systemPrompt.isEmpty ? nil : systemPrompt,
-                            history: sessionHistory,
-                            generateParameters: parameters,
-                            additionalContext: additionalContext
+                        let historyFingerprint = Self.historyFingerprint(history)
+                        let cacheSignature = Self.generationCacheSignature(
+                            optimizationPlan: optimizationPlan,
+                            supportsVision: loadedModelSupportsVision
                         )
+                        let historyHasImages = history.contains {
+                            !($0.attachedImages?.isEmpty ?? true)
+                        }
+                        // Prefix reuse is safe for vision-capable models on text-only turns.
+                        // Any image in the live turn or prior history forces a full rebuild.
+                        let canUseConversationCache = conversationCacheKey != nil
+                            && userInputImages.isEmpty
+                            && !historyHasImages
+                        let session: ChatSession
+                        if canUseConversationCache,
+                           let conversationCacheKey,
+                           let loadedModelId,
+                           let cached = conversationSessionCache,
+                           cached.key == conversationCacheKey,
+                           cached.modelId == loadedModelId,
+                           cached.historyFingerprint == historyFingerprint,
+                           cached.systemPrompt == systemPrompt,
+                           cached.thinkingEnabled == thinkingEnabled,
+                           cached.generationCacheSignature == cacheSignature {
+                            session = cached.session
+                            session.generateParameters = parameters
+                            session.additionalContext = additionalContext
+                            profile.measurementNotes.append("Validated conversation prefix cache hit.")
+                        } else {
+                            session = ChatSession(
+                                modelContainer,
+                                instructions: systemPrompt.isEmpty ? nil : systemPrompt,
+                                history: sessionHistory,
+                                generateParameters: parameters,
+                                processing: .init(
+                                    resize: CGSize(
+                                        width: optimizationPlan.visionInputSize,
+                                        height: optimizationPlan.visionInputSize
+                                    )
+                                ),
+                                additionalContext: additionalContext
+                            )
+                            if conversationCacheKey != nil {
+                                profile.measurementNotes.append("Conversation prefix cache miss; rebuilt from visible history.")
+                            }
+                        }
 
                         let stream = session.streamDetails(
                             to: prompt,
@@ -365,6 +433,8 @@ actor InferenceService {
                             var decodeTimer: LLMProfiler.Timer?
                             var emittedTextChunkCount = 0
                             var emittedTextCharacterCount = 0
+                            var generatedText = ""
+                            var receivedCompletionInfo = false
                             var lastDecodeProgressSnapshot = 0.0
 
                             generationLoop: for try await generation in stream {
@@ -372,6 +442,7 @@ actor InferenceService {
 
                                 switch generation {
                                 case .chunk(let chunk):
+                                    generatedText.append(chunk)
                                     if profile.tokenizationDuration == nil {
                                         profile.tokenizationDuration = streamSetupTimer.elapsedSeconds()
                                         saveInProgressProfile(
@@ -423,6 +494,7 @@ actor InferenceService {
                                     }
 
                                 case .info(let info):
+                                    receivedCompletionInfo = true
                                     profile.inputTokenCount = info.promptTokenCount
                                     profile.outputTokenCount = info.generationTokenCount
                                     profile.prefillPromptEvaluationDuration = info.promptTime
@@ -456,6 +528,35 @@ actor InferenceService {
                                 profile.decodeGenerationDuration = decodeTimer?.elapsedSeconds()
                                 profile.decodeGenerationDurationSource = "consumer_wall_clock_decode_loop"
                             }
+
+                            if canUseConversationCache,
+                               receivedCompletionInfo,
+                               profile.stopReason != "cancelled",
+                               let conversationCacheKey,
+                               let loadedModelId {
+                                // ChatViewModel only enables caching when the generation prompt
+                                // matches the visible user text, keeping the session and fingerprint aligned.
+                                var completedHistory = history
+                                completedHistory.append(
+                                    .init(
+                                        role: .user,
+                                        content: conversationCacheUserText ?? prompt
+                                    )
+                                )
+                                completedHistory.append(.init(role: .assistant, content: generatedText))
+                                session.instructions = nil
+                                conversationSessionCache = ConversationSessionCache(
+                                    key: conversationCacheKey,
+                                    modelId: loadedModelId,
+                                    historyFingerprint: Self.historyFingerprint(completedHistory),
+                                    systemPrompt: systemPrompt,
+                                    thinkingEnabled: thinkingEnabled,
+                                    generationCacheSignature: cacheSignature,
+                                    session: session
+                                )
+                            } else if conversationCacheKey != nil {
+                                conversationSessionCache = nil
+                            }
                         }
                     }
 
@@ -465,6 +566,7 @@ actor InferenceService {
                             availableMemoryBytes: LLMProfiler.availableMemoryBytes()
                         )
                     {
+                        conversationSessionCache = nil
                         MLX.Memory.clearCache()
                     }
                     continuation.finish()
@@ -595,9 +697,11 @@ actor InferenceService {
     func unload() async {
         let wasLoaded = modelContainer != nil
         modelContainer = nil
+        loadedModelId = nil
         loadedModelSupportsVision = false
         visionFeaturesEnabled = false
         lastModelLoadMetrics = nil
+        conversationSessionCache = nil
 
         if wasLoaded {
             await Task.yield()
@@ -610,76 +714,112 @@ actor InferenceService {
         locale: VoiceLocale,
         assets: SpeechAssetFileLocations
     ) async throws -> SynthesizedSpeech {
-        #if targetEnvironment(simulator)
-        throw InferenceError.simulatorUnsupported
-        #else
-        defer {
-            releaseSpeechSynthesisResources()
+        var combinedAudio: [Float] = []
+        let stream = synthesizeSpeechStream(text: text, locale: locale, assets: assets)
+        for try await chunk in stream {
+            combinedAudio.append(contentsOf: chunk.samples)
         }
-
-        guard locale.supportsLiveKokoroSynthesis else {
-            throw InferenceError.unsupportedSpeechLocale(locale.displayName)
-        }
-
-        MLX.Memory.clearCache()
-
-        if kokoroAssets != assets || kokoroTTS == nil || kokoroVoiceEmbedding == nil || kokoroVoiceLocale != locale {
-            let g2p: G2P = {
-                switch locale {
-                case .english: return .misaki
-                case .spanish, .simplifiedChinese: return .multilingual
-                }
-            }()
-            kokoroTTS = KokoroTTS(modelPath: assets.modelURL, g2p: g2p)
-            let voiceWeights = try MLX.loadArrays(url: assets.voiceURL)
-            guard let firstKey = voiceWeights.keys.sorted().first,
-                  let voiceEmbedding = voiceWeights[firstKey] else {
-                throw InferenceError.speechAssetsUnavailable
-            }
-            kokoroVoiceEmbedding = voiceEmbedding
-            kokoroAssets = assets
-            kokoroVoiceLocale = locale
-        }
-
-        guard let kokoroTTS,
-              let voiceEmbedding = kokoroVoiceEmbedding else {
-            throw InferenceError.speechAssetsUnavailable
-        }
-
-        let language: Language = {
-            switch locale {
-            case .english: return .enUS
-            case .spanish: return .spanish
-            case .simplifiedChinese: return .mandarinChinese
-            }
-        }()
-        let chunks = speechChunks(for: text)
-        guard !chunks.isEmpty else {
-            throw InferenceError.speechTextEmpty
-        }
-        let audio = try await withPreferredDevice {
-            var combinedAudio: [Float] = []
-            combinedAudio.reserveCapacity(chunks.count * 24_000)
-
-            for index in chunks.indices {
-                let chunkAudio = try kokoroTTS.generateAudio(
-                    voice: voiceEmbedding,
-                    language: language,
-                    text: chunks[index]
-                ).0
-                combinedAudio.append(contentsOf: chunkAudio)
-                if index < chunks.index(before: chunks.endIndex) {
-                    combinedAudio.append(contentsOf: Array(repeating: 0, count: 2_400))
-                }
-            }
-
-            return combinedAudio
-        }
-        MLX.Memory.clearCache()
         return SynthesizedSpeech(
-            samples: audio,
+            samples: combinedAudio,
             sampleRate: Double(KokoroTTS.Constants.samplingRate)
         )
+    }
+
+    func synthesizeSpeechStream(
+        text: String,
+        locale: VoiceLocale,
+        assets: SpeechAssetFileLocations
+    ) -> AsyncThrowingStream<SynthesizedSpeech, Error> {
+        #if targetEnvironment(simulator)
+        return AsyncThrowingStream { continuation in
+            continuation.finish(throwing: InferenceError.simulatorUnsupported)
+        }
+        #else
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    guard locale.supportsLiveKokoroSynthesis else {
+                        throw InferenceError.unsupportedSpeechLocale(locale.displayName)
+                    }
+
+                    MLX.Memory.clearCache()
+
+                    if kokoroAssets != assets || kokoroTTS == nil || kokoroVoiceEmbedding == nil
+                        || kokoroVoiceLocale != locale
+                    {
+                        let g2p: G2P = {
+                            switch locale {
+                            case .english: return .misaki
+                            case .spanish, .simplifiedChinese: return .multilingual
+                            }
+                        }()
+                        kokoroTTS = KokoroTTS(modelPath: assets.modelURL, g2p: g2p)
+                        let voiceWeights = try MLX.loadArrays(url: assets.voiceURL)
+                        guard let firstKey = voiceWeights.keys.sorted().first,
+                              let voiceEmbedding = voiceWeights[firstKey] else {
+                            throw InferenceError.speechAssetsUnavailable
+                        }
+                        kokoroVoiceEmbedding = voiceEmbedding
+                        kokoroAssets = assets
+                        kokoroVoiceLocale = locale
+                    }
+
+                    guard let kokoroTTS,
+                          let voiceEmbedding = kokoroVoiceEmbedding else {
+                        throw InferenceError.speechAssetsUnavailable
+                    }
+
+                    let language: Language = {
+                        switch locale {
+                        case .english: return .enUS
+                        case .spanish: return .spanish
+                        case .simplifiedChinese: return .mandarinChinese
+                        }
+                    }()
+                    let chunks = speechChunks(for: text)
+                    guard !chunks.isEmpty else {
+                        throw InferenceError.speechTextEmpty
+                    }
+
+                    let clearCacheBetweenStages = InferenceOptimizationPolicy
+                        .shouldClearCacheBetweenSpeechStages(
+                            availableMemoryBytes: LLMProfiler.availableMemoryBytes()
+                        )
+                    for index in chunks.indices {
+                        try Task.checkCancellation()
+                        var samples = try kokoroTTS.generateAudio(
+                            voice: voiceEmbedding,
+                            language: language,
+                            text: chunks[index],
+                            clearCacheBetweenStages: clearCacheBetweenStages
+                        ).0
+                        if index < chunks.index(before: chunks.endIndex) {
+                            samples.append(contentsOf: repeatElement(Float.zero, count: 2_400))
+                        }
+                        if case .terminated = continuation.yield(
+                            SynthesizedSpeech(
+                                samples: samples,
+                                sampleRate: Double(KokoroTTS.Constants.samplingRate)
+                            )
+                        ) {
+                            break
+                        }
+                    }
+
+                    if InferenceOptimizationPolicy.shouldReclaimCache(
+                        availableMemoryBytes: LLMProfiler.availableMemoryBytes()
+                    ) {
+                        MLX.Memory.clearCache()
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
         #endif
     }
 
@@ -848,5 +988,29 @@ actor InferenceService {
         case .cancelled:
             return "cancelled"
         }
+    }
+
+    private nonisolated static func historyFingerprint(_ history: [ChatMessage]) -> String {
+        var hasher = SHA256()
+        for message in history {
+            hasher.update(data: Data(message.role.rawValue.utf8))
+            hasher.update(data: Data([0]))
+            hasher.update(data: Data(message.content.utf8))
+            hasher.update(data: Data([0xff]))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private nonisolated static func generationCacheSignature(
+        optimizationPlan: InferenceOptimizationPlan,
+        supportsVision: Bool
+    ) -> String {
+        [
+            optimizationPlan.maxKVSize.map(String.init) ?? "none",
+            optimizationPlan.kvBits.map(String.init) ?? "none",
+            String(optimizationPlan.kvGroupSize),
+            String(optimizationPlan.quantizedKVStart),
+            supportsVision ? "vision" : "text",
+        ].joined(separator: ":")
     }
 }

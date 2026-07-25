@@ -738,7 +738,7 @@
 			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
 			requirement = {
 				kind = exactVersion;
-				version = 3.31.3;
+				version = 3.31.4;
 			};
 		};
 		E7B002002F7D30000002P003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {

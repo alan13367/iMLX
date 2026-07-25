@@ -79,7 +79,7 @@ xcodebuild -downloadComponent MetalToolchain
 4. iOS Simulator cannot run MLX inference, AlarmKit scheduling, or Live Activities. Use it for builds/UI only; use a physical device for those features.
 5. Inference is foreground-only. Do not design around background GPU execution.
 6. Deployment target is iOS 26+.
-7. The project uses `mlx-swift` from `main`, pins `mlx-swift-lm` to `3.31.3`, and uses `swift-tokenizers-mlx` for local tokenizer loading.
+7. The project uses `mlx-swift` from `main`, pins `mlx-swift-lm` to `3.31.4`, and uses `swift-tokenizers-mlx` for local tokenizer loading.
 8. The Xcode target defaults actor isolation to `MainActor`; pure off-main helpers may need explicit `nonisolated`.
 9. Persisted chat/conversation/tool/source models require backward-compatible decoding.
 10. Do not add parallel architecture when an existing service boundary fits.

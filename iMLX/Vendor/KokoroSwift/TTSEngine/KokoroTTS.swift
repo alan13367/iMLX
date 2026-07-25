@@ -170,7 +170,13 @@ nonisolated public final class KokoroTTS {
   /// - Returns: Array of audio samples as Float values
   /// - Throws: `KokoroTTSError.tooManyTokens` if text is too long,
   ///           or `G2PProcessorError` if G2P processing fails
-  public func generateAudio(voice: MLXArray, language: Language, text: String, speed: Float = 1.0) throws -> ([Float], [MToken]?) {
+  public func generateAudio(
+    voice: MLXArray,
+    language: Language,
+    text: String,
+    speed: Float = 1.0,
+    clearCacheBetweenStages: Bool = true
+  ) throws -> ([Float], [MToken]?) {
     // Update language if it has changed
     try updateLanguageIfNeeded(language)
 
@@ -192,7 +198,7 @@ nonisolated public final class KokoroTTS {
       style: globalStyle
     )
     MLX.eval(durationFeatures)
-    MLX.Memory.clearCache()
+    clearCacheIfNeeded(clearCacheBetweenStages)
     
     // Step 5: Predict phoneme durations
     let (predictedDurations, alignmentTarget) = predictDurations(
@@ -201,23 +207,23 @@ nonisolated public final class KokoroTTS {
       speed: speed
     )
     MLX.eval(predictedDurations, alignmentTarget)
-    MLX.Memory.clearCache()
+    clearCacheIfNeeded(clearCacheBetweenStages)
     
     // Step 6: Generate aligned encodings
     let alignedEncoding = durationFeatures.transposed(0, 2, 1).matmul(alignmentTarget)
     MLX.eval(alignedEncoding)
-    MLX.Memory.clearCache()
+    clearCacheIfNeeded(clearCacheBetweenStages)
     
     // Step 7: Predict prosody (F0, pitch)
     let (f0Prediction, nPrediction) = prosodyPredictor.F0NTrain(x: alignedEncoding, s: globalStyle)
     MLX.eval(f0Prediction, nPrediction)
-    MLX.Memory.clearCache()
+    clearCacheIfNeeded(clearCacheBetweenStages)
     
     // Step 8: Encode text for decoder
     let textEncoding = textEncoder(paddedInputIds, inputLengths: inputLengths, m: textMask)
     let asrFeatures = MLX.matmul(textEncoding, alignmentTarget)
     MLX.eval(asrFeatures)
-    MLX.Memory.clearCache()
+    clearCacheIfNeeded(clearCacheBetweenStages)
     
     // Step 9: Generate audio
     let audio = decoder(
@@ -227,7 +233,7 @@ nonisolated public final class KokoroTTS {
       s: acousticStyle
     )[0]
     MLX.eval(audio)
-    MLX.Memory.clearCache()
+    clearCacheIfNeeded(clearCacheBetweenStages)
     
     // Try to predict timestamp of each token if G2P processor returns tokens
     if let tokenArray {
@@ -235,6 +241,12 @@ nonisolated public final class KokoroTTS {
     }
 
     return (audio[0].asArray(Float.self), tokenArray)
+  }
+
+  private func clearCacheIfNeeded(_ shouldClear: Bool) {
+    if shouldClear {
+      MLX.Memory.clearCache()
+    }
   }
   
   /// Updates the G2P language if it differs from the current language.

@@ -396,9 +396,15 @@ final class ChatViewModel {
                     for: loadedModel
                 )
             }
-            let effectiveUserPrompt = self.promptWithToolContext(
+            let toolAugmentedUserPrompt = self.promptWithToolContext(
                 userPrompt: text,
                 toolContext: toolContextBlock
+            )
+            // Keep the ChatSession system prompt stable across turns so prefix KV reuse can hit.
+            // Per-turn memory is folded into the user prompt instead.
+            let effectiveUserPrompt = self.promptWithMemoryContext(
+                userPrompt: toolAugmentedUserPrompt,
+                memoryContext: memoryContext
             )
             Self.debugToolLog(
                 "generation context: tool=\(toolResult?.toolName ?? "none") toolSources=\(toolResult?.sources.count ?? 0) " +
@@ -406,7 +412,7 @@ final class ChatViewModel {
             )
             let effectiveSystemPrompt = self.mergedSystemPrompt(
                 base: systemPrompt,
-                memoryContext: memoryContext,
+                memoryContext: "",
                 toolContext: "",
                 thinkingEnabled: thinkingEnabled,
                 replyMode: replyMode
@@ -414,6 +420,8 @@ final class ChatViewModel {
             let promptConstructionDuration = promptConstructionTimer.elapsedSeconds()
             LLMProfiler.endInterval("Prompt Construction", promptConstructionSignpost)
 
+            let canUseConversationCache = effectiveUserPrompt == text
+                && (userMessage.attachedImages?.isEmpty ?? true)
             let stream = await self.inferenceService.generate(
                 prompt: effectiveUserPrompt,
                 images: userMessage.attachedImages,
@@ -434,7 +442,11 @@ final class ChatViewModel {
                     topP: topP,
                     repetitionPenalty: repetitionPenalty,
                     thinkingEnabled: loadedModel?.supportsThinking == true ? thinkingEnabled : nil
-                )
+                ),
+                conversationCacheKey: canUseConversationCache
+                    ? activeConversationId?.uuidString
+                    : nil,
+                conversationCacheUserText: canUseConversationCache ? text : nil
             )
 
             for try await token in stream {
@@ -462,11 +474,14 @@ final class ChatViewModel {
             flushResponseToUI(force: true)
 
             if shouldForceFinalAnswerFollowUp || self.shouldRunFinalAnswerFollowUp(for: latestParsedResponse, thinkingEnabled: thinkingEnabled) {
+                // Follow-up rebuilds with a different system prompt and mutates the visible
+                // assistant transcript, so any prefix session from the first pass is stale.
+                await self.inferenceService.invalidateConversationSessionCache()
                 let finalPromptConstructionSignpost = LLMProfiler.beginInterval("Prompt Construction")
                 let finalPromptConstructionTimer = LLMProfiler.Timer()
                 let finalSystemPrompt = self.finalAnswerSystemPrompt(
                     base: systemPrompt,
-                    memoryContext: memoryContext,
+                    memoryContext: "",
                     toolContext: "",
                     replyMode: replyMode
                 )
@@ -1443,9 +1458,10 @@ final class ChatViewModel {
     }
 
     private func promptHistory(from history: [ChatMessage], for model: ModelInfo?) -> [ChatMessage] {
-        guard isMemoryConstrainedLargeModel(model) else { return history }
-        return history
-            .suffix(Constants.Generation.memoryConstrainedHistoryMessageLimit)
+        let boundedHistory = isMemoryConstrainedLargeModel(model)
+            ? Array(history.suffix(Constants.Generation.memoryConstrainedHistoryMessageLimit))
+            : history
+        return boundedHistory
             .map { message in
                 var promptMessage = message
                 promptMessage.attachedImages = nil
@@ -1471,6 +1487,16 @@ final class ChatViewModel {
         \(trimmedToolContext)
 
         User request:
+        \(userPrompt)
+        """
+    }
+
+    private func promptWithMemoryContext(userPrompt: String, memoryContext: String) -> String {
+        let trimmedMemoryContext = memoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMemoryContext.isEmpty else { return userPrompt }
+        return """
+        \(trimmedMemoryContext)
+
         \(userPrompt)
         """
     }

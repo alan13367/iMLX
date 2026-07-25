@@ -261,32 +261,46 @@ final class LiveVoiceSessionViewModel {
         statusText = String.appLocalized("voice.status.preparing_speech")
 
         do {
-            let speech = try await appState.inferenceService.synthesizeSpeech(
+            let speechStream = await appState.inferenceService.synthesizeSpeechStream(
                 text: text,
                 locale: voiceLocale,
                 assets: assetLocations
             )
-            guard isSessionActive, !Task.isCancelled, activeSpeakSession == session else {
-                isSpeaking = false
-                activeSpeakSession = nil
-                await resumeConversationModelIfNeeded()
-                return
-            }
-            try playbackService.play(speech) { [weak self] in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard self.isSessionActive, self.activeSpeakSession == session else { return }
-                    self.activeSpeakSession = nil
-                    self.isSpeaking = false
-                    self.statusText = String.appLocalized("voice.status.preparing_next_turn")
-                    await self.resumeConversationModelIfNeeded()
-                    self.statusText = String.appLocalized("voice.status.listening")
-                    if self.isSessionActive {
-                        await self.startListeningCycle()
-                    }
+            var didStartPlayback = false
+            for try await speechChunk in speechStream {
+                guard isSessionActive, !Task.isCancelled, activeSpeakSession == session else {
+                    playbackService.stop()
+                    isSpeaking = false
+                    activeSpeakSession = nil
+                    await resumeConversationModelIfNeeded()
+                    return
                 }
+                if !didStartPlayback {
+                    try playbackService.startStreaming(sampleRate: speechChunk.sampleRate) { [weak self] in
+                        guard let self else { return }
+                        Task { @MainActor in
+                            guard self.isSessionActive, self.activeSpeakSession == session else { return }
+                            self.activeSpeakSession = nil
+                            self.isSpeaking = false
+                            self.statusText = String.appLocalized("voice.status.preparing_next_turn")
+                            await self.resumeConversationModelIfNeeded()
+                            self.statusText = String.appLocalized("voice.status.listening")
+                            if self.isSessionActive {
+                                await self.startListeningCycle()
+                            }
+                        }
+                    }
+                    didStartPlayback = true
+                    statusText = String.appLocalized("voice.status.preparing_speech")
+                }
+                try playbackService.enqueue(speechChunk)
             }
+            guard didStartPlayback else {
+                throw InferenceError.speechTextEmpty
+            }
+            playbackService.finishStreaming()
         } catch {
+            playbackService.stop()
             activeSpeakSession = nil
             guard isSessionActive, !Task.isCancelled else { return }
             isSpeaking = false
@@ -319,6 +333,9 @@ final class LiveVoiceSessionViewModel {
     private func resumeConversationModelIfNeeded() async {
         let model = suspendedModelForPlayback
         suspendedModelForPlayback = nil
+        if model != nil {
+            await appState.inferenceService.unloadSpeechSynthesisResources()
+        }
         isRestoringConversationModel = true
         await chatViewModel.resumeModelAfterVoicePlayback(model)
         isRestoringConversationModel = false

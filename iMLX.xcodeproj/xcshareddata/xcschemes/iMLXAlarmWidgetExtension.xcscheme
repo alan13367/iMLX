@@ -18,6 +18,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "E7A1A1022F9001000001A102"
                BuildableName = "iMLXAlarmWidgetExtension.appex"
+               BlueprintName = "iMLXAlarmWidgetExtension"
                ReferencedContainer = "container:iMLX.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -31,6 +32,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "E73069FF2F7D21010061F6D5"
                BuildableName = "iMLX.app"
+               BlueprintName = "iMLX"
                ReferencedContainer = "container:iMLX.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -63,6 +65,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E7A1A1022F9001000001A102"
             BuildableName = "iMLXAlarmWidgetExtension.appex"
+            BlueprintName = "iMLXAlarmWidgetExtension"
             ReferencedContainer = "container:iMLX.xcodeproj">
          </BuildableReference>
       </RemoteRunnable>
@@ -71,6 +74,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E73069FF2F7D21010061F6D5"
             BuildableName = "iMLX.app"
+            BlueprintName = "iMLX"
             ReferencedContainer = "container:iMLX.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -106,6 +110,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E73069FF2F7D21010061F6D5"
             BuildableName = "iMLX.app"
+            BlueprintName = "iMLX"
             ReferencedContainer = "container:iMLX.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

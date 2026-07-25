@@ -292,7 +292,11 @@ actor WebSearchService {
     private func fetchReadablePage(for url: URL) async throws -> ReadablePage? {
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
+        #if os(macOS)
+        request.setValue("Mozilla/5.0 (Macintosh; Apple Silicon Mac OS X) AppleWebKit/605.1.15 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+        #else
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        #endif
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<400).contains(httpResponse.statusCode) else {

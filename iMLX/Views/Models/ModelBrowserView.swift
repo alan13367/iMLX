@@ -39,10 +39,11 @@ struct ModelBrowserView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
+        .background(PlatformColors.groupedBackground)
         .navigationTitle(String.appLocalized("models.browser.title"))
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            #if os(iOS)
+            ToolbarItem(placement: .imlxTrailing) {
                 Button {
                     dismiss()
                 } label: {
@@ -50,6 +51,7 @@ struct ModelBrowserView: View {
                 }
                 .accessibilityLabel(String.appLocalized("common.close"))
             }
+            #endif
         }
         .navigationDestination(item: $selectedFamily) { family in
             FamilyModelsView(family: family, viewModel: viewModel)
@@ -209,9 +211,9 @@ struct FamilyModelsView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
+        .background(PlatformColors.groupedBackground)
         .navigationTitle(family.displayName)
-        .navigationBarTitleDisplayMode(.inline)
+        .imlxInlineNavigationTitle()
     }
 }
 

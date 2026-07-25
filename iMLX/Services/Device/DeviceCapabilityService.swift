@@ -62,13 +62,8 @@ nonisolated final class DeviceCapabilityService {
     }
 
     var availableMemoryMB: UInt64 {
-        #if os(iOS)
-        let available = os_proc_available_memory()
-        guard available != 0 else { return 0 }
-        return UInt64(available / (1024 * 1024))
-        #else
-        return 0
-        #endif
+        guard let available = SystemMemory.availableBytes() else { return 0 }
+        return available / (1024 * 1024)
     }
 
     func compatibleModels(from registry: [ModelInfo]) -> [ModelInfo] {

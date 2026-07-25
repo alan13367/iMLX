@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 private enum SettingsNavigationDestination: String, Hashable {
     case memory
@@ -13,21 +12,42 @@ private enum SettingsNavigationDestination: String, Hashable {
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
 
     @Bindable var appState: AppState
+    var showsCloseButton = true
     @State private var showClearModelsAlert = false
     @State private var navigationDestination: SettingsNavigationDestination?
     @State private var hapticWarningTrigger = 0
     private let deviceCapability = DeviceCapabilityService()
 
     var body: some View {
+        Group {
+            #if os(macOS)
+            MacSettingsRootView(
+                appState: appState,
+                deviceCapability: deviceCapability,
+                showClearModelsAlert: $showClearModelsAlert
+            )
+            #else
+            mobileSettingsContent
+            #endif
+        }
+        .alert(String.appLocalized("settings.clear_alert_title"), isPresented: $showClearModelsAlert) {
+            Button(String.appLocalized("common.cancel"), role: .cancel) {}
+            Button(String.appLocalized("settings.clear_confirm"), role: .destructive) {
+                clearAllModels()
+            }
+        } message: {
+            Text(String.appLocalized("settings.clear_alert_message"))
+        }
+        .sensoryFeedback(.warning, trigger: hapticWarningTrigger)
+    }
+
+    private var mobileSettingsContent: some View {
         Form {
             Section {
                 Button {
-                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
-                        openURL(settingsURL)
-                    }
+                    PlatformApplication.openLanguageSettings()
                 } label: {
                     SettingsValueRow(
                         title: String.appLocalized("settings.section.language"),
@@ -108,13 +128,15 @@ struct SettingsView: View {
         }
         .navigationTitle(String.appLocalized("settings.title"))
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    dismiss()
-                } label: {
-                    CloseButtonLabel()
+            if showsCloseButton {
+                ToolbarItem(placement: .imlxTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        CloseButtonLabel()
+                    }
+                    .accessibilityLabel(String.appLocalized("common.close"))
                 }
-                .accessibilityLabel(String.appLocalized("common.close"))
             }
         }
         .navigationDestination(item: $navigationDestination) { destination in
@@ -138,15 +160,6 @@ struct SettingsView: View {
             #endif
             }
         }
-        .alert(String.appLocalized("settings.clear_alert_title"), isPresented: $showClearModelsAlert) {
-            Button(String.appLocalized("common.cancel"), role: .cancel) {}
-            Button(String.appLocalized("settings.clear_confirm"), role: .destructive) {
-                clearAllModels()
-            }
-        } message: {
-            Text(String.appLocalized("settings.clear_alert_message"))
-        }
-        .sensoryFeedback(.warning, trigger: hapticWarningTrigger)
     }
 
     private func clearAllModels() {
@@ -195,6 +208,168 @@ struct SettingsView: View {
     #endif
 }
 
+#if os(macOS)
+private enum MacSettingsSection: String, Hashable {
+    case general
+    case assistant
+    case memory
+    case speech
+    #if DEBUG
+    case profiling
+    #endif
+    case about
+
+    var title: String {
+        switch self {
+        case .general:
+            String.appLocalized("settings.section.app")
+        case .assistant:
+            String.appLocalized("settings.assistant.title")
+        case .memory:
+            String.appLocalized("settings.manage_memory")
+        case .speech:
+            String.appLocalized("settings.speech_assets.section")
+        #if DEBUG
+        case .profiling:
+            "LLM Profiling"
+        #endif
+        case .about:
+            String.appLocalized("settings.section.about")
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general:
+            "gearshape"
+        case .assistant:
+            "person.crop.circle"
+        case .memory:
+            "brain.head.profile"
+        case .speech:
+            "waveform"
+        #if DEBUG
+        case .profiling:
+            "gauge.with.dots.needle.67percent"
+        #endif
+        case .about:
+            "info.circle"
+        }
+    }
+}
+
+private struct MacSettingsRootView: View {
+    @Bindable var appState: AppState
+    let deviceCapability: DeviceCapabilityService
+    @Binding var showClearModelsAlert: Bool
+    @State private var selection: MacSettingsSection? = .general
+
+    private var activeSection: MacSettingsSection {
+        selection ?? .general
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $selection) {
+                Section {
+                    settingsLink(.general)
+                    settingsLink(.assistant)
+                    settingsLink(.memory)
+                    settingsLink(.speech)
+                }
+
+                #if DEBUG
+                Section("Developer") {
+                    settingsLink(.profiling)
+                }
+                #endif
+
+                Section {
+                    settingsLink(.about)
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationTitle(String.appLocalized("settings.title"))
+            .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 250)
+        } detail: {
+            NavigationStack {
+                detailView(for: activeSection)
+            }
+            .id(activeSection)
+        }
+    }
+
+    private func settingsLink(_ section: MacSettingsSection) -> some View {
+        Label(section.title, systemImage: section.systemImage)
+            .tag(section)
+            .accessibilityLabel(section.title)
+    }
+
+    @ViewBuilder
+    private func detailView(for section: MacSettingsSection) -> some View {
+        switch section {
+        case .general:
+            MacGeneralSettingsView(appState: appState)
+        case .assistant:
+            AssistantSettingsView(appState: appState)
+        case .memory:
+            MemoryLibraryView(appState: appState)
+        case .speech:
+            SpeechAssetsSettingsView(appState: appState)
+        #if DEBUG
+        case .profiling:
+            LLMProfilingView(appState: appState)
+        #endif
+        case .about:
+            AboutSettingsView(
+                appState: appState,
+                appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0",
+                deviceCapability: deviceCapability,
+                showClearModelsAlert: $showClearModelsAlert
+            )
+        }
+    }
+}
+
+private struct MacGeneralSettingsView: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Form {
+            Section {
+                Button {
+                    PlatformApplication.openLanguageSettings()
+                } label: {
+                    SettingsValueRow(
+                        title: String.appLocalized("settings.section.language"),
+                        detail: String.appLocalized("settings.language.mac_system_settings_detail"),
+                        systemImage: "globe"
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Toggle(isOn: Binding(
+                    get: { appState.openKeyboardOnLaunch },
+                    set: { appState.setOpenKeyboardOnLaunch($0) }
+                )) {
+                    Label(
+                        String.appLocalized("settings.focus_composer_on_launch"),
+                        systemImage: "text.cursor"
+                    )
+                }
+            } header: {
+                SettingsSectionHeader(
+                    title: String.appLocalized("settings.section.app"),
+                    systemImage: "gearshape"
+                )
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(String.appLocalized("settings.section.app"))
+    }
+}
+#endif
+
 private struct SpeechAssetsSettingsView: View {
     @Bindable var appState: AppState
 
@@ -225,6 +400,7 @@ private struct SpeechAssetsSettingsView: View {
                 }
             }
         }
+        .imlxSettingsFormStyle()
         .navigationTitle(String.appLocalized("settings.speech_assets.section"))
     }
 
@@ -265,7 +441,7 @@ private struct AboutSettingsView: View {
                         showClearModelsAlert: $showClearModelsAlert
                     )
                 } label: {
-                    Label(String.appLocalized("settings.section.device"), systemImage: "iphone")
+                    Label(String.appLocalized("settings.section.device"), systemImage: settingsDeviceSystemImage)
                 }
 
                 NavigationLink {
@@ -299,6 +475,7 @@ private struct AboutSettingsView: View {
                 }
             }
         }
+        .imlxSettingsFormStyle()
         .navigationTitle(String.appLocalized("settings.section.about"))
     }
 }
@@ -323,7 +500,7 @@ private struct DeviceSettingsView: View {
             } header: {
                 SettingsSectionHeader(
                     title: String.appLocalized("settings.section.device"),
-                    systemImage: "iphone"
+                    systemImage: settingsDeviceSystemImage
                 )
             }
 
@@ -333,8 +510,17 @@ private struct DeviceSettingsView: View {
                 }
             }
         }
+        .imlxSettingsFormStyle()
         .navigationTitle(String.appLocalized("settings.section.device"))
     }
+}
+
+private var settingsDeviceSystemImage: String {
+    #if os(macOS)
+    "laptopcomputer"
+    #else
+    "iphone"
+    #endif
 }
 
 private struct LegalTextView: View {
@@ -381,6 +567,17 @@ private struct LicensesSettingsView: View {
             }
         }
         .navigationTitle(String.appLocalized("settings.about.licenses"))
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func imlxSettingsFormStyle() -> some View {
+        #if os(macOS)
+        formStyle(.grouped)
+        #else
+        self
+        #endif
     }
 }
 

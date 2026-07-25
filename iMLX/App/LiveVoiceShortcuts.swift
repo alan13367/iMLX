@@ -5,7 +5,7 @@ struct OpenLiveVoiceIntent: AppIntent {
     nonisolated static let description = IntentDescription("Open iMLX directly in a live voice conversation.")
     nonisolated static let isDiscoverable = true
 
-    @available(iOS 26.0, *)
+    @available(iOS 26.0, macOS 26.0, *)
     nonisolated static var supportedModes: IntentModes {
         .foreground(.immediate)
     }

@@ -26,6 +26,7 @@ final class AppState {
     var assistantTemperature: Double
     var openKeyboardOnLaunch: Bool
     var voiceSessionInvalidationSeed: Int = 0
+    var pendingComposerFocusToken: UUID?
     var pendingShortcutRoute: AppShortcutRoute?
     var latestLLMExecutionProfile: LLMExecutionProfile?
     var llmExecutionProfiles: [LLMExecutionProfile] = []
@@ -600,6 +601,16 @@ final class AppState {
             Haptics.impactLight()
         }
         return conversation.id
+    }
+
+    func requestComposerFocus() {
+        pendingComposerFocusToken = UUID()
+    }
+
+    func consumeComposerFocusRequest() -> Bool {
+        guard pendingComposerFocusToken != nil else { return false }
+        pendingComposerFocusToken = nil
+        return true
     }
 
     private func removeEmptyDraftConversations(excluding preservedID: UUID? = nil) {

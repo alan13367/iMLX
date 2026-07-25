@@ -1,6 +1,4 @@
 import SwiftUI
-import UIKit
-import UniformTypeIdentifiers
 
 /// Top-level message row. Renders a `ChatMessage` (and an optional in-flight
 /// streaming overlay) using the small per-purpose component library.
@@ -21,8 +19,6 @@ struct MessageRow: View, Equatable {
     let onOpenSourceURL: (URL?) -> Void
 
     @State private var localThinkingExpanded: Bool = false
-    @State private var showShareSheet: Bool = false
-    @Environment(\.openURL) private var openURL
 
     init(
         message: ChatMessage,
@@ -85,9 +81,6 @@ struct MessageRow: View, Equatable {
                 Spacer(minLength: 24)
             }
         }
-        .sheet(isPresented: $showShareSheet) {
-            ShareSheet(items: [shareableText])
-        }
     }
 
     // MARK: - Assistant body
@@ -141,9 +134,7 @@ struct MessageRow: View, Equatable {
             } label: {
                 Label(String.appLocalized("message.copy"), systemImage: "doc.on.doc")
             }
-            Button {
-                showShareSheet = true
-            } label: {
+            ShareLink(item: shareableText) {
                 Label(String.appLocalized("message.share"), systemImage: "square.and.arrow.up")
             }
         }
@@ -156,9 +147,7 @@ struct MessageRow: View, Equatable {
         } label: {
             Label(String.appLocalized("message.copy"), systemImage: "doc.on.doc")
         }
-        Button {
-            showShareSheet = true
-        } label: {
+        ShareLink(item: shareableText) {
             Label(String.appLocalized("message.share"), systemImage: "square.and.arrow.up")
         }
         if deliveryState == .failed, let onRetry {
@@ -200,16 +189,6 @@ struct MessageRow: View, Equatable {
             && message.toolTrace?.toolName == "contacts_lookup"
             && message.toolTrace?.success == true
     }
-}
-
-private struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 #Preview("Assistant message") {

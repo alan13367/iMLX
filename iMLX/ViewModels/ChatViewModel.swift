@@ -810,6 +810,11 @@ final class ChatViewModel {
 
     @MainActor
     func appendPendingImage(_ data: Data) {
+        guard canUseVision else {
+            errorMessage = String.appLocalized("error.chat.vision_required")
+            Haptics.notificationError()
+            return
+        }
         pendingImages.append(ChatAttachmentImage(data: data))
     }
 
@@ -888,7 +893,7 @@ final class ChatViewModel {
         userMessage: ChatMessage,
         assistantMessage: ChatMessage
     ) async throws -> String? {
-        guard #available(iOS 26.0, *) else { return nil }
+        guard #available(iOS 26.0, macOS 26.0, *) else { return nil }
         let model = SystemLanguageModel(useCase: .general)
         guard model.isAvailable else { return nil }
 
@@ -1261,7 +1266,7 @@ final class ChatViewModel {
             return []
         }
 
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             if let candidates = try await extractMemoryCandidatesWithAppleFoundationModel(
                 userMessage: userMessage
             ) {
@@ -1275,7 +1280,7 @@ final class ChatViewModel {
         )
     }
 
-    @available(iOS 26.0, *)
+    @available(iOS 26.0, macOS 26.0, *)
     private func extractMemoryCandidatesWithAppleFoundationModel(
         userMessage: ChatMessage
     ) async throws -> [MemoryExtractionCandidate]? {

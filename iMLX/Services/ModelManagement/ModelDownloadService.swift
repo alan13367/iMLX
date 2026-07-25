@@ -1,7 +1,11 @@
 import Foundation
 
 actor ModelDownloadService {
+    #if os(macOS)
+    static let backgroundSessionIdentifier = "com.alan13367.iMLX.macOS.model-downloads"
+    #else
     static let backgroundSessionIdentifier = "com.alan13367.iMLX.model-downloads"
+    #endif
 
     private static let defaultRevision = "main"
     private static let modelFileGlobs = ["*.safetensors", "*.json", "*.jinja", "*.txt", "*.model"]

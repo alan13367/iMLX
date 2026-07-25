@@ -85,7 +85,7 @@ struct OnboardingFlowView: View {
                     .tag(currentStep)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .modifier(OnboardingTabViewStyle())
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: step)
 
             // Fixed Footer
@@ -175,6 +175,17 @@ struct OnboardingFlowView: View {
             return snapshot.displayStatus
         }
         return "Download \(model.displayName)"
+    }
+}
+
+private struct OnboardingTabViewStyle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.tabViewStyle(.page(indexDisplayMode: .never))
+        #else
+        content.tabViewStyle(.automatic)
+        #endif
     }
 }
 

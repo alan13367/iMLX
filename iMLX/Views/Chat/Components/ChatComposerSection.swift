@@ -56,9 +56,11 @@ struct ChatComposerSection: View {
                     }
 
                     if state.canUseVision {
+                        #if os(iOS)
                         Button(action: actions.openCamera) {
                             Label(String.appLocalized("chat.take_photo"), systemImage: "camera")
                         }
+                        #endif
 
                         Button(action: actions.openPhotoLibrary) {
                             Label(String.appLocalized("chat.photo_library"), systemImage: "photo.on.rectangle")
@@ -76,7 +78,7 @@ struct ChatComposerSection: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.title3.weight(.semibold))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 36, height: 36)
                         .foregroundStyle(BrandPalette.accent)
                         .liquidGlassSurface(
                             tint: BrandPalette.accent.opacity(0.12),
@@ -86,14 +88,17 @@ struct ChatComposerSection: View {
                         )
                 }
                 .tint(.primary)
+                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
                 .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel("Add attachment")
 
                 if state.canUseThinking {
                     Button(action: actions.toggleThinking) {
                         Image(systemName: state.isThinkingEnabled ? "lightbulb.fill" : "lightbulb")
                             .font(.title3)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 36, height: 36)
                             .foregroundStyle(state.isThinkingEnabled ? .orange : .secondary)
                             .liquidGlassSurface(
                                 tint: state.isThinkingEnabled ? .orange.opacity(0.2) : nil,
@@ -102,7 +107,9 @@ struct ChatComposerSection: View {
                                 interactive: true
                             )
                     }
+                    .buttonStyle(.plain)
                     .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                     .accessibilityLabel(state.isThinkingEnabled ? "Disable thinking" : "Enable thinking")
                 }
 

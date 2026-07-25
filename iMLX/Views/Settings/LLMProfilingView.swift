@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct LLMProfilingView: View {
@@ -81,11 +80,11 @@ struct LLMProfilingView: View {
 
                 Section {
                     Button("Copy JSON") {
-                        UIPasteboard.general.string = LLMExecutionProfileExport(profile).jsonString
+                        PlatformClipboard.copy(LLMExecutionProfileExport(profile).jsonString)
                         copiedMessage = "Copied JSON"
                     }
                     Button("Copy CSV Row") {
-                        UIPasteboard.general.string = LLMExecutionProfile.csvHeader + "\n" + profile.csvRow
+                        PlatformClipboard.copy(LLMExecutionProfile.csvHeader + "\n" + profile.csvRow)
                         copiedMessage = "Copied CSV"
                     }
                 } header: {
@@ -162,7 +161,7 @@ struct LLMProfilingView: View {
                     metricRow("Mean characters/sec", LLMProfileFormatters.characterRate(benchmark.charactersPerSecond?.mean))
                     metricRow("Mean memory delta", benchmarkMemoryDelta(benchmark.memoryDelta))
                     Button("Copy Benchmark JSON") {
-                        UIPasteboard.general.string = LLMBenchmarkResultExport(benchmark).jsonString
+                        PlatformClipboard.copy(LLMBenchmarkResultExport(benchmark).jsonString)
                         copiedMessage = "Copied benchmark JSON"
                     }
                 } header: {
@@ -223,7 +222,7 @@ struct LLMProfilingView: View {
                     metricRow("Mean tokens/sec", LLMProfileFormatters.rate(ifBench.tokensPerSecond?.mean))
                     metricRow("Mean memory peak", benchmarkMemory(ifBench.memoryPeakDuringInference))
                     Button("Copy Responses JSONL") {
-                        UIPasteboard.general.string = ifBench.officialResponsesJSONL
+                        PlatformClipboard.copy(ifBench.officialResponsesJSONL)
                         copiedMessage = "Copied IFBench responses"
                     }
                     Button("Save Responses JSONL") {
@@ -245,7 +244,7 @@ struct LLMProfilingView: View {
         }
         .navigationTitle("LLM Profiling")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .imlxTrailing) {
                 Button {
                     Task {
                         await appState.refreshLLMExecutionProfiles()
@@ -386,7 +385,7 @@ struct LLMProfilingView: View {
     private func copySessionJSON(_ session: LLMProfilingSessionRecord) async {
         await appState.refreshLLMExecutionProfiles()
         guard let export = appState.makeLLMProfilingSessionExport(for: session.id) else { return }
-        UIPasteboard.general.string = export.jsonString
+        PlatformClipboard.copy(export.jsonString)
         copiedMessage = "Copied session JSON"
     }
 

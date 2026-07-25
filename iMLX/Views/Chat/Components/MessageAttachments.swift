@@ -1,6 +1,5 @@
-import SwiftUI
-import UIKit
 import ImageIO
+import SwiftUI
 
 /// Tint colors for the document attachment cards. Resolved from a small
 /// curated palette so the card looks correct in light *and* dark mode without
@@ -213,7 +212,7 @@ struct AttachmentImageThumbnailView: View {
     let size: CGFloat
     let cornerRadius: CGFloat
 
-    @State private var image: UIImage?
+    @State private var image: PlatformImage?
 
     private var maxPixelSize: CGFloat {
         size * displayScale
@@ -226,12 +225,12 @@ struct AttachmentImageThumbnailView: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
+                Image(platformImage: image)
                     .resizable()
                     .scaledToFill()
             } else {
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(Color(.tertiarySystemFill))
+                    .fill(Color.secondary.opacity(0.12))
             }
         }
         .frame(width: size, height: size)
@@ -249,7 +248,7 @@ struct AttachmentImageThumbnailView: View {
 
 nonisolated final class AttachmentImageThumbnailCache {
     static let shared = AttachmentImageThumbnailCache()
-    private let cache = NSCache<NSString, UIImage>()
+    private let cache = NSCache<NSString, PlatformImage>()
 
     private init() {
         cache.countLimit = 96
@@ -260,11 +259,11 @@ nonisolated final class AttachmentImageThumbnailCache {
         "\(id.uuidString)-\(Int(maxPixelSize.rounded(.up)))"
     }
 
-    func image(for data: Data, cacheKey: String, maxPixelSize: CGFloat) async -> UIImage? {
+    func image(for data: Data, cacheKey: String, maxPixelSize: CGFloat) async -> PlatformImage? {
         await image(for: data, cacheKey: cacheKey as NSString, maxPixelSize: maxPixelSize)
     }
 
-    private func image(for data: Data, cacheKey key: NSString, maxPixelSize: CGFloat) async -> UIImage? {
+    private func image(for data: Data, cacheKey key: NSString, maxPixelSize: CGFloat) async -> PlatformImage? {
         if let cached = cache.object(forKey: key) {
             return cached
         }
@@ -274,17 +273,20 @@ nonisolated final class AttachmentImageThumbnailCache {
         }.value
 
         if let decoded {
-            let cost = decoded.cgImage.map { $0.bytesPerRow * $0.height } ?? data.count
-            cache.setObject(decoded, forKey: key, cost: cost)
+            cache.setObject(decoded, forKey: key, cost: data.count)
         }
 
         return decoded
     }
 
-    private static func downsampledImage(from data: Data, maxPixelSize: CGFloat) -> UIImage? {
+    private static func downsampledImage(from data: Data, maxPixelSize: CGFloat) -> PlatformImage? {
         let imageSourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, imageSourceOptions) else {
-            return UIImage(data: data)
+            #if canImport(UIKit)
+            return PlatformImage(data: data)
+            #elseif canImport(AppKit)
+            return PlatformImage(data: data)
+            #endif
         }
 
         let downsampleOptions = [
@@ -295,10 +297,14 @@ nonisolated final class AttachmentImageThumbnailCache {
         ] as CFDictionary
 
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions) else {
-            return UIImage(data: data)
+            return PlatformImage(data: data)
         }
 
-        return UIImage(cgImage: cgImage)
+        #if canImport(UIKit)
+        return PlatformImage(cgImage: cgImage)
+        #elseif canImport(AppKit)
+        return PlatformImage(cgImage: cgImage, size: .zero)
+        #endif
     }
 }
 

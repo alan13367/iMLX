@@ -426,7 +426,7 @@ struct ToolActivityStepRow: View {
         case .active: BrandPalette.cyan
         case .completed: .secondary
         case .failed: .secondary
-        case .pending: Color(.quaternaryLabel)
+        case .pending: Color.secondary.opacity(0.55)
         }
     }
 
@@ -435,7 +435,7 @@ struct ToolActivityStepRow: View {
         case .active: .primary
         case .completed: .secondary
         case .failed: .secondary
-        case .pending: Color(.quaternaryLabel)
+        case .pending: Color.secondary.opacity(0.55)
         }
     }
 }

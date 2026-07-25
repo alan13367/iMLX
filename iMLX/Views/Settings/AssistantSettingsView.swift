@@ -64,6 +64,7 @@ struct AssistantSettingsView: View {
                 }
             }
         }
+        .imlxSettingsFormStyle()
         .navigationTitle(String.appLocalized("settings.assistant.title"))
     }
 

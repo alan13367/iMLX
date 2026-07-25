@@ -293,6 +293,9 @@ final class ToolExecutionTests: XCTestCase {
     }
 
     func testExecuteTimerCreatePassesDurationSecondsToExecutor() async throws {
+        guard TimerService.isSupported else {
+            throw XCTSkip("AlarmKit timer creation is unavailable on macOS.")
+        }
         let service = ToolCallingService(webSearchService: WebSearchService())
         let recorder = ArgumentRecorder()
 

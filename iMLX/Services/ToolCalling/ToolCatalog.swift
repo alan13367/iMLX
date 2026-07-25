@@ -221,7 +221,7 @@ nonisolated struct ToolCatalog {
         let timerCreateExecutor = TimerCreateToolExecutor(timerService: timerService)
         let contactsLookupExecutor = ContactsLookupToolExecutor(contactsService: contactsService)
 
-        let definitions: [ToolDefinition] = [
+        var definitions: [ToolDefinition] = [
             readURLTool,
             ocrTool,
             webSearchTool,
@@ -231,10 +231,9 @@ nonisolated struct ToolCatalog {
             currentDateTimeTool,
             remindersBriefTool,
             remindersCreateTool,
-            timerCreateTool,
             contactsLookupTool
         ]
-        let executors: [String: any ToolExecutor] = [
+        var executors: [String: any ToolExecutor] = [
             readURLExecutor.toolName: readURLExecutor,
             ocrExecutor.toolName: ocrExecutor,
             webSearchExecutor.toolName: webSearchExecutor,
@@ -244,9 +243,12 @@ nonisolated struct ToolCatalog {
             currentDateTimeExecutor.toolName: currentDateTimeExecutor,
             remindersBriefExecutor.toolName: remindersBriefExecutor,
             remindersCreateExecutor.toolName: remindersCreateExecutor,
-            timerCreateExecutor.toolName: timerCreateExecutor,
             contactsLookupExecutor.toolName: contactsLookupExecutor
         ]
+        if TimerService.isSupported {
+            definitions.insert(timerCreateTool, at: definitions.count - 1)
+            executors[timerCreateExecutor.toolName] = timerCreateExecutor
+        }
         return ToolCatalog(definitions: definitions, executors: executors)
     }
 }

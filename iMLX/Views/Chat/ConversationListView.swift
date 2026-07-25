@@ -94,7 +94,7 @@ struct ConversationListView: View {
         .toolbar {
             if presentation == .modalSheet {
                 if isSelectionMode {
-                    ToolbarItemGroup(placement: .topBarLeading) {
+                    ToolbarItemGroup(placement: .imlxLeading) {
                         Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
                             toggleSelectAll()
                         }
@@ -107,26 +107,26 @@ struct ConversationListView: View {
                         .disabled(!hasSelectedConversations)
                         .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .imlxTrailing) {
                         Button(String.appLocalized("common.cancel")) {
                             stopSelecting()
                         }
                     }
                 } else {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .imlxLeading) {
                         Button(action: createConversation) {
                             Image(systemName: "square.and.pencil")
                         }
                         .accessibilityLabel("New conversation")
                     }
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .imlxLeading) {
                         if canClearAllConversations {
                             Button(String.appLocalized("common.select")) {
                                 startSelecting()
                             }
                         }
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .imlxTrailing) {
                         Button {
                             onClose?()
                         } label: {
@@ -137,12 +137,12 @@ struct ConversationListView: View {
                 }
             } else {
                 if isSelectionMode {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .imlxLeading) {
                         Button(String.appLocalized("common.cancel")) {
                             stopSelecting()
                         }
                     }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
+                    ToolbarItemGroup(placement: .imlxTrailing) {
                         Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
                             toggleSelectAll()
                         }
@@ -157,13 +157,13 @@ struct ConversationListView: View {
                         .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
                     }
                 } else {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .imlxLeading) {
                         Button(action: createConversation) {
                             Image(systemName: "square.and.pencil")
                         }
                         .accessibilityLabel("New conversation")
                     }
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .imlxLeading) {
                         if canClearAllConversations {
                             Button(String.appLocalized("common.select")) {
                                 startSelecting()

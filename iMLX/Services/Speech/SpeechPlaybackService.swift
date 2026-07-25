@@ -27,9 +27,11 @@ final class SpeechPlaybackService {
     ) throws {
         stop()
 
+        #if os(iOS)
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        #endif
 
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
         if !hasConnectedNode {
@@ -98,7 +100,9 @@ final class SpeechPlaybackService {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
+        #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
 
     private func completeStreamingIfReady() {

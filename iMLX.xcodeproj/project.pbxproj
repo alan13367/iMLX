@@ -20,6 +20,18 @@
 		E74248D82F7D2670003ECA6B /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P011 /* Textual */; };
 		E7A1A10E2F9001000001A10E /* iMLXAlarmWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E7A1A1012F9001000001A101 /* iMLXAlarmWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E7C100012F9000010061F6D5 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E7C100032F9000010061F6D5 /* XCTest.framework */; };
+		E7D100012FA000000061F6D5 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P001 /* MLX */; };
+		E7D100022FA000000061F6D5 /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P002 /* MLXNN */; };
+		E7D100032FA000000061F6D5 /* MLXRandom in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P003 /* MLXRandom */; };
+		E7D100042FA000000061F6D5 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P004 /* MLXLMCommon */; };
+		E7D100052FA000000061F6D5 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P005 /* MLXLLM */; };
+		E7D100062FA000000061F6D5 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P006 /* MLXVLM */; };
+		E7D100072FA000000061F6D5 /* MLXFFT in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P007 /* MLXFFT */; };
+		E7D100082FA000000061F6D5 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P008 /* ZIPFoundation */; };
+		E7D100092FA000000061F6D5 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P009 /* GRDB */; };
+		E7D1000A2FA000000061F6D5 /* MLXLMTokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P010 /* MLXLMTokenizers */; };
+		E7D1000B2FA000000061F6D5 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = E7B001012F7D30000001P011 /* Textual */; };
+		E7D1000C2FA000000061F6D5 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E7C100032F9000010061F6D5 /* XCTest.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +48,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = E73069FF2F7D21010061F6D5;
 			remoteInfo = iMLX;
+		};
+		E7D400012FA000000061F6D5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E73069F82F7D21010061F6D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E7D300012FA000000061F6D5;
+			remoteInfo = iMLXMac;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -58,6 +77,8 @@
 		E7A1A1012F9001000001A101 /* iMLXAlarmWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = iMLXAlarmWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E7C100022F9000010061F6D5 /* iMLXTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iMLXTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E7C100032F9000010061F6D5 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		E7D001012FA000000061F6D5 /* iMLXMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iMLXMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E7D001022FA000000061F6D5 /* iMLXMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iMLXMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -125,6 +146,32 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E7D200022FA000000061F6D5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E7D100092FA000000061F6D5 /* GRDB in Frameworks */,
+				E7D100082FA000000061F6D5 /* ZIPFoundation in Frameworks */,
+				E7D100072FA000000061F6D5 /* MLXFFT in Frameworks */,
+				E7D1000B2FA000000061F6D5 /* Textual in Frameworks */,
+				E7D1000A2FA000000061F6D5 /* MLXLMTokenizers in Frameworks */,
+				E7D100062FA000000061F6D5 /* MLXVLM in Frameworks */,
+				E7D100052FA000000061F6D5 /* MLXLLM in Frameworks */,
+				E7D100042FA000000061F6D5 /* MLXLMCommon in Frameworks */,
+				E7D100032FA000000061F6D5 /* MLXRandom in Frameworks */,
+				E7D100022FA000000061F6D5 /* MLXNN in Frameworks */,
+				E7D100012FA000000061F6D5 /* MLX in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E7D200052FA000000061F6D5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E7D1000C2FA000000061F6D5 /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -153,6 +200,8 @@
 				E7306A002F7D21010061F6D5 /* iMLX.app */,
 				E7C100022F9000010061F6D5 /* iMLXTests.xctest */,
 				E7A1A1012F9001000001A101 /* iMLXAlarmWidgetExtension.appex */,
+				E7D001012FA000000061F6D5 /* iMLXMac.app */,
+				E7D001022FA000000061F6D5 /* iMLXMacTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -238,6 +287,62 @@
 			productReference = E7C100022F9000010061F6D5 /* iMLXTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		E7D300012FA000000061F6D5 /* iMLXMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E7D600012FA000000061F6D5 /* Build configuration list for PBXNativeTarget "iMLXMac" */;
+			buildPhases = (
+				E7D200012FA000000061F6D5 /* Sources */,
+				E7D200022FA000000061F6D5 /* Frameworks */,
+				E7D200032FA000000061F6D5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E7306A022F7D21010061F6D5 /* iMLX */,
+			);
+			name = iMLXMac;
+			packageProductDependencies = (
+				E7B001012F7D30000001P001 /* MLX */,
+				E7B001012F7D30000001P002 /* MLXNN */,
+				E7B001012F7D30000001P003 /* MLXRandom */,
+				E7B001012F7D30000001P004 /* MLXLMCommon */,
+				E7B001012F7D30000001P005 /* MLXLLM */,
+				E7B001012F7D30000001P006 /* MLXVLM */,
+				E7B001012F7D30000001P007 /* MLXFFT */,
+				E7B001012F7D30000001P008 /* ZIPFoundation */,
+				E7B001012F7D30000001P009 /* GRDB */,
+				E7B001012F7D30000001P010 /* MLXLMTokenizers */,
+				E7B001012F7D30000001P011 /* Textual */,
+			);
+			productName = iMLXMac;
+			productReference = E7D001012FA000000061F6D5 /* iMLXMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E7D300022FA000000061F6D5 /* iMLXMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E7D600022FA000000061F6D5 /* Build configuration list for PBXNativeTarget "iMLXMacTests" */;
+			buildPhases = (
+				E7D200042FA000000061F6D5 /* Sources */,
+				E7D200052FA000000061F6D5 /* Frameworks */,
+				E7D200062FA000000061F6D5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E7D400022FA000000061F6D5 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				E7C100042F9000010061F6D5 /* iMLXTests */,
+			);
+			name = iMLXMacTests;
+			packageProductDependencies = (
+			);
+			productName = iMLXMacTests;
+			productReference = E7D001022FA000000061F6D5 /* iMLXMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -257,6 +362,13 @@
 					E7C100062F9000010061F6D5 = {
 						CreatedOnToolsVersion = 26.4;
 						TestTargetID = E73069FF2F7D21010061F6D5;
+					};
+					E7D300012FA000000061F6D5 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					E7D300022FA000000061F6D5 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = E7D300012FA000000061F6D5;
 					};
 				};
 			};
@@ -287,6 +399,8 @@
 				E73069FF2F7D21010061F6D5 /* iMLX */,
 				E7A1A1022F9001000001A102 /* iMLXAlarmWidgetExtension */,
 				E7C100062F9000010061F6D5 /* iMLXTests */,
+				E7D300012FA000000061F6D5 /* iMLXMac */,
+				E7D300022FA000000061F6D5 /* iMLXMacTests */,
 			);
 		};
 /* End PBXProject section */
@@ -307,6 +421,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		E7C100082F9000010061F6D5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E7D200032FA000000061F6D5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E7D200062FA000000061F6D5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -337,6 +465,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E7D200012FA000000061F6D5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E7D200042FA000000061F6D5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -349,6 +491,11 @@
 			isa = PBXTargetDependency;
 			target = E73069FF2F7D21010061F6D5 /* iMLX */;
 			targetProxy = E7C100072F9000010061F6D5 /* PBXContainerItemProxy */;
+		};
+		E7D400022FA000000061F6D5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E7D300012FA000000061F6D5 /* iMLXMac */;
+			targetProxy = E7D400012FA000000061F6D5 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -683,6 +830,169 @@
 			};
 			name = Release;
 		};
+		E7D500012FA000000061F6D5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = iMLX/iMLXMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = YES;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = YES;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = iMLX;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to attach images for visual models.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "We need contacts access to find phone numbers and email addresses locally when you ask.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access for live voice conversations.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need photo library access to attach images for visual models.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "We need reminders access to brief and create your reminders locally when you ask.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "We need speech recognition to transcribe your voice locally for live conversations.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX.macOS;
+				PRODUCT_MODULE_NAME = iMLX;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		E7D500022FA000000061F6D5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = iMLX/iMLXMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = YES;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = YES;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = iMLX;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "We need calendar access to summarize your schedule locally when you ask.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to attach images for visual models.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "We need contacts access to find phone numbers and email addresses locally when you ask.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access for live voice conversations.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need photo library access to attach images for visual models.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "We need reminders access to brief and create your reminders locally when you ask.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "We need speech recognition to transcribe your voice locally for live conversations.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX.macOS;
+				PRODUCT_MODULE_NAME = iMLX;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		E7D500032FA000000061F6D5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../Frameworks",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX.macOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iMLXMac.app/Contents/MacOS/iMLXMac";
+				TEST_TARGET_NAME = iMLXMac;
+			};
+			name = Debug;
+		};
+		E7D500042FA000000061F6D5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../Frameworks",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX.macOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iMLXMac.app/Contents/MacOS/iMLXMac";
+				TEST_TARGET_NAME = iMLXMac;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -718,6 +1028,24 @@
 			buildConfigurations = (
 				E7C1000B2F9000010061F6D5 /* Debug */,
 				E7C1000C2F9000010061F6D5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E7D600012FA000000061F6D5 /* Build configuration list for PBXNativeTarget "iMLXMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E7D500012FA000000061F6D5 /* Debug */,
+				E7D500022FA000000061F6D5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E7D600022FA000000061F6D5 /* Build configuration list for PBXNativeTarget "iMLXMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E7D500032FA000000061F6D5 /* Debug */,
+				E7D500042FA000000061F6D5 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

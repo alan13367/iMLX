@@ -28,6 +28,21 @@ xcodebuild build \
   -scheme "iMLX" \
   -destination 'generic/platform=iOS'
 
+# Native Apple-silicon macOS build.
+xcodebuild build \
+  -project "iMLX.xcodeproj" \
+  -scheme "iMLXMac" \
+  -destination 'platform=macOS,arch=arm64' \
+  CODE_SIGNING_ALLOWED=NO
+
+# Native macOS tests.
+xcodebuild test \
+  -project "iMLX.xcodeproj" \
+  -scheme "iMLXMac" \
+  -destination 'platform=macOS,arch=arm64' \
+  -only-testing:iMLXMacTests \
+  CODE_SIGNING_ALLOWED=NO
+
 # Optional physical iPhone debug/install flow. Use only when explicitly asked;
 # simulator remains the default verification target.
 # List paired devices and substitute the destination id from that output:
@@ -83,6 +98,8 @@ xcodebuild -downloadComponent MetalToolchain
 8. The Xcode target defaults actor isolation to `MainActor`; pure off-main helpers may need explicit `nonisolated`.
 9. Persisted chat/conversation/tool/source models require backward-compatible decoding.
 10. Do not add parallel architecture when an existing service boundary fits.
+11. Native macOS support is Apple-silicon-only and builds through the `iMLXMac` target. Shared services remain cross-platform; use thin platform adapters for UIKit/AppKit differences.
+12. AlarmKit and the timer Live Activity remain iOS-only. The native macOS tool catalog must not expose `timer_create` unless a real macOS implementation is added.
 
 ## Architecture
 
@@ -91,7 +108,7 @@ xcodebuild -downloadComponent MetalToolchain
 - Service boundaries: app-facing services remain stable façades. Domain folders contain focused policy, transport, parsing, persistence, and support types; callers should not assemble those internals directly.
 - Inference: `InferenceService` is the serialized MLX façade. Loading, streaming, profiling, input policy, and support code live under `Services/Inference/`; pure helpers must not own MLX state.
 - Prompt/session policy: every generation rebuilds prompt/session state from visible conversation history instead of relying on hidden long-lived chat state.
-- UI: SwiftUI + `@Observable`. Root chat orchestration lives in `ChatView`; extracted chat UI lives under `iMLX/Views/Chat/Components`.
+- UI: SwiftUI + `@Observable`. Root chat orchestration lives in `ChatView`; extracted chat UI lives under `iMLX/Views/Chat/Components`. iOS uses stack navigation while native macOS uses a shared-state `NavigationSplitView` shell and macOS commands/settings scenes.
 - Models: curated model entries live in `Constants.swift`. Assistant defaults (system prompt, temperature) live in `AppState` and are edited in `AssistantSettingsView`.
 - Model management: `ModelDownloadService` owns download-job state and background-session callbacks. Repository metadata, manifests, delegates, filesystem policy, and support types live under `Services/ModelManagement/`.
 - Documents and web: `DocumentLibraryService` and `WebSearchService` remain separate actor façades because their transport, language, embedding, and ranking policies differ. Exact shared text/scoring primitives live under `Services/Grounding/`.
@@ -127,7 +144,8 @@ iMLX/
 ├── Utilities/            Constants, localization, styling, helpers
 └── Assets.xcassets/
 iMLXAlarmWidget/          Widget Extension for AlarmKit timer Live Activity
-iMLXInfo.plist            Main app Info.plist for keys Xcode will not auto-inject
+iMLX.xcodeproj/           iOS, native macOS, test, and widget targets/schemes
+iMLXInfo.plist            Main iOS app Info.plist for keys Xcode will not auto-inject
 iMLXAlarmWidgetInfo.plist Widget extension Info.plist
 ```
 

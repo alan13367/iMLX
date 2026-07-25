@@ -22,9 +22,17 @@ final class SpeechRecognitionService {
         }
 
         let microphoneAuthorized = await withCheckedContinuation { continuation in
+            #if os(iOS)
             AVAudioApplication.requestRecordPermission { granted in
                 continuation.resume(returning: granted)
             }
+            #elseif os(macOS)
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                continuation.resume(returning: granted)
+            }
+            #else
+            continuation.resume(returning: false)
+            #endif
         }
 
         return speechAuthorized && microphoneAuthorized
@@ -43,12 +51,14 @@ final class SpeechRecognitionService {
             throw SpeechRecognitionError.unavailable
         }
 
+        #if os(iOS)
         let audioSession = AVAudioSession.sharedInstance()
         do {
             try configureAudioSession(audioSession)
         } catch {
             throw normalizedRecognitionError(error)
         }
+        #endif
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -56,7 +66,14 @@ final class SpeechRecognitionService {
 
         audioEngine = AVAudioEngine()
         let inputNode = audioEngine.inputNode
+        #if os(iOS)
         let format = try recognitionFormat(for: inputNode, audioSession: audioSession)
+        #else
+        let format = inputNode.outputFormat(forBus: 0)
+        guard isValidRecognitionFormat(format) else {
+            throw SpeechRecognitionError.invalidInputConfiguration
+        }
+        #endif
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
             request.append(buffer)
@@ -123,7 +140,9 @@ final class SpeechRecognitionService {
         recognitionTask?.cancel()
         recognitionRequest = nil
         recognitionTask = nil
+        #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
 
         if deliverFinal, !hasDeliveredFinal {
             hasDeliveredFinal = true
@@ -134,6 +153,7 @@ final class SpeechRecognitionService {
         }
     }
 
+    #if os(iOS)
     private func configureAudioSession(_ audioSession: AVAudioSession) throws {
         try audioSession.setCategory(
             .playAndRecord,
@@ -180,6 +200,7 @@ final class SpeechRecognitionService {
 
         throw SpeechRecognitionError.invalidInputConfiguration
     }
+    #endif
 
     private func isValidRecognitionFormat(_ format: AVAudioFormat) -> Bool {
         format.sampleRate > 0 && format.channelCount > 0

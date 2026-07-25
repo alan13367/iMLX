@@ -64,7 +64,7 @@ struct ModelPickerSheet: View {
                 }
             }
             .navigationTitle(String.appLocalized("models.picker.title"))
-            .navigationBarTitleDisplayMode(.inline)
+            .imlxInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(String.appLocalized("common.done")) {

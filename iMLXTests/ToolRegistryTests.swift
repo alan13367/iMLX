@@ -42,7 +42,7 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertNotNil(executors["current_datetime"])
         XCTAssertNotNil(executors["reminders_brief"])
         XCTAssertNotNil(executors["reminders_create"])
-        XCTAssertNotNil(executors["timer_create"])
+        XCTAssertEqual(executors["timer_create"] != nil, TimerService.isSupported)
         XCTAssertNotNil(executors["contacts_lookup"])
     }
 
@@ -171,20 +171,23 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertTrue(names.contains("reminders_brief"))
         XCTAssertTrue(names.contains("reminders_create"))
         XCTAssertTrue(names.contains("calendar_create"))
-        XCTAssertTrue(names.contains("timer_create"))
+        XCTAssertEqual(names.contains("timer_create"), TimerService.isSupported)
         XCTAssertTrue(names.contains("contacts_lookup"))
     }
 
     private var localToolNames: [String] {
-        [
+        var names = [
             "calendar_brief",
             "calendar_create",
             "current_datetime",
             "reminders_brief",
             "reminders_create",
-            "timer_create",
             "contacts_lookup"
         ]
+        if TimerService.isSupported {
+            names.insert("timer_create", at: names.count - 1)
+        }
+        return names
     }
 
     private var webEnabledToolNames: [String] {

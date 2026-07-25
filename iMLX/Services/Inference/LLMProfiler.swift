@@ -1,7 +1,9 @@
 import Darwin
 import Foundation
 import OSLog
+#if canImport(UIKit)
 import UIKit
+#endif
 
 nonisolated enum LLMProfiler {
     static let signposter = OSSignposter(
@@ -43,13 +45,7 @@ nonisolated enum LLMProfiler {
     }
 
     static func availableMemoryBytes() -> UInt64? {
-        #if os(iOS)
-        let available = os_proc_available_memory()
-        guard available != 0 else { return nil }
-        return UInt64(available)
-        #else
-        return nil
-        #endif
+        SystemMemory.availableBytes()
     }
 
     static func devicePhysicalMemoryGB() -> Int {
@@ -95,9 +91,9 @@ nonisolated enum LLMProfiler {
     }
 
     /// Battery percentage is intentionally captured as a coarse contextual signal only.
-    /// Public iOS APIs do not provide joule-level energy usage for a single inference run.
     @MainActor
     static func coarseBatteryLevel() -> Double? {
+        #if canImport(UIKit)
         let device = UIDevice.current
         let wasMonitoring = device.isBatteryMonitoringEnabled
         if !wasMonitoring {
@@ -112,6 +108,9 @@ nonisolated enum LLMProfiler {
         let level = device.batteryLevel
         guard level >= 0 else { return nil }
         return Double(level)
+        #else
+        return nil
+        #endif
     }
 
     static func deviceModelIdentifier() -> String? {

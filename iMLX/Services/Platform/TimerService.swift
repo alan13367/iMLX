@@ -1,8 +1,12 @@
-import AlarmKit
 import Foundation
+
+#if canImport(AlarmKit)
+import AlarmKit
 import SwiftUI
 
 actor TimerService {
+    nonisolated static let isSupported = true
+
     func createTimer(durationSeconds: TimeInterval, title: String?) async throws -> MessageGroundingResult {
         guard durationSeconds >= 1, durationSeconds <= 86_400 else {
             throw ToolExecutionFailure.invalidArguments("Timer duration must be between 1 second and 24 hours.")
@@ -110,3 +114,12 @@ actor TimerService {
         return parts.joined(separator: " ")
     }
 }
+#else
+actor TimerService {
+    nonisolated static let isSupported = false
+
+    func createTimer(durationSeconds: TimeInterval, title: String?) async throws -> MessageGroundingResult {
+        throw ToolExecutionFailure.unavailable("Native timer creation is not available on macOS.")
+    }
+}
+#endif

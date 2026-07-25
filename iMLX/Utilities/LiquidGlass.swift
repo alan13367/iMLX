@@ -9,7 +9,7 @@ extension View {
         fallbackStroke: Color = Color.secondary.opacity(0.14),
         interactive: Bool = false
     ) -> some View {
-        if #available(iOS 26, *) {
+        if #available(iOS 26, macOS 26, *) {
             self.glassEffect(Self.liquidGlass(tint: tint, interactive: interactive), in: shape)
         } else {
             self
@@ -25,7 +25,7 @@ extension View {
         prominent: Bool = false,
         tint: Color? = nil
     ) -> some View {
-        if #available(iOS 26, *) {
+        if #available(iOS 26, macOS 26, *) {
             if prominent {
                 self
                     .tint(tint)
@@ -50,7 +50,7 @@ extension View {
 
     @ViewBuilder
     func liquidGlassContainer(spacing: CGFloat? = nil) -> some View {
-        if #available(iOS 26, *) {
+        if #available(iOS 26, macOS 26, *) {
             GlassEffectContainer(spacing: spacing) {
                 self
             }
@@ -59,7 +59,7 @@ extension View {
         }
     }
 
-    @available(iOS 26, *)
+    @available(iOS 26, macOS 26, *)
     private static func liquidGlass(tint: Color?, interactive: Bool) -> Glass {
         var glass = Glass.regular
         if let tint {

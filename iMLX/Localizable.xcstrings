@@ -812,6 +812,9 @@
         }
       }
     },
+    "Choose Model…" : {
+
+    },
     "Choose one model to download now, or skip and browse models later." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1097,6 +1100,9 @@
           }
         }
       }
+    },
+    "Conversation" : {
+
     },
     "conversation.clear_alert_message" : {
       "extractionState" : "manual",
@@ -1809,6 +1815,29 @@
         }
       }
     },
+    "error.chat.image_too_large" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That image is too large to attach (25 MB limit). Try a smaller file."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esa imagen es demasiado grande para adjuntarla (límite de 25 MB). Prueba con un archivo más pequeño."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该图片过大，无法附加（上限 25 MB）。请尝试更小的文件。"
+          }
+        }
+      }
+    },
     "error.chat.low_memory" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1897,6 +1926,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未加载模型。请先选择并加载模型。"
+          }
+        }
+      }
+    },
+    "error.chat.vision_required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The current model does not support images. Load a vision-capable model to attach photos."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El modelo actual no admite imágenes. Carga un modelo con visión para adjuntar fotos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前模型不支持图片。请加载支持视觉的模型后再附加照片。"
           }
         }
       }
@@ -2107,6 +2159,9 @@
           }
         }
       }
+    },
+    "Focus Message Composer" : {
+
     },
     "Forget" : {
       "extractionState" : "manual",
@@ -3288,6 +3343,9 @@
         }
       }
     },
+    "Model" : {
+
+    },
     "models.browser.dismiss_error_a11y" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4023,6 +4081,12 @@
           }
         }
       }
+    },
+    "New Conversation" : {
+
+    },
+    "New Window" : {
+
     },
     "No Profile Yet" : {
 
@@ -5012,6 +5076,29 @@
         }
       }
     },
+    "settings.focus_composer_on_launch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Focus the message field on launch"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enfocar el campo de mensaje al iniciar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动时聚焦消息输入框"
+          }
+        }
+      }
+    },
     "settings.language.english" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5031,6 +5118,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "英语"
+          }
+        }
+      }
+    },
+    "settings.language.mac_system_settings_detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open System Settings"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abrir Ajustes del Sistema"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开系统设置"
           }
         }
       }

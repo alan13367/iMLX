@@ -1,10 +1,10 @@
-import SwiftUI
 import PhotosUI
-import UIKit
+import SwiftUI
 import UniformTypeIdentifiers
 
 struct ChatView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.openURL) private var openURL
     @State private var chatViewModel: ChatViewModel
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
@@ -39,18 +39,18 @@ struct ChatView: View {
                 .padding(.top, 4)
         }
         .navigationTitle(conversationTitle)
-        .navigationBarTitleDisplayMode(.inline)
+        .imlxInlineNavigationTitle()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             chatAccessoryInset
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .imlxLeading) {
                 leadingToolbarContent
             }
-            ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .imlxPrincipal) {
                 principalToolbarContent
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .imlxTrailing) {
                 trailingToolbarContent
             }
         }
@@ -107,11 +107,12 @@ struct ChatView: View {
                 }
             }
         }
-        .sheet(isPresented: $showCamera) {
-            ImagePicker(isPresented: $showCamera) { data in
-                chatViewModel.appendPendingImage(data)
-            }
-        }
+        .modifier(
+            CameraPickerPresentation(
+                isPresented: $showCamera,
+                onImagePicked: chatViewModel.appendPendingImage
+            )
+        )
         .photosPicker(isPresented: $showPhotoLibrary, selection: $selectedPhotoItem, matching: .images)
         .fileImporter(
             isPresented: $showDocumentImporter,
@@ -128,12 +129,17 @@ struct ChatView: View {
                 chatViewModel.errorMessage = error.localizedDescription
             }
         }
+        .modifier(MacFileDropDestination(onDrop: handleDroppedFiles(_:)))
         .sheet(item: $utilitySheet) { sheet in
             utilitySheetView(sheet)
         }
-        .fullScreenCover(isPresented: $showLiveVoice) {
-            LiveVoiceConversationView(appState: appState, chatViewModel: chatViewModel)
-        }
+        .modifier(
+            LiveVoicePresentation(
+                isPresented: $showLiveVoice,
+                appState: appState,
+                chatViewModel: chatViewModel
+            )
+        )
         .sheet(isPresented: $showWebSearchDisclosure) {
             WebSearchPrivacyConfirmationSheet {
                 chatViewModel.setWebSearchEnabled(true)
@@ -145,6 +151,19 @@ struct ChatView: View {
         .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
         .sensoryFeedback(.impact(weight: .medium), trigger: hapticMediumTrigger)
         .sensoryFeedback(.impact(weight: .light), trigger: hapticLightTrigger)
+        #if os(macOS)
+        .task(id: conversationId) {
+            guard appState.consumeComposerFocusRequest() else { return }
+            try? await Task.sleep(for: .milliseconds(50))
+            isInputFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .imlxOpenModelBrowser)) { _ in
+            openModels()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .imlxFocusComposer)) { _ in
+            isInputFocused = true
+        }
+        #endif
     }
 
     private var isShowingEmptyState: Bool {
@@ -318,6 +337,13 @@ struct ChatView: View {
                 SettingsView(appState: appState)
             }
         }
+        .modifier(MacUtilitySheetSizing(sheet: sheet))
+        .modifier(
+            MacUtilitySheetCloseControl(
+                sheet: sheet,
+                onClose: { utilitySheet = nil }
+            )
+        )
     }
 
     private var modelStatus: some View {
@@ -378,7 +404,7 @@ struct ChatView: View {
     }
 
     private func copyText(_ text: String) {
-        UIPasteboard.general.setValue(text, forPasteboardType: UTType.plainText.identifier)
+        PlatformClipboard.copy(text)
         hapticLightTrigger += 1
         presentToast(
             ChatToastModel(
@@ -394,7 +420,7 @@ struct ChatView: View {
 
     private func openSourceURL(_ url: URL?) {
         guard let url else { return }
-        UIApplication.shared.open(url)
+        openURL(url)
     }
 
     private func refreshDownloadedModels() async {
@@ -445,6 +471,60 @@ struct ChatView: View {
     private func openDocumentImporter() {
         isInputFocused = false
         showDocumentImporter = true
+    }
+
+    private func handleDroppedFiles(_ urls: [URL]) {
+        Task {
+            for url in urls {
+                let contentType = UTType(filenameExtension: url.pathExtension)
+                if contentType?.conforms(to: .image) == true {
+                    let didAccess = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if didAccess {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    let loadResult = await Self.loadDroppedImageData(from: url)
+                    await MainActor.run {
+                        if let data = loadResult.data {
+                            chatViewModel.appendPendingImage(data)
+                        } else if let message = loadResult.errorMessage {
+                            chatViewModel.errorMessage = message
+                            Haptics.notificationError()
+                        }
+                    }
+                } else {
+                    await chatViewModel.importDocument(from: url)
+                }
+            }
+        }
+    }
+
+    private static let maxDroppedImageBytes = 25 * 1024 * 1024
+
+    private struct DroppedImageLoadResult: Sendable {
+        var data: Data?
+        var errorMessage: String?
+    }
+
+    private nonisolated static func loadDroppedImageData(from url: URL) async -> DroppedImageLoadResult {
+        await Task.detached(priority: .userInitiated) {
+            if let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+               fileSize > maxDroppedImageBytes {
+                return DroppedImageLoadResult(errorMessage: String.appLocalized("error.chat.image_too_large"))
+            }
+
+            guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+                return DroppedImageLoadResult(errorMessage: String.appLocalized("error.inference.invalid_image"))
+            }
+            guard data.count <= maxDroppedImageBytes else {
+                return DroppedImageLoadResult(errorMessage: String.appLocalized("error.chat.image_too_large"))
+            }
+            guard PlatformImage(data: data) != nil else {
+                return DroppedImageLoadResult(errorMessage: String.appLocalized("error.inference.invalid_image"))
+            }
+            return DroppedImageLoadResult(data: data)
+        }.value
     }
 
     private func openCamera() {
@@ -561,6 +641,152 @@ struct ChatView: View {
         true
         #else
         false
+        #endif
+    }
+}
+
+private struct MacUtilitySheetSizing: ViewModifier {
+    let sheet: ChatUtilitySheet
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.frame(
+            minWidth: minimumSize.width,
+            idealWidth: idealSize.width,
+            maxWidth: maximumSize.width,
+            minHeight: minimumSize.height,
+            idealHeight: idealSize.height,
+            maxHeight: maximumSize.height
+        )
+        #else
+        content
+        #endif
+    }
+
+    #if os(macOS)
+    private var minimumSize: CGSize {
+        switch sheet {
+        case .models:
+            CGSize(width: 720, height: 580)
+        case .conversations:
+            CGSize(width: 560, height: 560)
+        case .memoryLibrary:
+            CGSize(width: 720, height: 580)
+        case .settings:
+            CGSize(width: 640, height: 580)
+        }
+    }
+
+    private var idealSize: CGSize {
+        switch sheet {
+        case .models:
+            CGSize(width: 800, height: 640)
+        case .conversations:
+            CGSize(width: 620, height: 620)
+        case .memoryLibrary:
+            CGSize(width: 800, height: 640)
+        case .settings:
+            CGSize(width: 680, height: 640)
+        }
+    }
+
+    private var maximumSize: CGSize {
+        switch sheet {
+        case .models, .memoryLibrary:
+            CGSize(width: 1_000, height: 780)
+        case .conversations:
+            CGSize(width: 760, height: 780)
+        case .settings:
+            CGSize(width: 820, height: 780)
+        }
+    }
+    #endif
+}
+
+private struct MacUtilitySheetCloseControl: ViewModifier {
+    let sheet: ChatUtilitySheet
+    let onClose: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.overlay(alignment: .topTrailing) {
+            if sheet == .models {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                        .liquidGlassSurface(
+                            in: Circle(),
+                            fallback: AnyShapeStyle(Color.secondary.opacity(0.10)),
+                            interactive: true
+                        )
+                }
+                .buttonStyle(.plain)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel(String.appLocalized("common.close"))
+                .help(String.appLocalized("common.close"))
+                .padding(.trailing, 6)
+                .zIndex(100)
+            }
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+private struct MacFileDropDestination: ViewModifier {
+    let onDrop: ([URL]) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.dropDestination(for: URL.self) { urls, _ in
+            guard !urls.isEmpty else { return false }
+            onDrop(urls)
+            return true
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+private struct CameraPickerPresentation: ViewModifier {
+    @Binding var isPresented: Bool
+    let onImagePicked: (Data) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.sheet(isPresented: $isPresented) {
+            ImagePicker(isPresented: $isPresented, onImagePicked: onImagePicked)
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+private struct LiveVoicePresentation: ViewModifier {
+    @Binding var isPresented: Bool
+    let appState: AppState
+    let chatViewModel: ChatViewModel
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.sheet(isPresented: $isPresented) {
+            LiveVoiceConversationView(appState: appState, chatViewModel: chatViewModel)
+                .frame(minWidth: 680, minHeight: 620)
+        }
+        #else
+        content.fullScreenCover(isPresented: $isPresented) {
+            LiveVoiceConversationView(appState: appState, chatViewModel: chatViewModel)
+        }
         #endif
     }
 }

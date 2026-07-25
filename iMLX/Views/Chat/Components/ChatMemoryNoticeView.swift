@@ -90,7 +90,7 @@ struct ChatMemoryNoticeView: View {
     private var backgroundView: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(Color.secondary.opacity(0.10))
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(notice.kind == .pending ? BrandPalette.cyan.opacity(0.18) : Color.green.opacity(0.16))
         }

@@ -11,12 +11,13 @@ struct InputBarView: View {
     let onStop: () -> Void
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        HStack(alignment: .bottom, spacing: 8) {
             TextField(String.appLocalized("chat.message_placeholder"), text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 11)
+                .frame(minHeight: 44)
                 .liquidGlassSurface(
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous),
                     fallback: AnyShapeStyle(.ultraThinMaterial),
@@ -31,7 +32,7 @@ struct InputBarView: View {
                 Button(action: onStop) {
                     Image(systemName: "stop.fill")
                         .font(.title3.weight(.semibold))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 36, height: 36)
                         .foregroundStyle(.white)
                         .liquidGlassSurface(
                             tint: .red.opacity(0.24),
@@ -40,13 +41,15 @@ struct InputBarView: View {
                             interactive: true
                         )
                 }
+                .buttonStyle(.plain)
                 .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel("Stop generating")
             } else {
                 Button(action: primaryAction) {
                     Image(systemName: primarySymbolName)
                         .font(.title3.weight(.semibold))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 36, height: 36)
                         .foregroundStyle(primaryActionEnabled ? Color.white : Color.secondary)
                         .liquidGlassSurface(
                             tint: primaryActionTint,
@@ -55,8 +58,11 @@ struct InputBarView: View {
                             interactive: true
                         )
                 }
+                .buttonStyle(.plain)
                 .disabled(!primaryActionEnabled)
+                .modifier(SendKeyboardShortcut(isEnabled: !isTextEmpty))
                 .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel(primaryAccessibilityLabel)
             }
         }
@@ -99,5 +105,22 @@ struct InputBarView: View {
         } else {
             onSend()
         }
+    }
+}
+
+private struct SendKeyboardShortcut: ViewModifier {
+    let isEnabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        if isEnabled {
+            content.keyboardShortcut(.return, modifiers: .command)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }

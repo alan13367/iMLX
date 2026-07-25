@@ -3,7 +3,7 @@
 </p>
 
 <p align="center"><strong>iMLX</strong></p>
-<p align="center">On-device AI chat for <strong>iOS</strong> and <strong>iPadOS</strong> using MLX Swift.</p>
+<p align="center">On-device AI chat for <strong>iOS</strong>, <strong>iPadOS</strong>, and native <strong>macOS</strong> using MLX Swift.</p>
 <p align="center"><sub>Runs supported LLMs locally on Apple Silicon · no cloud dependency · actively evolving</sub></p>
 
 ---
@@ -61,9 +61,9 @@ The app is designed to degrade clearly when a feature cannot run, such as MLX in
 
 ## Requirements
 
-- macOS with **Xcode 16+**
-- **iOS 18.0+** deployment target
-- **Apple Silicon** device for realistic performance
+- macOS with **Xcode 26+**
+- **iOS/iPadOS 26+** or **macOS 26+**
+- **Apple Silicon** hardware for local MLX inference
 - **Metal Toolchain** for CLI builds (see below)
 
 ---
@@ -103,6 +103,16 @@ xcodebuild build \
   -destination 'generic/platform=iOS'
 ```
 
+**5. Build the native Apple-silicon Mac app**
+
+```bash
+xcodebuild build \
+  -project "iMLX.xcodeproj" \
+  -scheme "iMLXMac" \
+  -destination 'platform=macOS,arch=arm64' \
+  CODE_SIGNING_ALLOWED=NO
+```
+
 ---
 
 ## Project layout
@@ -127,7 +137,8 @@ iMLX/
 - Memory extraction uses the active model or Apple Foundation Models when available, but retrieval is local and does not require a translation/generation pass.
 - Memory internals are split across `MemoryService.swift`, `MemoryStore.swift`, `MemoryDatabase.swift`, `MemoryService+Extraction.swift`, `MemoryService+Retrieval.swift`, `MemoryService+Shared.swift`, and `MemorySupport.swift`.
 - A dedicated architecture note lives in `docs/memory-architecture.md`.
-- The Simulator is not a reliable stand-in for GPU behavior on device.
+- The iOS Simulator is not a reliable stand-in for GPU behavior; the native macOS target can run MLX directly on Apple silicon.
+- AlarmKit timer creation and its Live Activity remain iOS-only; unsupported tools are omitted from the macOS catalog.
 - Inference is intended for **foreground** use.
 
 ---

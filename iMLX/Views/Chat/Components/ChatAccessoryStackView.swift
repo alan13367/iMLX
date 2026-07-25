@@ -104,6 +104,15 @@ struct ChatAccessoryStackView: View {
             )
         }
         .padding(.top, 8)
+        .padding(.bottom, platformBottomPadding)
+    }
+
+    private var platformBottomPadding: CGFloat {
+        #if os(macOS)
+        14
+        #else
+        0
+        #endif
     }
 
     private func isOOMError(_ message: String) -> Bool {

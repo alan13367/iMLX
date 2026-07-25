@@ -176,7 +176,7 @@ actor RemindersService {
         case .writeOnly:
             return false
         case .notDetermined:
-            if #available(iOS 17.0, *) {
+            if #available(iOS 17.0, macOS 14.0, *) {
                 return try await eventStore.requestFullAccessToReminders()
             } else {
                 return try await withCheckedThrowingContinuation { continuation in

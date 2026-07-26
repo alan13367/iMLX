@@ -22,4 +22,9 @@ final class ModelFamilyMetadataTests: XCTestCase {
         XCTAssertEqual(ModelInfo.ModelFamily.qwen35.logoName, "qwen_logo")
         XCTAssertEqual(ModelInfo.ModelFamily.qwen2vl.logoName, "qwen_logo")
     }
+
+    func testBonsaiFamilyUsesBonsaiLogo() {
+        XCTAssertEqual(ModelInfo.ModelFamily.bonsai.displayName, "Bonsai")
+        XCTAssertEqual(ModelInfo.ModelFamily.bonsai.logoName, "bonsai_logo")
+    }
 }

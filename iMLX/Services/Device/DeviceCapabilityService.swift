@@ -25,23 +25,21 @@ nonisolated final class DeviceCapabilityService {
     let tier: DeviceTier
     let usableMemoryEstimateGB: Int
 
-    init() {
-        let physicalBytes = ProcessInfo.processInfo.physicalMemory
-        let physicalGB = Int(physicalBytes / (1024 * 1024 * 1024))
+    init(hostMemoryProfile: HostMemoryProfile = .current) {
+        let physicalGB = hostMemoryProfile.physicalMemoryGB
         self.physicalMemoryGB = physicalGB
+        self.usableMemoryEstimateGB = Int(
+            hostMemoryProfile.usableMemoryEstimateBytes / HostMemoryProfile.gigabyte
+        )
 
         if physicalGB >= 20 {
             self.tier = .tier24GB
-            self.usableMemoryEstimateGB = physicalGB - 6
         } else if physicalGB >= 14 {
             self.tier = .tier16GB
-            self.usableMemoryEstimateGB = physicalGB - 5
         } else if physicalGB >= 10 {
             self.tier = .tier12GB
-            self.usableMemoryEstimateGB = physicalGB - 4
         } else {
             self.tier = .tier8GB
-            self.usableMemoryEstimateGB = max(physicalGB - 3, 2)
         }
     }
 

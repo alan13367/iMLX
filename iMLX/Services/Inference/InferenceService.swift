@@ -24,6 +24,7 @@ actor InferenceService {
     private var loadedModelId: String?
     private var loadedModelSupportsVision = false
     private var visionFeaturesEnabled = false
+    private var wiredMemoryBudgetBytes: Int?
     private var kokoroTTS: KokoroTTS?
     private var kokoroVoiceEmbedding: MLXArray?
     private var kokoroAssets: SpeechAssetFileLocations?
@@ -80,7 +81,8 @@ actor InferenceService {
             await unload()
         }
         lastModelLoadMetrics = nil
-        MLX.Memory.cacheLimit = InferenceOptimizationPolicy.defaultMLXCacheLimitBytes
+        MLX.Memory.cacheLimit = InferenceOptimizationPolicy.defaultCacheLimitBytes()
+        MLX.Memory.memoryLimit = InferenceOptimizationPolicy.memoryLimitBytes()
         MLX.Memory.clearCache()
 
         let configSupportsVision = detectVisionSupport(in: localDirectory)
@@ -91,9 +93,12 @@ actor InferenceService {
         let loadTimer = LLMProfiler.Timer()
         let loadSignpost = LLMProfiler.beginInterval("Model Loading")
         let tokenizerLoader = ProfilingTokenizerLoader()
+        let budgetBytes = InferenceWiredMemory.budgetBytes(
+            weightBytes: InferenceWiredMemory.estimatedModelWeightBytes(in: localDirectory)
+        )
 
         do {
-            let container = try await withPreferredDevice {
+            let container = try await InferenceWiredMemory.withBudget(bytes: budgetBytes) {
                 if shouldPreferVisionLoader {
                     return try await VLMModelFactory.shared.loadContainer(
                         from: localDirectory,
@@ -107,24 +112,58 @@ actor InferenceService {
                 )
             }
 
+            let modelLoadDuration = loadTimer.elapsedSeconds()
+            let memoryAfterLoad = LLMProfiler.currentMemoryFootprintBytes()
             modelContainer = container
             loadedModelId = modelId
             loadedModelSupportsVision = shouldPreferVisionLoader
             visionFeaturesEnabled = shouldPreferVisionLoader
+            wiredMemoryBudgetBytes = budgetBytes
+            LLMProfiler.endInterval("Model Loading", loadSignpost)
+
+            let warmupDuration = await warmUpLoadedModel(container)
             lastModelLoadMetrics = LLMModelLoadMetrics(
                 modelName: displayName,
-                modelLoadDuration: loadTimer.elapsedSeconds(),
+                modelLoadDuration: modelLoadDuration,
                 tokenizerLoadDuration: await tokenizerLoader.duration,
                 memoryBeforeModelLoad: memoryBeforeLoad,
-                memoryAfterModelLoad: LLMProfiler.currentMemoryFootprintBytes()
+                memoryAfterModelLoad: memoryAfterLoad,
+                modelWarmupDuration: warmupDuration
             )
-            LLMProfiler.endInterval("Model Loading", loadSignpost)
         } catch {
             LLMProfiler.endInterval("Model Loading", loadSignpost)
             MLX.Memory.clearCache()
             throw error
         }
         #endif
+    }
+
+    /// Runs a throwaway single-token generation so the user's first real message does not also pay
+    /// for Metal kernel compilation and first-touch allocation.
+    private func warmUpLoadedModel(_ container: ModelContainer) async -> TimeInterval? {
+        let signpost = LLMProfiler.beginInterval("Model Warm-up")
+        let timer = LLMProfiler.Timer()
+        defer { LLMProfiler.endInterval("Model Warm-up", signpost) }
+
+        var parameters = GenerateParameters(temperature: 0)
+        parameters.maxTokens = 1
+        let session = ChatSession(container, generateParameters: parameters)
+
+        do {
+            try await InferenceWiredMemory.withBudget(bytes: wiredMemoryBudgetBytes) {
+                for try await _ in session.streamDetails(
+                    to: "Hi",
+                    role: .user,
+                    images: [],
+                    videos: []
+                ) {
+                    try Task.checkCancellation()
+                }
+            }
+        } catch {
+            return nil
+        }
+        return timer.elapsedSeconds()
     }
 
     func invalidateConversationSessionCache() {
@@ -141,6 +180,9 @@ actor InferenceService {
         temperature: Float = 0.7,
         topP: Float = 1.0,
         repetitionPenalty: Float = 1.0,
+        topK: Int? = nil,
+        minP: Float? = nil,
+        seed: UInt64? = nil,
         modelName: String? = nil,
         profileRunLabel: String = "Local LLM Inference",
         promptConstructionDuration: TimeInterval? = nil,
@@ -311,6 +353,9 @@ actor InferenceService {
                     "mlxCacheLimit=\(optimizationPlan.mlxCacheLimitBytes), " +
                     "visionInputSize=\(optimizationPlan.visionInputSize)."
                 )
+                if let seed {
+                    profile.measurementNotes.append("Sampling seed: \(seed).")
+                }
                 MLX.Memory.cacheLimit = optimizationPlan.mlxCacheLimitBytes
                 if optimizationPlan.shouldClearCacheBeforeGeneration {
                     MLX.Memory.clearCache()
@@ -348,7 +393,7 @@ actor InferenceService {
                 }
 
                 do {
-                    try await withPreferredDevice {
+                    try await InferenceWiredMemory.withBudget(bytes: wiredMemoryBudgetBytes) {
                         let additionalContext: [String: any Sendable]? = thinkingEnabled.map { value in
                             ["enable_thinking": value]
                         }
@@ -366,6 +411,13 @@ actor InferenceService {
                         if repetitionPenalty != 1.0 {
                             parameters.repetitionPenalty = repetitionPenalty
                         }
+                        if let topK {
+                            parameters.topK = topK
+                        }
+                        if let minP {
+                            parameters.minP = minP
+                        }
+                        parameters.seed = seed
 
                         let sessionHistory = loadedModelSupportsVision
                             ? history.map(\.chatMessage)
@@ -609,7 +661,9 @@ actor InferenceService {
         var profiles: [LLMExecutionProfile] = []
         profiles.reserveCapacity(iterationCount)
 
-        for _ in 0..<iterationCount {
+        for iteration in 0..<iterationCount {
+            // Iterations stay distinct from each other but the run as a whole is reproducible,
+            // so throughput comparisons are not muddied by different sampled outputs.
             let stream = generate(
                 prompt: prompt,
                 history: [],
@@ -618,6 +672,7 @@ actor InferenceService {
                 temperature: temperature,
                 topP: topP,
                 repetitionPenalty: repetitionPenalty,
+                seed: Constants.Generation.reproducibleRunSeed &+ UInt64(iteration),
                 modelName: modelName,
                 profileRunLabel: "Benchmark",
                 profilingContext: profilingContext
@@ -659,6 +714,7 @@ actor InferenceService {
                 temperature: temperature,
                 topP: topP,
                 repetitionPenalty: repetitionPenalty,
+                seed: Constants.Generation.reproducibleRunSeed,
                 modelName: modelName,
                 profileRunLabel: "IFBench",
                 profilingContext: profilingContext
@@ -702,6 +758,7 @@ actor InferenceService {
         visionFeaturesEnabled = false
         lastModelLoadMetrics = nil
         conversationSessionCache = nil
+        wiredMemoryBudgetBytes = nil
 
         if wasLoaded {
             await Task.yield()
@@ -742,7 +799,13 @@ actor InferenceService {
                         throw InferenceError.unsupportedSpeechLocale(locale.displayName)
                     }
 
-                    MLX.Memory.clearCache()
+                    // Speech runs between chat turns, so dropping the buffer pool unconditionally
+                    // would make every spoken reply cost the next generation a cold cache.
+                    if InferenceOptimizationPolicy.shouldReclaimCache(
+                        availableMemoryBytes: LLMProfiler.availableMemoryBytes()
+                    ) {
+                        MLX.Memory.clearCache()
+                    }
 
                     if kokoroAssets != assets || kokoroTTS == nil || kokoroVoiceEmbedding == nil
                         || kokoroVoiceLocale != locale
@@ -825,10 +888,6 @@ actor InferenceService {
 
     func unloadSpeechSynthesisResources() {
         releaseSpeechSynthesisResources()
-    }
-
-    private func withPreferredDevice<R>(_ operation: () async throws -> R) async rethrows -> R {
-        return try await operation()
     }
 
     private func speechChunks(for text: String) -> [String] {

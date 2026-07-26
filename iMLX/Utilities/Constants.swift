@@ -381,6 +381,20 @@ nonisolated enum Constants {
                 supportsVision: false,
                 prefersThinkingEnabled: true
             ),
+            ModelInfo(
+                id: "ternary-bonsai-8b-mlx-2bit",
+                displayName: "Ternary Bonsai 8B",
+                huggingFaceId: "prism-ml/Ternary-Bonsai-8B-mlx-2bit",
+                parameterCount: "8B",
+                quantization: "2-bit",
+                estimatedSizeGB: 2.3,
+                minDeviceRAM: 12,
+                family: .bonsai,
+                logoName: "bonsai_logo",
+                supportsThinking: false,
+                supportsVision: false,
+                prefersThinkingEnabled: false
+            ),
         ]
     }
 
@@ -407,6 +421,8 @@ nonisolated enum Constants {
         """
         static let defaultTopP: Float = 1.0
         static let defaultRepetitionPenalty: Float = 1.0
+        /// Fixed sampling seed so benchmark and IFBench runs can be compared across builds.
+        static let reproducibleRunSeed: UInt64 = 20_260_101
         static let standardMaxTokens = 4096
         static let memoryConstrainedStandardMaxTokens = 1024
         static let memoryConstrainedVisionMaxTokens = 1024

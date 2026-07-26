@@ -28,6 +28,13 @@ struct ModelLogoView: View {
                             .font(.system(size: size * 0.42, weight: .semibold))
                             .foregroundStyle(.white)
                     }
+            case .bonsai:
+                Image(family.logoName)
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .padding(size * 0.18)
+                    .foregroundStyle(.primary)
             default:
                 Image(family.logoName)
                     .resizable()

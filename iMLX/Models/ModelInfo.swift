@@ -28,6 +28,7 @@ struct ModelInfo: Identifiable, Codable {
         case mistral3
         case lfm2
         case lfm25
+        case bonsai
 
         var displayName: String {
             switch self {
@@ -41,6 +42,7 @@ struct ModelInfo: Identifiable, Codable {
             case .mistral3: return "Mistral 3"
             case .lfm2: return "LFM 2"
             case .lfm25: return "LFM 2.5"
+            case .bonsai: return "Bonsai"
             }
         }
 
@@ -66,6 +68,8 @@ struct ModelInfo: Identifiable, Codable {
                 return "LFM 2 is a compact Liquid model family tuned for efficient everyday chat and low-footprint on-device use."
             case .lfm25:
                 return "LFM 2.5 pushes Liquid's small-model efficiency further, adding stronger reasoning behavior while staying lightweight for local use."
+            case .bonsai:
+                return "Bonsai is Prism ML's end-to-end 1-bit model family for Apple Silicon — dense Qwen3-class quality at a fraction of the usual on-device footprint."
             }
         }
 
@@ -77,6 +81,7 @@ struct ModelInfo: Identifiable, Codable {
             case .gemma3, .gemma4: return "gemma_logo"
             case .mistral3: return "mistral_logo"
             case .lfm2, .lfm25: return "lfm_logo"
+            case .bonsai: return "bonsai_logo"
             }
         }
 
@@ -92,6 +97,7 @@ struct ModelInfo: Identifiable, Codable {
             case .mistral3: return 7
             case .lfm2: return 8
             case .lfm25: return 9
+            case .bonsai: return 10
             }
         }
     }

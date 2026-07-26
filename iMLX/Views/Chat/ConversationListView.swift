@@ -38,6 +38,14 @@ struct ConversationListView: View {
             : String.appLocalized("conversation.title.list")
     }
 
+    private var listSelectionToolbarPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        .automatic
+        #else
+        .imlxLeading
+        #endif
+    }
+
     var body: some View {
         let conversations = appState.conversations
         let conversationIDs = conversations.map(\.id)
@@ -137,7 +145,7 @@ struct ConversationListView: View {
                 }
             } else {
                 if isSelectionMode {
-                    ToolbarItem(placement: .imlxLeading) {
+                    ToolbarItem(placement: listSelectionToolbarPlacement) {
                         Button(String.appLocalized("common.cancel")) {
                             stopSelecting()
                         }
@@ -163,7 +171,7 @@ struct ConversationListView: View {
                         }
                         .accessibilityLabel("New conversation")
                     }
-                    ToolbarItem(placement: .imlxLeading) {
+                    ToolbarItem(placement: listSelectionToolbarPlacement) {
                         if canClearAllConversations {
                             Button(String.appLocalized("common.select")) {
                                 startSelecting()

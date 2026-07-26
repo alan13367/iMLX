@@ -62,6 +62,7 @@ struct LLMProfilingView: View {
                 Section {
                     metricRow("Model load", LLMProfileFormatters.duration(profile.modelLoadDuration))
                     metricRow("Tokenizer load", LLMProfileFormatters.duration(profile.tokenizerLoadDuration))
+                    metricRow("Warm-up", LLMProfileFormatters.duration(profile.modelWarmupDuration))
                     metricRow("Prompt construction", LLMProfileFormatters.duration(profile.promptConstructionDuration))
                     metricRow("Tokenization", LLMProfileFormatters.duration(profile.tokenizationDuration))
                     metricRow("Prefill / prompt eval", LLMProfileFormatters.duration(profile.prefillPromptEvaluationDuration))

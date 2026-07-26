@@ -64,6 +64,23 @@ nonisolated struct LLMModelLoadMetrics: Codable, Hashable, Sendable {
     let tokenizerLoadDuration: TimeInterval?
     let memoryBeforeModelLoad: UInt64?
     let memoryAfterModelLoad: UInt64?
+    let modelWarmupDuration: TimeInterval?
+
+    init(
+        modelName: String,
+        modelLoadDuration: TimeInterval,
+        tokenizerLoadDuration: TimeInterval?,
+        memoryBeforeModelLoad: UInt64?,
+        memoryAfterModelLoad: UInt64?,
+        modelWarmupDuration: TimeInterval? = nil
+    ) {
+        self.modelName = modelName
+        self.modelLoadDuration = modelLoadDuration
+        self.tokenizerLoadDuration = tokenizerLoadDuration
+        self.memoryBeforeModelLoad = memoryBeforeModelLoad
+        self.memoryAfterModelLoad = memoryAfterModelLoad
+        self.modelWarmupDuration = modelWarmupDuration
+    }
 }
 
 nonisolated struct LLMExecutionProfile: Identifiable, Codable, Hashable, Sendable {
@@ -86,6 +103,7 @@ nonisolated struct LLMExecutionProfile: Identifiable, Codable, Hashable, Sendabl
     var outputCharacterCount: Int?
     var modelLoadDuration: TimeInterval?
     var tokenizerLoadDuration: TimeInterval?
+    var modelWarmupDuration: TimeInterval?
     var promptConstructionDuration: TimeInterval?
     var tokenizationDuration: TimeInterval?
     var prefillPromptEvaluationDuration: TimeInterval?
@@ -161,6 +179,7 @@ nonisolated struct LLMExecutionProfile: Identifiable, Codable, Hashable, Sendabl
         self.outputCharacterCount = 0
         self.modelLoadDuration = modelLoadMetrics?.modelLoadDuration
         self.tokenizerLoadDuration = modelLoadMetrics?.tokenizerLoadDuration
+        self.modelWarmupDuration = modelLoadMetrics?.modelWarmupDuration
         self.promptConstructionDuration = promptConstructionDuration
         self.tokenizationDuration = nil
         self.prefillPromptEvaluationDuration = nil
@@ -228,7 +247,7 @@ nonisolated struct LLMExecutionProfile: Identifiable, Codable, Hashable, Sendabl
             "Time to first output chunk is recorded separately because streamed text chunks can lag the first raw token when detokenization buffers partial text.",
             "Detokenization is performed inside MLXLMCommon's generation stream; this app records emitted text chunk and character counts from stream output.",
             "memoryPeakDuringInference is the maximum sampled process phys_footprint during the run (including periodic samples while decoding).",
-            "memoryAvailableAtInferenceStart uses Mach host_statistics64 free_count + inactive_count and estimates reclaimable host memory, not process jetsam headroom."
+            "memoryAvailableAtInferenceStart uses Mach host_statistics64 to subtract app, wired, and compressed memory from physical RAM, mirroring Activity Monitor's memory-used accounting rather than process jetsam headroom."
         ]
         #else
         [
@@ -279,6 +298,7 @@ nonisolated struct LLMExecutionProfile: Identifiable, Codable, Hashable, Sendabl
             "outputCharacterCount",
             "modelLoadDuration",
             "tokenizerLoadDuration",
+            "modelWarmupDuration",
             "promptConstructionDuration",
             "tokenizationDuration",
             "prefillPromptEvaluationDuration",
@@ -344,6 +364,7 @@ nonisolated struct LLMExecutionProfile: Identifiable, Codable, Hashable, Sendabl
         fields.append(outputCharacterCount.map(String.init) ?? "")
         fields.append(Self.string(modelLoadDuration))
         fields.append(Self.string(tokenizerLoadDuration))
+        fields.append(Self.string(modelWarmupDuration))
         fields.append(Self.string(promptConstructionDuration))
         fields.append(Self.string(tokenizationDuration))
         fields.append(Self.string(prefillPromptEvaluationDuration))
@@ -1105,6 +1126,7 @@ nonisolated struct LLMProfilingModelLoadExport: Codable, Hashable, Sendable {
     let modelName: String
     let modelLoadDuration: TimeInterval?
     let tokenizerLoadDuration: TimeInterval?
+    let modelWarmupDuration: TimeInterval?
     let memoryBeforeModelLoad: UInt64?
     let memoryAfterModelLoad: UInt64?
 
@@ -1112,6 +1134,7 @@ nonisolated struct LLMProfilingModelLoadExport: Codable, Hashable, Sendable {
         self.modelName = profile.modelName
         self.modelLoadDuration = profile.modelLoadDuration
         self.tokenizerLoadDuration = profile.tokenizerLoadDuration
+        self.modelWarmupDuration = profile.modelWarmupDuration
         self.memoryBeforeModelLoad = profile.memoryBeforeModelLoad
         self.memoryAfterModelLoad = profile.memoryAfterModelLoad
     }

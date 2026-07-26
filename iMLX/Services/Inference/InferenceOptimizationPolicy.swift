@@ -11,8 +11,20 @@ nonisolated struct InferenceOptimizationPlan: Equatable, Sendable {
     let shouldClearCacheBeforeGeneration: Bool
 }
 
+/// Tuning policy for a single generation.
+///
+/// Fields split into two groups. KV cache shape (`maxKVSize`, `kvBits`, `kvGroupSize`,
+/// `quantizedKVStart`) must stay stable for the lifetime of a conversation, because changing it
+/// invalidates the reusable prefix session and forces a full re-prefill. Those fields are derived
+/// only from the host and the model, never from fluctuating live memory readings. Everything else
+/// (prefill chunking, buffer cache size, cache reclamation) is safe to adapt per run.
 nonisolated enum InferenceOptimizationPolicy {
-    static let defaultMLXCacheLimitBytes = 20 * 1024 * 1024
+    private struct PrefillLadder {
+        let severe: Int
+        let constrained: Int
+        let standard: Int
+        let large: Int
+    }
 
     private enum ModelClass {
         case hybrid
@@ -20,15 +32,20 @@ nonisolated enum InferenceOptimizationPolicy {
         case standard
     }
 
-    private static let severeMemoryHeadroomBytes: UInt64 = 512 * 1024 * 1024
-    private static let constrainedMemoryHeadroomBytes: UInt64 = 1_200 * 1024 * 1024
-    private static let highMemoryHeadroomBytes: UInt64 = 2_000 * 1024 * 1024
-    private static let cacheReclaimHeadroomBytes: UInt64 = 768 * 1024 * 1024
-    private static let kvQuantizationPromptTokenThreshold = 1_280
-    private static let extendedGenerationTokenThreshold = 6_000
-    /// Assumed generation use when deciding whether a large maxTokens budget warrants KV quant.
-    private static let likelyGenerationTokenCap = 2_048
-    private static let kvQuantizationActiveCacheTokenThreshold = 3_072
+    private static let mobilePrefillLadder = PrefillLadder(
+        severe: 128,
+        constrained: 256,
+        standard: 512,
+        large: 1_024
+    )
+    private static let desktopPrefillLadder = PrefillLadder(
+        severe: 512,
+        constrained: 1_024,
+        standard: 2_048,
+        large: 4_096
+    )
+
+    private static let largePromptPrefillThreshold = 2_048
 
     static func plan(
         contextTextBytes: Int,
@@ -39,59 +56,42 @@ nonisolated enum InferenceOptimizationPolicy {
         modelName: String? = nil,
         estimatedModelSizeGB: Double? = nil,
         supportsVision: Bool = false,
-        allowsKVQuantization: Bool = true
+        allowsKVQuantization: Bool = true,
+        host: HostMemoryProfile = .current
     ) -> InferenceOptimizationPlan {
         let availableMemory = availableMemoryBytes ?? .max
         let estimatedPromptTokens = max(1, (max(0, contextTextBytes) + 2) / 3)
         let hasMedia = contextMediaAttachmentCount > 0
-        let isMemoryConstrained = availableMemory < constrainedMemoryHeadroomBytes
+        let isSeverelyConstrained = availableMemory < host.severeHeadroomBytes
+        let isMemoryConstrained = availableMemory < host.constrainedHeadroomBytes
         let modelClass = modelClass(modelIdentifier: modelIdentifier, modelName: modelName)
-        let estimatedActiveCacheTokens =
-            estimatedPromptTokens + min(max(0, maxTokens), likelyGenerationTokenCap)
 
+        let ladder = host.isDesktopClass ? desktopPrefillLadder : mobilePrefillLadder
         let prefillStepSize: Int
-        if availableMemory < severeMemoryHeadroomBytes {
-            prefillStepSize = 128
+        if isSeverelyConstrained {
+            prefillStepSize = ladder.severe
         } else if hasMedia || isMemoryConstrained {
             // Only pay the smaller vision/memory prefill chunk when this turn actually needs it.
             // A vision-capable model on a text-only turn should still use the faster path.
-            prefillStepSize = 256
-        } else if modelClass == .hybrid || estimatedPromptTokens >= 2_048 {
-            prefillStepSize = 1_024
+            prefillStepSize = ladder.constrained
+        } else if modelClass == .hybrid || estimatedPromptTokens >= largePromptPrefillThreshold {
+            prefillStepSize = ladder.large
         } else {
-            prefillStepSize = 512
+            prefillStepSize = ladder.standard
         }
 
-        let shouldQuantizeKVCache = allowsKVQuantization
-            && !supportsVision
-            && (isMemoryConstrained
-                || estimatedPromptTokens >= kvQuantizationPromptTokenThreshold
-                || estimatedActiveCacheTokens >= kvQuantizationActiveCacheTokenThreshold
-                || maxTokens >= extendedGenerationTokenThreshold)
-        let quantizedKVStart = shouldQuantizeKVCache
-            ? (isMemoryConstrained ? 512 : 1_024)
-            : 0
+        // Quantization is requested for every eligible model rather than being switched on once a
+        // conversation grows. `quantizedKVStart` already delays the conversion until the cache is
+        // large enough to be worth compressing, so this costs nothing on short turns and keeps the
+        // prefix session valid as the conversation grows.
+        let shouldQuantizeKVCache = allowsKVQuantization && !supportsVision
+        let quantizedKVStart = shouldQuantizeKVCache ? host.quantizedKVStartTokens : 0
 
-        let maxKVSize: Int?
-        if availableMemory < severeMemoryHeadroomBytes && estimatedPromptTokens > 2_048 {
-            maxKVSize = 2_048
-        } else if isMemoryConstrained && estimatedPromptTokens > 4_096 {
-            maxKVSize = 4_096
-        } else {
-            maxKVSize = nil
-        }
-
-        let mlxCacheLimitBytes: Int
-        if availableMemory < severeMemoryHeadroomBytes {
-            mlxCacheLimitBytes = 8 * 1024 * 1024
-        } else if isMemoryConstrained {
-            mlxCacheLimitBytes = defaultMLXCacheLimitBytes
-        } else if supportsVision || (estimatedModelSizeGB ?? 0) >= 3 {
-            mlxCacheLimitBytes = 32 * 1024 * 1024
-        } else if availableMemory >= highMemoryHeadroomBytes {
-            mlxCacheLimitBytes = 64 * 1024 * 1024
-        } else {
-            mlxCacheLimitBytes = 32 * 1024 * 1024
+        // A rotating window drops the oldest context, so it is only used when the conversation
+        // genuinely outgrows the host. Prompt size grows monotonically within a conversation,
+        // which keeps this from flipping back and forth between turns.
+        let maxKVSize = host.kvWindowTokenLimit.flatMap { limit in
+            estimatedPromptTokens > limit ? limit : nil
         }
 
         return InferenceOptimizationPlan(
@@ -100,15 +100,40 @@ nonisolated enum InferenceOptimizationPolicy {
             kvBits: shouldQuantizeKVCache ? 8 : nil,
             kvGroupSize: 64,
             quantizedKVStart: quantizedKVStart,
-            mlxCacheLimitBytes: mlxCacheLimitBytes,
-            visionInputSize: isMemoryConstrained ? 384 : 512,
-            shouldClearCacheBeforeGeneration: availableMemory < severeMemoryHeadroomBytes
+            mlxCacheLimitBytes: cacheLimitBytes(
+                host: host,
+                isSeverelyConstrained: isSeverelyConstrained,
+                isMemoryConstrained: isMemoryConstrained,
+                availableMemoryBytes: availableMemory,
+                estimatedModelSizeGB: estimatedModelSizeGB,
+                supportsVision: supportsVision
+            ),
+            visionInputSize: visionInputSize(host: host, isMemoryConstrained: isMemoryConstrained),
+            shouldClearCacheBeforeGeneration: isSeverelyConstrained
         )
     }
 
-    static func shouldReclaimCache(availableMemoryBytes: UInt64?) -> Bool {
+    /// Buffer cache used before a plan is available, for example while loading a model.
+    static func defaultCacheLimitBytes(host: HostMemoryProfile = .current) -> Int {
+        host.isDesktopClass
+            ? clampedDesktopCacheLimitBytes(host: host)
+            : 20 * Int(HostMemoryProfile.megabyte)
+    }
+
+    /// Ceiling MLX applies to its own allocations before waiting on scheduled work.
+    ///
+    /// MLX otherwise defaults to 1.5x the recommended Metal working set, which can exceed what
+    /// jetsam tolerates on an iPhone even with the increased memory entitlement.
+    static func memoryLimitBytes(host: HostMemoryProfile = .current) -> Int {
+        Int(clamping: host.inferenceMemoryLimitBytes)
+    }
+
+    static func shouldReclaimCache(
+        availableMemoryBytes: UInt64?,
+        host: HostMemoryProfile = .current
+    ) -> Bool {
         guard let availableMemoryBytes else { return false }
-        return availableMemoryBytes < cacheReclaimHeadroomBytes
+        return availableMemoryBytes < host.cacheReclaimHeadroomBytes
     }
 
     static func allowsKVQuantization(
@@ -121,9 +146,50 @@ nonisolated enum InferenceOptimizationPolicy {
         return modelClass(modelIdentifier: modelIdentifier, modelName: modelName) != .gemma4
     }
 
-    static func shouldClearCacheBetweenSpeechStages(availableMemoryBytes: UInt64?) -> Bool {
+    static func shouldClearCacheBetweenSpeechStages(
+        availableMemoryBytes: UInt64?,
+        host: HostMemoryProfile = .current
+    ) -> Bool {
         guard let availableMemoryBytes else { return true }
-        return availableMemoryBytes < constrainedMemoryHeadroomBytes
+        return availableMemoryBytes < host.constrainedHeadroomBytes
+    }
+
+    private static func cacheLimitBytes(
+        host: HostMemoryProfile,
+        isSeverelyConstrained: Bool,
+        isMemoryConstrained: Bool,
+        availableMemoryBytes: UInt64,
+        estimatedModelSizeGB: Double?,
+        supportsVision: Bool
+    ) -> Int {
+        let megabyte = Int(HostMemoryProfile.megabyte)
+
+        if host.isDesktopClass {
+            if isSeverelyConstrained { return 64 * megabyte }
+            if isMemoryConstrained { return 256 * megabyte }
+            return clampedDesktopCacheLimitBytes(host: host)
+        }
+
+        if isSeverelyConstrained { return 8 * megabyte }
+        if isMemoryConstrained { return 20 * megabyte }
+        if supportsVision || (estimatedModelSizeGB ?? 0) >= 3 { return 32 * megabyte }
+        if availableMemoryBytes >= host.abundantHeadroomBytes { return 64 * megabyte }
+        return 32 * megabyte
+    }
+
+    /// A desktop-sized buffer pool. MLX recycles evaluation buffers up to this limit, so the tiny
+    /// mobile budgets force constant allocate/free churn on machines that can spare gigabytes.
+    private static func clampedDesktopCacheLimitBytes(host: HostMemoryProfile) -> Int {
+        let megabyte = Int(HostMemoryProfile.megabyte)
+        let scaled = Int(clamping: host.physicalMemoryBytes / 16)
+        return min(max(scaled, 384 * megabyte), 1_536 * megabyte)
+    }
+
+    private static func visionInputSize(host: HostMemoryProfile, isMemoryConstrained: Bool) -> Int {
+        if host.isDesktopClass {
+            return isMemoryConstrained ? 512 : 768
+        }
+        return isMemoryConstrained ? 384 : 512
     }
 
     private static func modelClass(modelIdentifier: String?, modelName: String?) -> ModelClass {

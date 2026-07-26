@@ -77,15 +77,9 @@ struct ChatComposerSection: View {
                     }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.title3.weight(.semibold))
-                        .frame(width: 36, height: 36)
-                        .foregroundStyle(BrandPalette.accent)
-                        .liquidGlassSurface(
-                            tint: BrandPalette.accent.opacity(0.12),
-                            in: Circle(),
-                            fallback: AnyShapeStyle(BrandPalette.accent.opacity(0.10)),
-                            interactive: true
-                        )
+                        .font(.title3)
+                        .frame(width: 30, height: 30)
+                        .foregroundStyle(.secondary)
                 }
                 .tint(.primary)
                 .menuIndicator(.hidden)
@@ -98,14 +92,8 @@ struct ChatComposerSection: View {
                     Button(action: actions.toggleThinking) {
                         Image(systemName: state.isThinkingEnabled ? "lightbulb.fill" : "lightbulb")
                             .font(.title3)
-                            .frame(width: 36, height: 36)
-                            .foregroundStyle(state.isThinkingEnabled ? .orange : .secondary)
-                            .liquidGlassSurface(
-                                tint: state.isThinkingEnabled ? .orange.opacity(0.2) : nil,
-                                in: Circle(),
-                                fallback: AnyShapeStyle(state.isThinkingEnabled ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)),
-                                interactive: true
-                            )
+                            .frame(width: 30, height: 30)
+                            .foregroundStyle(state.isThinkingEnabled ? BrandPalette.accent : .secondary)
                     }
                     .buttonStyle(.plain)
                     .frame(width: 44, height: 44)
@@ -127,12 +115,10 @@ struct ChatComposerSection: View {
         }
         .frame(maxWidth: state.maxWidth)
         .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.vertical, 6)
         .liquidGlassSurface(
-            tint: BrandPalette.navy.opacity(0.10),
             in: RoundedRectangle(cornerRadius: 24, style: .continuous),
-            fallback: AnyShapeStyle(.thinMaterial)
+            fallback: AnyShapeStyle(.regularMaterial)
         )
         .padding(.horizontal)
     }

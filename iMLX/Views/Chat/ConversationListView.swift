@@ -8,6 +8,9 @@ enum ConversationListPresentation {
 struct ConversationListView: View {
     let appState: AppState
     var presentation: ConversationListPresentation = .rootNavigation
+    /// Set by the macOS split view so this view can own the collapse control and hide
+    /// its sidebar-only actions once the sidebar is closed.
+    var sidebarVisibility: Binding<NavigationSplitViewVisibility>?
     var onClose: (() -> Void)?
     var onSelect: (UUID) -> Void
 
@@ -38,14 +41,6 @@ struct ConversationListView: View {
             : String.appLocalized("conversation.title.list")
     }
 
-    private var listSelectionToolbarPlacement: ToolbarItemPlacement {
-        #if os(macOS)
-        .automatic
-        #else
-        .imlxLeading
-        #endif
-    }
-
     var body: some View {
         let conversations = appState.conversations
         let conversationIDs = conversations.map(\.id)
@@ -55,131 +50,15 @@ struct ConversationListView: View {
                 emptyContent
             } else {
                 ForEach(conversations) { conversation in
-                    ConversationListItem(
-                        conversation: conversation,
-                        isActive: appState.activeConversationId == conversation.id,
-                        isSelectionMode: isSelectionMode,
-                        isSelected: selectedConversationIDs.contains(conversation.id),
-                        onOpen: { selectConversation(conversation.id) },
-                        onToggleSelection: { toggleSelection(for: conversation.id) }
-                    )
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if !isSelectionMode {
-                            Button(role: .destructive) {
-                                confirmDeletion(for: conversation)
-                            } label: {
-                                Label(String.appLocalized("common.delete"), systemImage: "trash")
-                            }
-                        }
-                    }
-                    .contextMenu {
-                        if isSelectionMode {
-                            Button {
-                                toggleSelection(for: conversation.id)
-                            } label: {
-                                Label(
-                                    selectedConversationIDs.contains(conversation.id)
-                                        ? String.appLocalized("conversation.deselect")
-                                        : String.appLocalized("common.select"),
-                                    systemImage: selectedConversationIDs.contains(conversation.id)
-                                        ? "checkmark.circle.fill"
-                                        : "circle"
-                                )
-                            }
-                        } else {
-                            Button(role: .destructive) {
-                                confirmDeletion(for: conversation)
-                            } label: {
-                                Label(String.appLocalized("common.delete"), systemImage: "trash")
-                            }
-                        }
-                    }
+                    conversationRow(conversation)
                 }
             }
         }
         .id(conversationIDs)
         .navigationTitle(navigationTitle)
         .toolbar {
-            if presentation == .modalSheet {
-                if isSelectionMode {
-                    ToolbarItemGroup(placement: .imlxLeading) {
-                        Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
-                            toggleSelectAll()
-                        }
-                        .disabled(!canClearAllConversations)
-                        Button(role: .destructive) {
-                            isShowingDeleteSelectedAlert = true
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .disabled(!hasSelectedConversations)
-                        .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
-                    }
-                    ToolbarItem(placement: .imlxTrailing) {
-                        Button(String.appLocalized("common.cancel")) {
-                            stopSelecting()
-                        }
-                    }
-                } else {
-                    ToolbarItem(placement: .imlxLeading) {
-                        Button(action: createConversation) {
-                            Image(systemName: "square.and.pencil")
-                        }
-                        .accessibilityLabel("New conversation")
-                    }
-                    ToolbarItem(placement: .imlxLeading) {
-                        if canClearAllConversations {
-                            Button(String.appLocalized("common.select")) {
-                                startSelecting()
-                            }
-                        }
-                    }
-                    ToolbarItem(placement: .imlxTrailing) {
-                        Button {
-                            onClose?()
-                        } label: {
-                            CloseButtonLabel()
-                        }
-                        .accessibilityLabel(String.appLocalized("common.close"))
-                    }
-                }
-            } else {
-                if isSelectionMode {
-                    ToolbarItem(placement: listSelectionToolbarPlacement) {
-                        Button(String.appLocalized("common.cancel")) {
-                            stopSelecting()
-                        }
-                    }
-                    ToolbarItemGroup(placement: .imlxTrailing) {
-                        Button(hasSelectedAllConversations ? String.appLocalized("conversation.deselect_all") : String.appLocalized("conversation.select_all")) {
-                            toggleSelectAll()
-                        }
-                        .disabled(!canClearAllConversations)
-                        
-                        Button(role: .destructive) {
-                            isShowingDeleteSelectedAlert = true
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .disabled(!hasSelectedConversations)
-                        .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
-                    }
-                } else {
-                    ToolbarItem(placement: .imlxLeading) {
-                        Button(action: createConversation) {
-                            Image(systemName: "square.and.pencil")
-                        }
-                        .accessibilityLabel("New conversation")
-                    }
-                    ToolbarItem(placement: listSelectionToolbarPlacement) {
-                        if canClearAllConversations {
-                            Button(String.appLocalized("common.select")) {
-                                startSelecting()
-                            }
-                        }
-                    }
-                }
-            }
+            modalSheetToolbar
+            sidebarToolbar
         }
         .modifier(
             ConversationDeletionAlert(
@@ -199,6 +78,153 @@ struct ConversationListView: View {
         }
         .onChange(of: conversationIDs) { _, ids in
             selectedConversationIDs.formIntersection(Set(ids))
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var modalSheetToolbar: some ToolbarContent {
+        if presentation == .modalSheet, isSelectionMode {
+            ToolbarItemGroup(placement: .imlxLeading) {
+                selectAllButton
+                deleteSelectedButton
+            }
+            ToolbarItem(placement: .imlxTrailing) {
+                cancelSelectionButton
+            }
+        }
+
+        if presentation == .modalSheet, !isSelectionMode {
+            ToolbarItem(placement: .imlxLeading) {
+                newConversationButton
+            }
+            ToolbarItem(placement: .imlxLeading) {
+                startSelectingButton
+            }
+            ToolbarItem(placement: .imlxTrailing) {
+                Button {
+                    onClose?()
+                } label: {
+                    CloseButtonLabel()
+                }
+                .accessibilityLabel(String.appLocalized("common.close"))
+            }
+        }
+    }
+
+    private var sidebarIsVisible: Bool {
+        sidebarVisibility?.wrappedValue != .detailOnly
+    }
+
+    @ToolbarContentBuilder
+    private var sidebarToolbar: some ToolbarContent {
+        if presentation == .rootNavigation, sidebarIsVisible, isSelectionMode {
+            ToolbarItem(placement: .imlxLeading) {
+                cancelSelectionButton
+            }
+            ToolbarItemGroup(placement: .imlxTrailing) {
+                selectAllButton
+                deleteSelectedButton
+            }
+        }
+
+        if presentation == .rootNavigation, sidebarIsVisible, !isSelectionMode {
+            ToolbarItem(placement: .imlxLeading) {
+                newConversationButton
+            }
+            ToolbarItem(placement: .imlxLeading) {
+                startSelectingButton
+            }
+        }
+
+        if let sidebarVisibility, presentation == .rootNavigation {
+            ToolbarItem(placement: .imlxLeading) {
+                SidebarCollapseButton(visibility: sidebarVisibility)
+            }
+        }
+    }
+
+    private var newConversationButton: some View {
+        Button(action: createConversation) {
+            Image(systemName: "square.and.pencil")
+        }
+        .accessibilityLabel("New conversation")
+    }
+
+    @ViewBuilder
+    private var startSelectingButton: some View {
+        if canClearAllConversations {
+            Button(String.appLocalized("common.select")) {
+                startSelecting()
+            }
+        }
+    }
+
+    private var cancelSelectionButton: some View {
+        Button(String.appLocalized("common.cancel")) {
+            stopSelecting()
+        }
+    }
+
+    private var selectAllButton: some View {
+        Button(
+            hasSelectedAllConversations
+                ? String.appLocalized("conversation.deselect_all")
+                : String.appLocalized("conversation.select_all")
+        ) {
+            toggleSelectAll()
+        }
+        .disabled(!canClearAllConversations)
+    }
+
+    private var deleteSelectedButton: some View {
+        Button(role: .destructive) {
+            isShowingDeleteSelectedAlert = true
+        } label: {
+            Image(systemName: "trash")
+        }
+        .disabled(!hasSelectedConversations)
+        .accessibilityLabel(String.appLocalized("conversation.delete_selected"))
+    }
+
+    private func conversationRow(_ conversation: Conversation) -> some View {
+        let isSelected = selectedConversationIDs.contains(conversation.id)
+
+        return ConversationListItem(
+            conversation: conversation,
+            isActive: appState.activeConversationId == conversation.id,
+            isSelectionMode: isSelectionMode,
+            isSelected: isSelected,
+            onOpen: { selectConversation(conversation.id) },
+            onToggleSelection: { toggleSelection(for: conversation.id) }
+        )
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if !isSelectionMode {
+                deleteButton(for: conversation)
+            }
+        }
+        .contextMenu {
+            if isSelectionMode {
+                Button {
+                    toggleSelection(for: conversation.id)
+                } label: {
+                    Label(
+                        isSelected
+                            ? String.appLocalized("conversation.deselect")
+                            : String.appLocalized("common.select"),
+                        systemImage: isSelected ? "checkmark.circle.fill" : "circle"
+                    )
+                }
+            } else {
+                deleteButton(for: conversation)
+            }
+        }
+    }
+
+    private func deleteButton(for conversation: Conversation) -> some View {
+        Button(role: .destructive) {
+            confirmDeletion(for: conversation)
+        } label: {
+            Label(String.appLocalized("common.delete"), systemImage: "trash")
         }
     }
 
@@ -279,6 +305,22 @@ struct ConversationListView: View {
             systemImage: "bubble.left.and.bubble.right"
         )
         .listRowBackground(Color.clear)
+    }
+}
+
+private struct SidebarCollapseButton: View {
+    @Binding var visibility: NavigationSplitViewVisibility
+
+    var body: some View {
+        Button {
+            withAnimation {
+                visibility = visibility == .detailOnly ? .all : .detailOnly
+            }
+        } label: {
+            Image(systemName: "sidebar.leading")
+        }
+        .help(String.appLocalized("conversation.toggle_sidebar"))
+        .accessibilityLabel(String.appLocalized("conversation.toggle_sidebar"))
     }
 }
 
@@ -391,27 +433,18 @@ struct ConversationRow: View {
             Spacer()
 
             Text("\(conversation.messages.count)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .liquidGlassSurface(in: Capsule(), fallback: AnyShapeStyle(.fill.tertiary))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
 
             if showsDeleteControl {
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .liquidGlassSurface(
-                            tint: .red.opacity(0.14),
-                            in: Circle(),
-                            fallback: AnyShapeStyle(.fill.tertiary),
-                            interactive: true
-                        )
+                        .foregroundStyle(.red)
                 }
                 .buttonStyle(.borderless)
                 .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel("Delete conversation")
             }
         }

@@ -25,50 +25,7 @@ struct MessageStreamingCaret: View {
     }
 }
 
-/// Three-dot pulsing indicator used while the assistant is "thinking" but has not
-/// produced any visible final answer yet.
-struct ThinkingActivityIndicator: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: Int = 0
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(BrandPalette.cyan)
-                    .frame(width: 5, height: 5)
-                    .opacity(opacity(for: index))
-                    .scaleEffect(scale(for: index))
-            }
-        }
-        .accessibilityLabel(String.appLocalized("message.waiting_final"))
-        .accessibilityAddTraits(.updatesFrequently)
-        .task(id: reduceMotion) {
-            guard !reduceMotion else { return }
-            while !Task.isCancelled {
-                withAnimation(.easeInOut(duration: 0.42)) {
-                    phase = (phase + 1) % 3
-                }
-                try? await Task.sleep(for: .milliseconds(420))
-            }
-        }
-    }
-
-    private func opacity(for index: Int) -> Double {
-        if reduceMotion { return 0.6 }
-        return phase == index ? 1.0 : 0.35
-    }
-
-    private func scale(for index: Int) -> CGFloat {
-        if reduceMotion { return 1.0 }
-        return phase == index ? 1.15 : 0.9
-    }
-}
-
-#Preview("Streaming caret + thinking dots") {
-    VStack(spacing: 24) {
-        MessageStreamingCaret()
-        ThinkingActivityIndicator()
-    }
-    .padding()
+#Preview("Streaming caret") {
+    MessageStreamingCaret()
+        .padding()
 }

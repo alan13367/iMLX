@@ -52,7 +52,7 @@ struct ChatAccessoryStackView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             if let errorMessage = state.errorMessage {
                 ChatNoticeBanner(
                     style: .error(isOOM: isOOMError(errorMessage)),
@@ -74,16 +74,17 @@ struct ChatAccessoryStackView: View {
             }
 
             if state.isModelLoading {
-                ChatStatusCard(
+                ChatStatusLine(
                     title: String.appLocalized("chat.loading_model_title"),
-                    subtitle: state.selectedModelDisplayName ?? String.appLocalized("chat.preparing_model")
+                    detail: state.selectedModelDisplayName ?? String.appLocalized("chat.preparing_model")
                 )
                 .frame(maxWidth: maxWidth)
-            }
-
-            if state.isGenerating {
-                ChatGeneratingIndicator()
-                    .frame(maxWidth: maxWidth)
+            } else if state.isGenerating {
+                ChatStatusLine(
+                    title: String.appLocalized("chat.generating"),
+                    detail: nil
+                )
+                .frame(maxWidth: maxWidth)
             }
 
             if let memoryNotice = state.memoryNotice {

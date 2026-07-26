@@ -11,14 +11,10 @@ struct WebSearchPrivacyConfirmationSheet: View {
                 VStack(alignment: .leading, spacing: 22) {
                     HStack(alignment: .top, spacing: 14) {
                         Image(systemName: "globe.badge.chevron.backward")
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(BrandPalette.cyan)
-                            .frame(width: 44, height: 44)
-                            .liquidGlassSurface(
-                                tint: BrandPalette.cyan.opacity(0.18),
-                                in: Circle(),
-                                fallback: AnyShapeStyle(BrandPalette.cyan.opacity(0.10))
-                            )
+                            .font(.title)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(BrandPalette.accent)
+                            .frame(width: 40)
 
                         VStack(alignment: .leading, spacing: 6) {
                             Text(String.appLocalized("web_search.privacy.title"))
@@ -51,7 +47,7 @@ struct WebSearchPrivacyConfirmationSheet: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity, minHeight: 48)
                 }
-                .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
+                .buttonStyle(.borderedProminent)
 
                 Button {
                     onKeepLocal()
@@ -61,7 +57,7 @@ struct WebSearchPrivacyConfirmationSheet: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity, minHeight: 48)
                 }
-                .liquidGlassButtonStyle(tint: BrandPalette.cyan)
+                .buttonStyle(.bordered)
             }
             .padding(.horizontal, 24)
             .padding(.top, 12)

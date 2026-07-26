@@ -109,6 +109,11 @@ struct LLMProfilingView: View {
             Section {
                 metricRow("Saved sessions", appState.llmProfilingSessions.count.formatted())
                 metricRow("Saved profiles", appState.llmExecutionProfiles.count.formatted())
+                Button("Refresh", systemImage: "arrow.clockwise") {
+                    Task {
+                        await appState.refreshLLMExecutionProfiles()
+                    }
+                }
                 ForEach(appState.llmProfilingSessions) { session in
                     sessionRow(session)
                 }
@@ -243,18 +248,8 @@ struct LLMProfilingView: View {
                 }
             }
         }
+        .imlxSettingsFormStyle()
         .navigationTitle("LLM Profiling")
-        .toolbar {
-            ToolbarItem(placement: .imlxTrailing) {
-                Button {
-                    Task {
-                        await appState.refreshLLMExecutionProfiles()
-                    }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-            }
-        }
         .fileExporter(
             isPresented: $isExportingSessionJSON,
             document: sessionExportDocument,
@@ -332,32 +327,28 @@ struct LLMProfilingView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
-            HStack {
-                Button {
+            HStack(spacing: 12) {
+                Button("Save JSON") {
                     Task {
                         await prepareSessionJSONExport(session)
                     }
-                } label: {
-                    Label("Save JSON", systemImage: "square.and.arrow.down")
                 }
-                Spacer()
                 Button("Copy JSON") {
                     Task {
                         await copySessionJSON(session)
                     }
                 }
-                Spacer()
-                Button(role: .destructive) {
+                Button("Delete", role: .destructive) {
                     Task {
                         await deleteSession(session)
                     }
-                } label: {
-                    Label("Delete", systemImage: "trash")
                 }
                 .disabled(session.activeSnapshot != nil)
+                Spacer(minLength: 0)
             }
             .buttonStyle(.borderless)
-            .padding(.top, 4)
+            .font(.callout)
+            .padding(.top, 2)
         }
         .padding(.vertical, 2)
     }

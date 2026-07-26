@@ -1,46 +1,47 @@
 import SwiftUI
 
+/// Navigation-title-style model status. Sits inside the toolbar, which already
+/// supplies its own background, so this draws no surface of its own.
 struct ChatModelStatusLabel: View {
     let isModelLoading: Bool
     let selectedModelDisplayName: String?
     let loadedModelDisplayName: String?
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             if isModelLoading {
                 ProgressView()
-                    .controlSize(.small)
-                Text(selectedModelDisplayName ?? String.appLocalized("chat.loading_model"))
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-            } else if let loadedModelDisplayName {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-                Text(loadedModelDisplayName)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else {
-                Image(systemName: "arrow.down.circle.fill")
+                    .controlSize(.mini)
+            } else if loadedModelDisplayName == nil {
+                Image(systemName: "exclamationmark.circle")
                     .font(.caption)
                     .foregroundStyle(.orange)
-                Text(String.appLocalized("chat.select_model"))
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+            }
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if !isModelLoading {
                 Image(systemName: "chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
         }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .liquidGlassSurface(in: Capsule(), interactive: true)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    private var title: String {
+        if isModelLoading {
+            return selectedModelDisplayName ?? String.appLocalized("chat.loading_model")
+        }
+        if let loadedModelDisplayName {
+            return loadedModelDisplayName
+        }
+        return String.appLocalized("chat.select_model")
     }
 }

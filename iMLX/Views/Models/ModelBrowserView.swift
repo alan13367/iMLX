@@ -15,31 +15,26 @@ struct ModelBrowserView: View {
     var body: some View {
         List {
             if let error = viewModel.errorMessage {
-                ModelBrowserErrorRow(message: error, onDismiss: dismissError)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                Section {
+                    ModelBrowserErrorRow(message: error, onDismiss: dismissError)
+                }
             }
 
-            ForEach(viewModel.downloadableModelsGroupedByFamily, id: \.family) { group in
-                Button {
-                    selectedFamily = group.family
-                } label: {
-                    ModelFamilyRow(
-                        family: group.family,
-                        modelCount: group.models.count,
-                        downloadedCount: group.models.count(where: \.isDownloaded)
-                    )
+            Section {
+                ForEach(viewModel.downloadableModelsGroupedByFamily, id: \.family) { group in
+                    Button {
+                        selectedFamily = group.family
+                    } label: {
+                        ModelFamilyRow(
+                            family: group.family,
+                            modelCount: group.models.count,
+                            downloadedCount: group.models.count(where: \.isDownloaded)
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(PlatformColors.groupedBackground)
         .navigationTitle(String.appLocalized("models.browser.title"))
         .toolbar {
             #if os(iOS)
@@ -78,30 +73,30 @@ private struct ModelBrowserErrorRow: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.footnote)
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(4)
-            Spacer()
+
+            Spacer(minLength: 0)
+
             Button(action: onDismiss) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
             .buttonStyle(.plain)
-            .frame(width: 44, height: 44)
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
             .accessibilityLabel(String.appLocalized("models.browser.dismiss_error_a11y"))
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 4)
-        .padding(.vertical, 6)
-        .liquidGlassSurface(
-            tint: Color.orange.opacity(0.08),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous),
-            fallback: AnyShapeStyle(Color.orange.opacity(0.08))
-        )
     }
 }
 
@@ -111,35 +106,29 @@ private struct ModelFamilyRow: View {
     let downloadedCount: Int
 
     var body: some View {
-        HStack(spacing: 14) {
-            ModelLogoView(family: family, size: 44)
+        HStack(spacing: 12) {
+            ModelLogoView(family: family, size: 38)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(family.displayName)
-                    .font(.headline)
+                    .font(.body)
+                    .foregroundStyle(.primary)
 
                 Text(statusText)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 8)
 
             Image(systemName: "chevron.forward")
-                .font(.footnote.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .liquidGlassSurface(
-            tint: downloadedCount > 0 ? Color.green.opacity(0.04) : nil,
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous),
-            fallback: AnyShapeStyle(.thinMaterial)
-        )
         .accessibilityElement(children: .combine)
     }
 
@@ -171,84 +160,44 @@ struct FamilyModelsView: View {
 
         List {
             if let error = viewModel.errorMessage {
-                ModelBrowserErrorRow(
-                    message: error,
-                    onDismiss: { viewModel.errorMessage = nil }
-                )
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                Section {
+                    ModelBrowserErrorRow(
+                        message: error,
+                        onDismiss: { viewModel.errorMessage = nil }
+                    )
+                }
             }
 
-            ModelFamilyOverview(
-                family: family,
-                modelCount: models.count
-            )
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-
-            ForEach(models) { model in
-                ModelCardView(
-                    model: model,
-                    progress: progressByModelID[model.id] ?? 0,
-                    isDownloading: downloadingByModelID[model.id] ?? false,
-                    anyModelDownloading: isAnyModelDownloading,
-                    onDownload: {
-                        viewModel.errorMessage = nil
-                        viewModel.download(model: model)
-                    },
-                    onCancelDownload: {
-                        viewModel.errorMessage = nil
-                        viewModel.cancelDownload(model: model)
-                    },
-                    onDelete: { viewModel.delete(model: model) }
-                )
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(PlatformColors.groupedBackground)
-        .navigationTitle(family.displayName)
-        .imlxInlineNavigationTitle()
-    }
-}
-
-private struct ModelFamilyOverview: View {
-    let family: ModelInfo.ModelFamily
-    let modelCount: Int
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ModelLogoView(family: family, size: 36)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 6) {
+            Section {
+                ForEach(models) { model in
+                    ModelCardView(
+                        model: model,
+                        progress: progressByModelID[model.id] ?? 0,
+                        isDownloading: downloadingByModelID[model.id] ?? false,
+                        anyModelDownloading: isAnyModelDownloading,
+                        onDownload: {
+                            viewModel.errorMessage = nil
+                            viewModel.download(model: model)
+                        },
+                        onCancelDownload: {
+                            viewModel.errorMessage = nil
+                            viewModel.cancelDownload(model: model)
+                        },
+                        onDelete: { viewModel.delete(model: model) }
+                    )
+                }
+            } header: {
                 Text(
                     String(
                         format: String.appLocalized("models.family.model_count"),
-                        modelCount
+                        models.count
                     )
                 )
-                .font(.subheadline.weight(.semibold))
-
+            } footer: {
                 Text(family.familyDescription)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .liquidGlassSurface(
-            tint: BrandPalette.navy.opacity(0.08),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous),
-            fallback: AnyShapeStyle(.thinMaterial)
-        )
-        .accessibilityElement(children: .combine)
+        .navigationTitle(family.displayName)
+        .imlxInlineNavigationTitle()
     }
 }

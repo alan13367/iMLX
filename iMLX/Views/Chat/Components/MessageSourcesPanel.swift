@@ -1,7 +1,10 @@
 import SwiftUI
 
-/// Compact sources disclosure. Renders as a single pill ("Sources · 3") that
-/// expands inline to show kind-grouped source rows.
+/// Sources disclosure rendered below a finalized answer.
+///
+/// A plain text header expands into hairline-separated rows. Web sources lead
+/// with their domain so the list scans like a citation list rather than a stack
+/// of cards; nothing here draws a background or capsule.
 struct MessageSourcesPanel: View {
     let sources: [MessageSource]
     let openSource: (URL?) -> Void
@@ -10,56 +13,43 @@ struct MessageSourcesPanel: View {
     @State private var hapticSelectionTrigger = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            disclosureButton
+        VStack(alignment: .leading, spacing: ChatMetrics.activityRowSpacing) {
+            ActivityRow(
+                leading: .symbol("text.quote", tint: .secondary),
+                label: String(
+                    format: String.appLocalized("message.sources_count"),
+                    sources.count
+                ),
+                trailing: nil,
+                disclosure: ActivityDisclosure(isExpanded: isExpanded) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isExpanded.toggle()
+                    }
+                    hapticSelectionTrigger += 1
+                }
+            )
+            .accessibilityLabel(
+                String(format: String.appLocalized("message.sources_count"), sources.count)
+            )
+            .accessibilityValue(isExpanded ? Text("Expanded") : Text("Collapsed"))
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(sources) { source in
-                        SourceRowView(source: source) {
-                            openSource(source.url)
+                ActivityDetailBody {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(sources.enumerated()), id: \.element.id) { index, source in
+                            if index > 0 {
+                                Divider()
+                            }
+                            SourceRowView(source: source) {
+                                openSource(source.url)
+                            }
                         }
                     }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(.opacity)
             }
         }
         .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
-    }
-
-    private var disclosureButton: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded.toggle()
-            }
-            hapticSelectionTrigger += 1
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(String(format: String.appLocalized("message.sources_count"), sources.count))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isExpanded ? 0 : -90))
-                    .animation(.easeInOut(duration: 0.18), value: isExpanded)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.regularMaterial, in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(String(format: String.appLocalized("message.sources_count"), sources.count))
-        .accessibilityValue(isExpanded ? Text("Expanded") : Text("Collapsed"))
-        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -69,54 +59,79 @@ private struct SourceRowView: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: kindIcon)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BrandPalette.accent)
-                    .frame(width: 18, height: 18)
-                    .padding(.top, 2)
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
-                    if !source.excerpt.isEmpty {
-                        Text(source.excerpt)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if source.url != nil {
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2.weight(.bold))
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: kindIcon)
+                        .font(.caption2)
                         .foregroundStyle(.tertiary)
-                        .padding(.top, 2)
+                        .accessibilityHidden(true)
+
+                    Text(provenance)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if source.url != nil {
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Text(source.title)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+
+                if !source.excerpt.isEmpty {
+                    Text(source.excerpt)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(source.url == nil)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title). \(source.excerpt)")
+        .accessibilityLabel("\(source.title). \(provenance)")
         .accessibilityAddTraits(source.url != nil ? .isLink : [])
     }
 
-    private var title: String {
-        if let location = source.location, !location.isEmpty {
-            return "\(source.title) · \(location)"
+    /// Where the source came from: a host for web results, otherwise the
+    /// in-document location such as a page number.
+    private var provenance: String {
+        if let host = source.url?.host()?.replacingOccurrences(of: "www.", with: ""), !host.isEmpty {
+            if let location = source.location, !location.isEmpty {
+                return "\(host) · \(location)"
+            }
+            return host
         }
-        return source.title
+        if let location = source.location, !location.isEmpty {
+            return location
+        }
+        return kindLabel
+    }
+
+    private var kindLabel: String {
+        switch source.kind {
+        case .web: "Web"
+        case .document: "Document"
+        case .image: "Image"
+        case .calendar: "Calendar"
+        case .reminder: "Reminder"
+        case .contact: "Contact"
+        }
     }
 
     private var kindIcon: String {
@@ -131,10 +146,27 @@ private struct SourceRowView: View {
     }
 }
 
-#Preview("Sources — collapsed") {
+#Preview("Sources") {
     MessageSourcesPanel(
         sources: [
-            MessageSource(id: "1", kind: .document, title: "MANDATO GESTORIA", excerpt: "ALAN BELTRAN POZO 53321921D SEAT IBIZA 1,0 TSI 115CV…", location: "Page 1", url: nil, score: 0.9)
+            MessageSource(
+                id: "1",
+                kind: .web,
+                title: "20 Tallest Buildings in the World 2026",
+                excerpt: "Merdeka 118 standard height and total height figures.",
+                location: nil,
+                url: URL(string: "https://www.thetowerinfo.com/tallest"),
+                score: 0.9
+            ),
+            MessageSource(
+                id: "2",
+                kind: .document,
+                title: "MANDATO GESTORIA",
+                excerpt: "ALAN BELTRAN POZO SEAT IBIZA 1,0 TSI 115CV",
+                location: "Page 1",
+                url: nil,
+                score: 0.7
+            )
         ],
         openSource: { _ in }
     )

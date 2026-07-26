@@ -35,12 +35,10 @@ struct ChatToastView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 4)
+                .liquidGlassSurface(
+                    in: Capsule(),
+                    fallback: AnyShapeStyle(.regularMaterial)
+                )
                 .id(toast.id)
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .accessibilityElement(children: .combine)

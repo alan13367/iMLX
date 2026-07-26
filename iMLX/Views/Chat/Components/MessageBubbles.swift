@@ -2,10 +2,9 @@ import SwiftUI
 
 // MARK: - User bubble
 
-/// Refined user message bubble. Uses `regularMaterial` with a brand-tinted
-/// stroke and a subtle gradient lining instead of a full magenta→cyan fill —
-/// puts the message *content* first and reserves the brand identity for the
-/// app chrome.
+/// User message bubble. A single flat fill on the system background — the only
+/// bubble in the transcript, so it distinguishes the user's turn without
+/// competing with the assistant's answer.
 struct UserMessageBubble: View {
     let text: String
     let deliveryState: MessageDeliveryState
@@ -20,27 +19,14 @@ struct UserMessageBubble: View {
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(.regularMaterial)
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        BrandPalette.magenta.opacity(0.40),
-                                        BrandPalette.accent.opacity(0.32),
-                                        BrandPalette.cyan.opacity(0.26)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 0.8
-                            )
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(.vertical, 10)
+                    .background(
+                        Color.secondary.opacity(ChatMetrics.inlineFillOpacity),
+                        in: RoundedRectangle(
+                            cornerRadius: ChatMetrics.bubbleCornerRadius,
+                            style: .continuous
+                        )
+                    )
             }
 
             MessageDeliveryStatusView(state: deliveryState, onRetry: onRetry)
@@ -96,22 +82,13 @@ struct MessageDeliveryStatusView: View {
                     }
 
                     if let onRetry {
-                        Button {
+                        Button(String.appLocalized("message.retry")) {
                             hapticLightTrigger += 1
                             onRetry()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.caption2.weight(.bold))
-                                Text(String.appLocalized("message.retry"))
-                                    .font(.caption.weight(.semibold))
-                            }
-                            .foregroundStyle(BrandPalette.accent)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(BrandPalette.accent.opacity(0.14), in: Capsule())
                         }
+                        .font(.caption.weight(.semibold))
                         .buttonStyle(.plain)
+                        .foregroundStyle(BrandPalette.accent)
                         .accessibilityLabel(String.appLocalized("message.retry"))
                     }
                 }

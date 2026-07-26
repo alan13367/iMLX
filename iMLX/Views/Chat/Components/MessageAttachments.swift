@@ -126,7 +126,7 @@ private struct MessageImageAttachmentStrip: View {
                         imageId: image.id,
                         imageData: image.data,
                         size: imageSize,
-                        cornerRadius: 14
+                        cornerRadius: ChatMetrics.chipCornerRadius
                     )
                         .accessibilityLabel("Attached image")
                 }
@@ -138,9 +138,8 @@ private struct MessageImageAttachmentStrip: View {
     }
 }
 
-/// Single-document attachment card. Uses semantic backgrounds so it adapts
-/// correctly to light and dark mode. The tint is *only* applied to the icon
-/// background and an accent rail; the card body uses `.regularMaterial`.
+/// Single-document attachment row. A flat fill with a tinted document glyph;
+/// the kind is carried by the icon rather than a rail, stroke, and badge.
 struct AttachmentDocumentCard: View {
     let document: ConversationDocumentReference
 
@@ -149,61 +148,39 @@ struct AttachmentDocumentCard: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(palette.tint.opacity(0.14))
-                    .frame(width: 40, height: 48)
+        HStack(spacing: 10) {
+            Image(systemName: palette.iconName)
+                .font(.title3)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(palette.tint)
+                .accessibilityHidden(true)
 
-                Image(systemName: palette.iconName)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(palette.tint)
-                    .symbolRenderingMode(.hierarchical)
-            }
-            .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(document.displayName)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(document.kind.displayName.uppercased())
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(palette.tint)
+                Text(document.kind.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .accessibilityLabel(document.kind.displayName)
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
         .frame(width: 280, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(alignment: .leading) {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 14,
-                bottomLeadingRadius: 14,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: 0
-            )
-            .fill(palette.tint)
-            .frame(width: 3)
-            .accessibilityHidden(true)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(palette.tint.opacity(0.32), lineWidth: 0.8)
-        }
+        .background(
+            Color.secondary.opacity(ChatMetrics.inlineFillOpacity),
+            in: RoundedRectangle(cornerRadius: ChatMetrics.chipCornerRadius, style: .continuous)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(document.displayName), \(document.kind.displayName)")
     }
 }
 
-/// Decoded thumbnail view backed by a shared `NSCache`. Identical behavior
-/// to the previous implementation in `MessageBubbleView.swift` but moved here
-/// so attachment-related code lives in one file.
+/// Decoded thumbnail view backed by a shared `NSCache`.
 struct AttachmentImageThumbnailView: View {
     @Environment(\.displayScale) private var displayScale
 

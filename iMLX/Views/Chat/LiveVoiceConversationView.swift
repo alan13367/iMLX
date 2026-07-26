@@ -130,14 +130,8 @@ private struct LiveVoiceHeaderBar: View {
         HStack {
             Text(voiceLocaleName)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white.opacity(0.9))
-                .padding(.horizontal, 14)
+                .foregroundStyle(.white.opacity(0.7))
                 .padding(.vertical, 8)
-                .liquidGlassSurface(
-                    tint: BrandPalette.accent.opacity(0.12),
-                    in: Capsule(),
-                    fallback: AnyShapeStyle(.ultraThinMaterial)
-                )
 
             Spacer()
 

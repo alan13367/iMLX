@@ -37,7 +37,7 @@ struct ChatMessageListSection: View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
+                    LazyVStack(spacing: 18) {
                         ForEach(messages) { message in
                             MessageRow(
                                 message: message,
@@ -51,43 +51,20 @@ struct ChatMessageListSection: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
 
-                        if let toolActivityStatus {
-                            HStack {
-                                MessageToolCallCard(phase: toolPhase(for: toolActivityStatus))
-                                Spacer(minLength: 24)
-                            }
+                        if let liveToolPhase {
+                            MessageActivityView(
+                                toolPhase: liveToolPhase,
+                                thinking: nil,
+                                isStreaming: true,
+                                isWaitingForAnswer: true,
+                                isThinkingExpanded: .constant(false)
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .id("toolActivity")
-                            .transition(.opacity)
-                        } else if let currentToolTrace, isGenerating {
-                            HStack {
-                                MessageToolCallCard(phase: .completed(currentToolTrace))
-                                Spacer(minLength: 24)
-                            }
-                            .id("toolTraceInline")
                             .transition(.opacity)
                         }
 
-                        if !currentResponse.isEmpty, shouldPinStreamingThinkingHeader {
-                            Section {
-                                streamingMessageBubble
-                            } header: {
-                                MessageThinkingPanel(
-                                    text: nil,
-                                    isStreaming: true,
-                                    isWaitingForAnswer: parsedResponse.response.isEmpty,
-                                    mode: .pinnedHeader,
-                                    isExpanded: $isStreamingThinkingExpanded,
-                                    onToggle: {
-                                        guard streamingAutoscrollEnabled else { return }
-                                        scheduleAutoscroll(using: proxy, repeatAfterLayoutChange: true)
-                                    }
-                                )
-                                .padding(.trailing, 24)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .id("streaming")
-                            .transition(.opacity)
-                        } else if !currentResponse.isEmpty {
+                        if !currentResponse.isEmpty {
                             streamingMessageBubble
                                 .id("streaming")
                                 .transition(.opacity)
@@ -170,12 +147,6 @@ struct ChatMessageListSection: View {
         .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
     }
 
-    private var shouldPinStreamingThinkingHeader: Bool {
-        guard isGenerating else { return false }
-        guard let thinking = parsedResponse.thinking else { return false }
-        return !thinking.isEmpty
-    }
-
     private var streamingMessageBubble: some View {
         MessageRow(
             message: ChatMessage(
@@ -186,18 +157,26 @@ struct ChatMessageListSection: View {
             ),
             isStreaming: true,
             parsedAssistantContent: parsedResponse,
-            showsThinkingHeader: !shouldPinStreamingThinkingHeader,
             thinkingExpansion: $isStreamingThinkingExpanded,
             onCopy: onCopy
         )
     }
 
-    private func toolPhase(for status: ToolActivityStatus) -> MessageToolCallCard.Phase {
-        switch status {
-        case .planning: return .planning
-        case .running(let toolName, let displayInput):
-            return .running(toolName: toolName, displayInput: displayInput)
+    /// In-flight tool activity. Falls back to the just-completed trace so the
+    /// summary line stays visible while the answer streams in behind it.
+    private var liveToolPhase: MessageActivityToolPhase? {
+        if let toolActivityStatus {
+            switch toolActivityStatus {
+            case .planning:
+                return .planning
+            case .running(let toolName, let displayInput):
+                return .running(toolName: toolName, displayInput: displayInput)
+            }
         }
+        if let currentToolTrace, isGenerating {
+            return .completed(currentToolTrace)
+        }
+        return nil
     }
 
     private var streamingAutoscrollKey: Int {
@@ -229,19 +208,13 @@ struct ChatMessageListSection: View {
             } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.85))
+                    .foregroundStyle(.secondary)
                     .frame(width: 36, height: 36)
                     .liquidGlassSurface(
                         in: Circle(),
-                        fallback: AnyShapeStyle(.ultraThinMaterial),
-                        fallbackStroke: Color.primary.opacity(0.08),
+                        fallback: AnyShapeStyle(.regularMaterial),
                         interactive: true
                     )
-                    .overlay {
-                        Circle()
-                            .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-                    }
-                    .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 2)
                     .frame(width: 44, height: 44)
                     .contentShape(Circle())
             }

@@ -11,34 +11,34 @@ struct ChatPendingDocumentStrip: View {
                 ForEach(pendingDocuments) { document in
                     HStack(spacing: 6) {
                         Image(systemName: iconName(document.kind))
-                            .foregroundStyle(BrandPalette.cyan)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(document.displayName)
-                                .font(.caption.weight(.semibold))
-                                .lineLimit(1)
-                            Text(document.kind.displayName)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(document.displayName)
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         Button {
                             onRemoveDocument(document)
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
+                            Image(systemName: "xmark")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
                         }
-                        .frame(width: 44, height: 44)
+                        .buttonStyle(.plain)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                         .accessibilityLabel("Remove document")
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .liquidGlassSurface(
-                        tint: BrandPalette.cyan.opacity(0.18),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
-                        fallback: AnyShapeStyle(BrandPalette.cyan.opacity(0.1))
+                    .padding(.leading, 10)
+                    .padding(.trailing, 2)
+                    .padding(.vertical, 4)
+                    .background(
+                        Color.secondary.opacity(ChatMetrics.inlineFillOpacity),
+                        in: Capsule()
                     )
                 }
             }
-            .liquidGlassContainer(spacing: 10)
             .padding(.horizontal, 4)
         }
         .scrollIndicators(.hidden)

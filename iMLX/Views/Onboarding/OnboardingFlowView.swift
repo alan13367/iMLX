@@ -53,9 +53,6 @@ struct OnboardingFlowView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ChatBackgroundView()
-                .ignoresSafeArea()
-
             TabView(selection: $step) {
                 ForEach(OnboardingStep.allCases, id: \.self) { currentStep in
                     ScrollView {
@@ -104,23 +101,15 @@ struct OnboardingFlowView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 48)
             .padding(.top, 40)
-            .background(
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .mask(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0.0),
-                                .init(color: .black, location: 0.35),
-                                .init(color: .black, location: 1.0)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .ignoresSafeArea(edges: .bottom)
-            )
+            .background(alignment: .top) {
+                VStack(spacing: 0) {
+                    Divider()
+                    PlatformColors.chatBackground
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
         }
+        .background(PlatformColors.chatBackground.ignoresSafeArea())
         .sensoryFeedback(.selection, trigger: step)
     }
 
@@ -198,16 +187,15 @@ private struct OnboardingProgressHeader: View {
         VStack(spacing: 24) {
             Image(systemName: step.icon)
                 .font(.largeTitle.weight(.light))
-                .foregroundStyle(BrandPalette.primaryGradient)
+                .foregroundStyle(BrandPalette.accent)
                 .symbolEffect(.bounce.up.byLayer, options: .nonRepeating)
                 .frame(height: 60)
-            
+
             VStack(spacing: 12) {
                 Text(step.title)
-                    .font(.system(.title, design: .rounded))
-                    .bold()
+                    .font(.title.weight(.bold))
                     .multilineTextAlignment(.center)
-                
+
                 HStack(spacing: 8) {
                     ForEach(0..<stepCount, id: \.self) { i in
                         Capsule()
@@ -369,7 +357,8 @@ private struct OnboardingFinishStep: View {
                         Text(String.appLocalized("models.card.stop_download"))
                             .frame(maxWidth: .infinity)
                     }
-                    .liquidGlassButtonStyle(prominent: false)
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
                 }
             } else if let selectedModel, isSelectedModelDownloaded {
                 OnboardingFeatureCard(
@@ -431,7 +420,8 @@ private struct OnboardingFooter: View {
                             Text(String.appLocalized("models.card.stop_download"))
                                 .frame(maxWidth: .infinity)
                         }
-                        .liquidGlassButtonStyle(prominent: false)
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
                     } else {
                         Button(action: {
                             hapticLightTrigger += 1
@@ -446,7 +436,8 @@ private struct OnboardingFooter: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                         .disabled(isStartingDownload)
                     }
                 }
@@ -458,7 +449,8 @@ private struct OnboardingFooter: View {
                     Text("Skip for now")
                         .frame(maxWidth: .infinity)
                 }
-                .liquidGlassButtonStyle(prominent: false)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             } else {
                 Button(action: {
                     hapticLightTrigger += 1
@@ -469,7 +461,8 @@ private struct OnboardingFooter: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
                 }
-                .liquidGlassButtonStyle(prominent: true, tint: BrandPalette.accent)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
 
             if step.rawValue > OnboardingStep.welcome.rawValue && step != .finish {
@@ -505,11 +498,8 @@ private struct OnboardingStarterModelRow: View {
                             .foregroundStyle(.primary)
                         if isRecommended {
                             Text("Recommended")
-                                .font(.caption2.weight(.bold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(BrandPalette.primaryGradient, in: Capsule())
-                                .foregroundStyle(.white)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(BrandPalette.accent)
                         }
                     }
 
@@ -520,26 +510,16 @@ private struct OnboardingStarterModelRow: View {
 
                 Spacer(minLength: 0)
 
-                ZStack {
-                    Circle()
-                        .stroke(isSelected ? BrandPalette.accent : Color.secondary.opacity(0.3), lineWidth: 2)
-                        .frame(width: 24, height: 24)
-                    
-                    if isSelected {
-                        Circle()
-                            .fill(BrandPalette.primaryGradient)
-                            .frame(width: 14, height: 14)
-                    }
-                }
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isSelected ? BrandPalette.accent : Color.secondary)
             }
-            .padding(20)
-            .liquidGlassSurface(
-                tint: isSelected ? BrandPalette.accent.opacity(0.1) : nil,
-                in: RoundedRectangle(cornerRadius: 24),
-                interactive: true
-            )
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -554,14 +534,15 @@ private struct OnboardingFeatureCard: View {
     let content: OnboardingCardContent
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: 14) {
             Image(systemName: content.icon)
-                .font(.title2)
-                .foregroundStyle(BrandPalette.primaryGradient)
-                .frame(width: 32)
+                .font(.title3)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(BrandPalette.accent)
+                .frame(width: 28)
                 .padding(.top, 2)
-            
-            VStack(alignment: .leading, spacing: 6) {
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(content.title)
                     .font(.headline)
                     .foregroundStyle(.primary)
@@ -572,23 +553,16 @@ private struct OnboardingFeatureCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .liquidGlassSurface(in: RoundedRectangle(cornerRadius: 24))
     }
 }
 
 #Preview("Onboarding Card") {
-    ZStack {
-        ChatBackgroundView()
-            .ignoresSafeArea()
-        
-        OnboardingFeatureCard(
-            content: OnboardingCardContent(
-                icon: "hand.raised.fill",
-                title: "Privacy before convenience",
-                body: "Web search is opt-in per conversation, and starter model downloads happen only when you choose them."
-            )
+    OnboardingFeatureCard(
+        content: OnboardingCardContent(
+            icon: "hand.raised.fill",
+            title: "Privacy before convenience",
+            body: "Web search is opt-in per conversation, and starter model downloads happen only when you choose them."
         )
-        .padding()
-    }
+    )
+    .padding()
 }

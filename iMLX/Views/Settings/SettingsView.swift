@@ -209,7 +209,7 @@ struct SettingsView: View {
 }
 
 #if os(macOS)
-private enum MacSettingsSection: String, Hashable {
+private enum MacSettingsTab: String, Hashable {
     case general
     case assistant
     case memory
@@ -218,116 +218,81 @@ private enum MacSettingsSection: String, Hashable {
     case profiling
     #endif
     case about
-
-    var title: String {
-        switch self {
-        case .general:
-            String.appLocalized("settings.section.app")
-        case .assistant:
-            String.appLocalized("settings.assistant.title")
-        case .memory:
-            String.appLocalized("settings.manage_memory")
-        case .speech:
-            String.appLocalized("settings.speech_assets.section")
-        #if DEBUG
-        case .profiling:
-            "LLM Profiling"
-        #endif
-        case .about:
-            String.appLocalized("settings.section.about")
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .general:
-            "gearshape"
-        case .assistant:
-            "person.crop.circle"
-        case .memory:
-            "brain.head.profile"
-        case .speech:
-            "waveform"
-        #if DEBUG
-        case .profiling:
-            "gauge.with.dots.needle.67percent"
-        #endif
-        case .about:
-            "info.circle"
-        }
-    }
 }
 
 private struct MacSettingsRootView: View {
     @Bindable var appState: AppState
     let deviceCapability: DeviceCapabilityService
     @Binding var showClearModelsAlert: Bool
-    @State private var selection: MacSettingsSection? = .general
-
-    private var activeSection: MacSettingsSection {
-        selection ?? .general
-    }
+    @State private var selection: MacSettingsTab = .general
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $selection) {
-                Section {
-                    settingsLink(.general)
-                    settingsLink(.assistant)
-                    settingsLink(.memory)
-                    settingsLink(.speech)
-                }
-
-                #if DEBUG
-                Section("Developer") {
-                    settingsLink(.profiling)
-                }
-                #endif
-
-                Section {
-                    settingsLink(.about)
+        TabView(selection: $selection) {
+            Tab(String.appLocalized("settings.section.general"), systemImage: "gearshape", value: MacSettingsTab.general) {
+                MacSettingsPane {
+                    MacGeneralSettingsView(appState: appState)
                 }
             }
-            .listStyle(.sidebar)
-            .navigationTitle(String.appLocalized("settings.title"))
-            .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 250)
-        } detail: {
-            NavigationStack {
-                detailView(for: activeSection)
+
+            Tab(String.appLocalized("settings.assistant.title"), systemImage: "person.crop.circle", value: MacSettingsTab.assistant) {
+                MacSettingsPane {
+                    AssistantSettingsView(appState: appState)
+                }
             }
-            .id(activeSection)
+
+            Tab(String.appLocalized("settings.manage_memory"), systemImage: "brain.head.profile", value: MacSettingsTab.memory) {
+                MacSettingsPane(idealHeight: 560) {
+                    MemoryLibraryView(appState: appState)
+                }
+            }
+
+            Tab(String.appLocalized("settings.speech_assets.section"), systemImage: "waveform", value: MacSettingsTab.speech) {
+                MacSettingsPane {
+                    SpeechAssetsSettingsView(appState: appState)
+                }
+            }
+
+            #if DEBUG
+            Tab("LLM Profiling", systemImage: "gauge.with.dots.needle.67percent", value: MacSettingsTab.profiling) {
+                MacSettingsPane(idealWidth: 640, idealHeight: 620) {
+                    LLMProfilingView(appState: appState)
+                }
+            }
+            #endif
+
+            Tab(String.appLocalized("settings.section.about"), systemImage: "info.circle", value: MacSettingsTab.about) {
+                MacSettingsPane {
+                    AboutSettingsView(
+                        appState: appState,
+                        appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0",
+                        deviceCapability: deviceCapability,
+                        showClearModelsAlert: $showClearModelsAlert
+                    )
+                }
+            }
         }
     }
+}
 
-    private func settingsLink(_ section: MacSettingsSection) -> some View {
-        Label(section.title, systemImage: section.systemImage)
-            .tag(section)
-            .accessibilityLabel(section.title)
-    }
+/// Wraps a macOS settings pane so every tab gets its own navigation stack and a
+/// consistent, resizable preferences-window footprint.
+private struct MacSettingsPane<Content: View>: View {
+    var idealWidth: CGFloat = 560
+    var idealHeight: CGFloat = 480
+    @ViewBuilder var content: Content
 
-    @ViewBuilder
-    private func detailView(for section: MacSettingsSection) -> some View {
-        switch section {
-        case .general:
-            MacGeneralSettingsView(appState: appState)
-        case .assistant:
-            AssistantSettingsView(appState: appState)
-        case .memory:
-            MemoryLibraryView(appState: appState)
-        case .speech:
-            SpeechAssetsSettingsView(appState: appState)
-        #if DEBUG
-        case .profiling:
-            LLMProfilingView(appState: appState)
-        #endif
-        case .about:
-            AboutSettingsView(
-                appState: appState,
-                appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0",
-                deviceCapability: deviceCapability,
-                showClearModelsAlert: $showClearModelsAlert
-            )
+    var body: some View {
+        NavigationStack {
+            content
         }
+        .frame(
+            minWidth: 500,
+            idealWidth: idealWidth,
+            maxWidth: .infinity,
+            minHeight: 360,
+            idealHeight: idealHeight,
+            maxHeight: .infinity
+        )
     }
 }
 
@@ -337,35 +302,20 @@ private struct MacGeneralSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Button {
-                    PlatformApplication.openLanguageSettings()
-                } label: {
-                    SettingsValueRow(
-                        title: String.appLocalized("settings.section.language"),
-                        detail: String.appLocalized("settings.language.mac_system_settings_detail"),
-                        systemImage: "globe"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Toggle(isOn: Binding(
+                Toggle(String.appLocalized("settings.focus_composer_on_launch"), isOn: Binding(
                     get: { appState.openKeyboardOnLaunch },
                     set: { appState.setOpenKeyboardOnLaunch($0) }
-                )) {
-                    Label(
-                        String.appLocalized("settings.focus_composer_on_launch"),
-                        systemImage: "text.cursor"
-                    )
+                ))
+
+                LabeledContent(String.appLocalized("settings.section.language")) {
+                    Button(String.appLocalized("settings.language.mac_system_settings_detail")) {
+                        PlatformApplication.openLanguageSettings()
+                    }
                 }
-            } header: {
-                SettingsSectionHeader(
-                    title: String.appLocalized("settings.section.app"),
-                    systemImage: "gearshape"
-                )
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(String.appLocalized("settings.section.app"))
+        .navigationTitle(String.appLocalized("settings.section.general"))
     }
 }
 #endif
@@ -586,11 +536,15 @@ private struct SettingsSectionHeader: View {
     var systemImage: String?
 
     var body: some View {
+        #if os(macOS)
+        Text(title)
+        #else
         if let systemImage {
             Label(title, systemImage: systemImage)
         } else {
             Text(title)
         }
+        #endif
     }
 }
 

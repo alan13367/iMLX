@@ -24,12 +24,6 @@ struct iMLXApp: App {
             SettingsView(appState: appState, showsCloseButton: false)
                 .environment(\.locale, appState.effectiveLocale)
                 .tint(BrandPalette.accent)
-                .frame(
-                    minWidth: 760,
-                    idealWidth: 820,
-                    minHeight: 540,
-                    idealHeight: 620
-                )
         }
         #else
         WindowGroup {
@@ -84,15 +78,23 @@ struct AppRootView: View {
 struct ChatRootView: View {
     let appState: AppState
 
+    #if os(macOS)
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    #endif
+
     var body: some View {
         #if os(macOS)
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             ConversationListView(
                 appState: appState,
                 presentation: .rootNavigation,
+                sidebarVisibility: $columnVisibility,
                 onSelect: { _ in }
             )
             .navigationSplitViewColumnWidth(min: 230, ideal: 280, max: 360)
+            // The generated toggle always sorts ahead of the sidebar's own items, so
+            // ConversationListView supplies its own to control the ordering.
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             chatDetail
         }

@@ -12,7 +12,6 @@ struct MessageRow: View, Equatable {
     let isStreaming: Bool
     let parsedAssistantContent: ParsedAssistantContent?
     let deliveryState: MessageDeliveryState
-    let showsThinkingHeader: Bool
     let thinkingExpansion: Binding<Bool>?
     let onCopy: (String) -> Void
     let onRetry: (() -> Void)?
@@ -25,7 +24,6 @@ struct MessageRow: View, Equatable {
         isStreaming: Bool = false,
         parsedAssistantContent: ParsedAssistantContent? = nil,
         deliveryState: MessageDeliveryState = .sent,
-        showsThinkingHeader: Bool = true,
         thinkingExpansion: Binding<Bool>? = nil,
         onCopy: @escaping (String) -> Void = { _ in },
         onRetry: (() -> Void)? = nil,
@@ -35,7 +33,6 @@ struct MessageRow: View, Equatable {
         self.isStreaming = isStreaming
         self.parsedAssistantContent = parsedAssistantContent
         self.deliveryState = deliveryState
-        self.showsThinkingHeader = showsThinkingHeader
         self.thinkingExpansion = thinkingExpansion
         self.onCopy = onCopy
         self.onRetry = onRetry
@@ -47,7 +44,6 @@ struct MessageRow: View, Equatable {
             && lhs.isStreaming == rhs.isStreaming
             && lhs.parsedAssistantContent == rhs.parsedAssistantContent
             && lhs.deliveryState == rhs.deliveryState
-            && lhs.showsThinkingHeader == rhs.showsThinkingHeader
     }
 
     var body: some View {
@@ -86,18 +82,14 @@ struct MessageRow: View, Equatable {
     // MARK: - Assistant body
 
     private var assistantContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !isStreaming, let trace = message.toolTrace {
-                MessageToolCallCard(phase: .completed(trace))
-            }
-
-            if let thinking = resolvedParsed.thinking, !thinking.isEmpty {
-                MessageThinkingPanel(
-                    text: thinking,
+        VStack(alignment: .leading, spacing: ChatMetrics.messageSectionSpacing) {
+            if hasActivity {
+                MessageActivityView(
+                    toolPhase: activityToolPhase,
+                    thinking: resolvedParsed.thinking,
                     isStreaming: isStreaming,
                     isWaitingForAnswer: resolvedParsed.response.isEmpty,
-                    mode: showsThinkingHeader ? .inline : .bodyOnly,
-                    isExpanded: thinkingBinding
+                    isThinkingExpanded: thinkingBinding
                 )
             }
 
@@ -167,6 +159,18 @@ struct MessageRow: View, Equatable {
 
     private var hasAttachments: Bool {
         (message.attachedDocuments?.isEmpty == false) || (message.attachedImages?.isEmpty == false)
+    }
+
+    /// Completed traces only. In-flight tool activity is rendered by the list
+    /// section, which owns the live `ToolActivityStatus`.
+    private var activityToolPhase: MessageActivityToolPhase? {
+        guard !isStreaming, let trace = message.toolTrace else { return nil }
+        return .completed(trace)
+    }
+
+    private var hasActivity: Bool {
+        if activityToolPhase != nil { return true }
+        return !(resolvedParsed.thinking?.isEmpty ?? true)
     }
 
     private var resolvedParsed: ParsedAssistantContent {

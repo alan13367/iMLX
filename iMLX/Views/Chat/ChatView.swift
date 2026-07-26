@@ -181,8 +181,6 @@ struct ChatView: View {
 
     private var chatContent: some View {
         ZStack {
-            ChatBackgroundView()
-            
             ChatEmptyStateView()
                 .opacity(isShowingEmptyState ? 1 : 0)
                 .allowsHitTesting(isShowingEmptyState)
@@ -208,6 +206,7 @@ struct ChatView: View {
             .opacity(isShowingEmptyState ? 0 : 1)
             .allowsHitTesting(!isShowingEmptyState)
         }
+        .background(PlatformColors.chatBackground)
     }
 
     @ViewBuilder

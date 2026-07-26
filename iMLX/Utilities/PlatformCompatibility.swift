@@ -99,4 +99,24 @@ enum PlatformColors {
         Color.clear
         #endif
     }
+
+    static var chatBackground: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemBackground)
+        #elseif canImport(AppKit)
+        Color(nsColor: .textBackgroundColor)
+        #else
+        Color.clear
+        #endif
+    }
+
+    static var separator: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .separator)
+        #elseif canImport(AppKit)
+        Color(nsColor: .separatorColor)
+        #else
+        Color.secondary.opacity(ChatMetrics.hairlineOpacity)
+        #endif
+    }
 }

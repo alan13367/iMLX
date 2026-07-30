@@ -13,6 +13,7 @@ final class LiveVoiceSessionViewModel {
     var statusText = String.appLocalized("voice.status.ready")
     var errorMessage: String?
     var memoryWarningMessage: String?
+    var isStartingListening = false
     var isListening = false
     var isSpeaking = false
     var isGeneratingReply = false
@@ -49,6 +50,7 @@ final class LiveVoiceSessionViewModel {
     var canStartListening: Bool {
         !isPreparingAssets
             && !isRestoringConversationModel
+            && !isStartingListening
             && !isListening
             && !isSpeaking
             && !isGeneratingReply
@@ -109,11 +111,11 @@ final class LiveVoiceSessionViewModel {
 
     func toggleListening() async {
         if isListening {
-            recognitionService.stopRecognition()
             isListening = false
-            statusText = String.appLocalized("voice.status.listening_stopped")
+            recognitionService.stopRecognition(deliverFinal: true)
             return
         }
+        guard !isStartingListening else { return }
         await startListeningCycle()
     }
 
@@ -133,6 +135,7 @@ final class LiveVoiceSessionViewModel {
     }
 
     func close() async {
+        guard isSessionActive else { return }
         isSessionActive = false
         activeSpeakSession = nil
         turnTask?.cancel()
@@ -142,13 +145,15 @@ final class LiveVoiceSessionViewModel {
         playbackService.stop()
         await appState.inferenceService.unloadSpeechSynthesisResources()
         await resumeConversationModelIfNeeded()
+        isStartingListening = false
         isListening = false
         isSpeaking = false
+        partialTranscript = ""
         isGeneratingReply = false
     }
 
     private func startListeningCycle() async {
-        guard isSessionActive else { return }
+        guard isSessionActive, !isStartingListening, !isListening else { return }
         guard unavailableReason == nil else {
             statusText = unavailableReason ?? statusText
             return
@@ -164,8 +169,14 @@ final class LiveVoiceSessionViewModel {
             return
         }
 
+        isStartingListening = true
         let hasPermissions = await recognitionService.requestPermissions()
+        guard isSessionActive else {
+            isStartingListening = false
+            return
+        }
         guard hasPermissions else {
+            isStartingListening = false
             errorMessage = String.appLocalized("voice.status.permissions_required_detail")
             statusText = String.appLocalized("voice.status.permissions_required")
             return
@@ -197,18 +208,19 @@ final class LiveVoiceSessionViewModel {
             errorMessage = error.localizedDescription
             statusText = String.appLocalized("voice.status.listening_failed")
         }
+        isStartingListening = false
     }
 
     private func handleRecognizedTranscript(_ transcript: String) async {
         guard isSessionActive, !Task.isCancelled else { return }
         isListening = false
+        partialTranscript = ""
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             statusText = String.appLocalized("voice.status.no_speech")
             return
         }
 
-        partialTranscript = ""
         lastUserTranscript = trimmed
         isGeneratingReply = true
         statusText = String.appLocalized("voice.status.generating")
@@ -284,7 +296,6 @@ final class LiveVoiceSessionViewModel {
                             self.isSpeaking = false
                             self.statusText = String.appLocalized("voice.status.preparing_next_turn")
                             await self.resumeConversationModelIfNeeded()
-                            self.statusText = String.appLocalized("voice.status.listening")
                             if self.isSessionActive {
                                 await self.startListeningCycle()
                             }

@@ -36,6 +36,7 @@ struct LiveVoiceConversationView: View {
                 LiveVoiceTranscriptArea(
                     lastUserTranscript: viewModel.lastUserTranscript,
                     partialTranscript: viewModel.partialTranscript,
+                    isListening: viewModel.isListening,
                     unavailableReason: viewModel.unavailableReason,
                     memoryWarningMessage: viewModel.memoryWarningMessage,
                     errorMessage: viewModel.errorMessage,
@@ -158,13 +159,13 @@ private struct LiveVoiceStatusLabel: View {
             .foregroundStyle(.white.opacity(0.5))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 40)
-            .animation(.easeInOut(duration: 0.3), value: statusText)
     }
 }
 
 private struct LiveVoiceTranscriptArea: View {
     let lastUserTranscript: String
     let partialTranscript: String
+    let isListening: Bool
     let unavailableReason: String?
     let memoryWarningMessage: String?
     let errorMessage: String?
@@ -189,7 +190,7 @@ private struct LiveVoiceTranscriptArea: View {
                     )
                 }
 
-                if !partialTranscript.isEmpty {
+                if isListening && !partialTranscript.isEmpty {
                     LiveVoiceTranscriptCard(
                         title: String.appLocalized("voice.listening"),
                         text: partialTranscript,

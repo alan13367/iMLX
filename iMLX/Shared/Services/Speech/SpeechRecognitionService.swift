@@ -2,6 +2,26 @@ import AVFoundation
 import Foundation
 import Speech
 
+nonisolated struct SpeechRecognitionSessionGate: Sendable {
+    private(set) var activeSessionID: UUID?
+
+    mutating func begin() -> UUID {
+        let sessionID = UUID()
+        activeSessionID = sessionID
+        return sessionID
+    }
+
+    func accepts(_ sessionID: UUID) -> Bool {
+        activeSessionID == sessionID
+    }
+
+    mutating func finish(_ sessionID: UUID) -> Bool {
+        guard activeSessionID == sessionID else { return false }
+        activeSessionID = nil
+        return true
+    }
+}
+
 @MainActor
 final class SpeechRecognitionService {
     private var audioEngine = AVAudioEngine()
@@ -11,9 +31,8 @@ final class SpeechRecognitionService {
     private var silenceWorkItem: DispatchWorkItem?
     private var onPartial: ((String) -> Void)?
     private var onFinal: ((String) -> Void)?
+    private var sessionGate = SpeechRecognitionSessionGate()
     private var latestTranscript = ""
-    private var hasDeliveredFinal = false
-    private var hasDetectedSpeech = false
 
     func requestPermissions() async -> Bool {
         let speechAuthorized = await withCheckedContinuation { continuation in
@@ -49,8 +68,16 @@ final class SpeechRecognitionService {
         do {
             format = try platformSession.prepareInputFormat(for: inputNode)
         } catch {
+            platformSession.deactivate()
             throw normalizedRecognitionError(error)
         }
+
+        let sessionID = sessionGate.begin()
+        self.onPartial = onPartial
+        self.onFinal = onFinal
+        recognitionRequest = request
+        latestTranscript = ""
+
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
             request.append(buffer)
@@ -60,72 +87,91 @@ final class SpeechRecognitionService {
         do {
             try audioEngine.start()
         } catch {
+            finishRecognition(sessionID: sessionID, deliverFinal: false)
             throw normalizedRecognitionError(error)
         }
 
-        self.onPartial = onPartial
-        self.onFinal = onFinal
-        self.recognitionRequest = request
-        latestTranscript = ""
-        hasDeliveredFinal = false
-        hasDetectedSpeech = false
-
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
+        scheduleSilenceTimeout(interval: 4.0, sessionID: sessionID)
+        let task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            guard let self, self.sessionGate.accepts(sessionID) else { return }
             if let result {
-                let transcript = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                let transcript = result.bestTranscription.formattedString
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let transcriptChanged = transcript != self.latestTranscript
                 self.latestTranscript = transcript
-                self.onPartial?(transcript)
-                if !transcript.isEmpty {
-                    self.hasDetectedSpeech = true
-                    self.scheduleSilenceTimeout(interval: 1.5)
-                }
+
                 if result.isFinal {
-                    self.finishRecognition(deliverFinal: true)
+                    self.finishRecognition(sessionID: sessionID, deliverFinal: true)
+                    return
                 }
-            } else if error != nil {
-                self.finishRecognition(deliverFinal: true)
+                if transcriptChanged {
+                    self.onPartial?(transcript)
+                    if !transcript.isEmpty {
+                        self.scheduleSilenceTimeout(interval: 1.5, sessionID: sessionID)
+                    }
+                }
+            }
+            if error != nil {
+                self.finishRecognition(sessionID: sessionID, deliverFinal: true)
             }
         }
-
-        scheduleSilenceTimeout(interval: 4.0)
+        guard sessionGate.accepts(sessionID) else {
+            task.cancel()
+            return
+        }
+        recognitionTask = task
     }
 
-    func stopRecognition() {
-        finishRecognition(deliverFinal: false)
+    func stopRecognition(deliverFinal: Bool = false) {
+        guard let activeSessionID = sessionGate.activeSessionID else {
+            tearDownAudioSession()
+            return
+        }
+        finishRecognition(sessionID: activeSessionID, deliverFinal: deliverFinal)
     }
 
-    private func scheduleSilenceTimeout(interval: TimeInterval) {
+    private func scheduleSilenceTimeout(interval: TimeInterval, sessionID: UUID) {
         silenceWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
-            self?.finishRecognition(deliverFinal: true)
+            guard let self, self.sessionGate.accepts(sessionID) else { return }
+            self.finishRecognition(sessionID: sessionID, deliverFinal: true)
         }
         silenceWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: workItem)
     }
 
-    private func finishRecognition(deliverFinal: Bool) {
+    private func finishRecognition(sessionID: UUID, deliverFinal: Bool) {
+        guard sessionGate.finish(sessionID) else { return }
         silenceWorkItem?.cancel()
         silenceWorkItem = nil
+
+        let finalCallback = onFinal
+        let finalTranscript = latestTranscript
+        onPartial = nil
+        onFinal = nil
+        latestTranscript = ""
+
+        tearDownAudioSession()
+
+        if deliverFinal {
+            finalCallback?(finalTranscript)
+        }
+    }
+
+    private func tearDownAudioSession() {
+        let request = recognitionRequest
+        let task = recognitionTask
+        recognitionRequest = nil
+        recognitionTask = nil
 
         if audioEngine.isRunning {
             audioEngine.stop()
         }
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.reset()
-        recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
-        recognitionRequest = nil
-        recognitionTask = nil
+        request?.endAudio()
+        task?.cancel()
         platformSession.deactivate()
-
-        if deliverFinal, !hasDeliveredFinal {
-            hasDeliveredFinal = true
-            let transcript = latestTranscript
-            if !transcript.isEmpty || hasDetectedSpeech {
-                onFinal?(transcript)
-            }
-        }
     }
 
     private func normalizedRecognitionError(_ error: Error) -> Error {

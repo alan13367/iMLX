@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="iMLX/Assets.xcassets/AppIcon.appiconset/icon-1024.png" alt="iMLX app icon" width="96" height="96" />
+  <img src="iMLX/Shared/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png" alt="iMLX app icon" width="96" height="96" />
 </p>
 
 <p align="center"><strong>iMLX</strong></p>
@@ -11,6 +11,8 @@
 ## Overview
 
 iMLX is a native app for streaming, multi-turn chat with curated MLX models: download what you need, load from Chat or the Models tab, and keep conversations on device.
+
+> **Project status:** iMLX is under active development. APIs, persisted formats, the model catalog, and platform behavior may change. Review model licenses and resource requirements before downloading or redistributing third-party models.
 
 ---
 
@@ -24,6 +26,9 @@ iMLX is a native app for streaming, multi-turn chat with curated MLX models: dow
 | **Chat** | Saved conversations, history from the toolbar, chat-first launch |
 | **Memory** | Private on-device user memories, multilingual extraction, review queue, local retrieval for personalization |
 | **Thinking** | Per-model toggle where the model supports `enable_thinking` |
+| **Grounding** | Local documents, image OCR, source attribution, optional web search and URL reading |
+| **Tools** | Local date/time plus permission-gated Calendar, Reminders, Contacts, and iOS timer tools |
+| **Voice** | On-device speech recognition and optional local Kokoro speech synthesis |
 | **UX** | Chat-first launch, brain-logo icon, cyan/magenta brand accents, EN / ES / zh-Hans + optional in-app language |
 
 ---
@@ -56,6 +61,16 @@ iMLX keeps the main assistant loop local:
 - `DocumentLibraryService` imports local files, chunks content, indexes it, and retrieves relevant snippets for chat context.
 
 The app is designed to degrade clearly when a feature cannot run, such as MLX inference on Simulator.
+
+---
+
+## Privacy and network use
+
+Core inference, OCR, memories, document retrieval, and speech synthesis run locally. iMLX has no required account, developer-operated backend, analytics SDK, or advertising SDK.
+
+Optional features make network requests: model and speech-asset downloads use Hugging Face, Web Search sends the selected query to DuckDuckGo and result sites, and Read URL contacts the requested host. Contacts, calendars, reminders, files, photos, camera, microphone, speech recognition, and alarms remain behind Apple system permissions.
+
+See [`docs/privacy.md`](docs/privacy.md) for the complete data-flow summary.
 
 ---
 
@@ -119,15 +134,20 @@ xcodebuild build \
 
 ```text
 iMLX/
-├── App/
-├── Models/          # Conversation, ChatMessage, UserMemory, …
-├── Services/        # Inference, downloads, memory, documents
-├── Utilities/
-├── ViewModels/
-└── Views/
-    ├── Chat/        # ChatView, composer, message components
-    └── Settings/    # SettingsView, MemoryLibraryView, AssistantSettingsView
+├── Shared/          # Cross-platform models, services, view models, views, resources
+├── Platforms/
+│   ├── iOS/         # iOS app shell, UIKit/AlarmKit adapters, mobile presentation
+│   └── macOS/       # Mac app shell, AppKit adapters, commands and desktop presentation
+└── Vendor/          # Shared vendored implementations and resources
+
+iMLXTests/
+├── Shared/
+└── Platforms/       # Target-specific iOS and macOS tests
 ```
+
+The Xcode project enforces these boundaries with separate synchronized source roots. See [`docs/cross-platform-source-boundaries.md`](docs/cross-platform-source-boundaries.md).
+
+For a physical-device build, select your own Apple development team in Xcode. Forks may also need unique app and widget bundle identifiers.
 
 ---
 
@@ -135,7 +155,7 @@ iMLX/
 
 - MLX work is serialized through an **actor**-based inference service.
 - Memory extraction uses the active model or Apple Foundation Models when available, but retrieval is local and does not require a translation/generation pass.
-- Memory internals are split across `MemoryService.swift`, `MemoryStore.swift`, `MemoryDatabase.swift`, `MemoryService+Extraction.swift`, `MemoryService+Retrieval.swift`, `MemoryService+Shared.swift`, and `MemorySupport.swift`.
+- Memory internals are split across `MemoryService.swift`, `MemoryStore.swift`, `MemoryDatabase.swift`, `MemoryExtraction.swift`, `MemoryRetrieval.swift`, `MemoryService+Shared.swift`, and `MemorySupport.swift` under `iMLX/Shared/Services/Memory/`.
 - A dedicated architecture note lives in `docs/memory-architecture.md`.
 - The iOS Simulator is not a reliable stand-in for GPU behavior; the native macOS target can run MLX directly on Apple silicon.
 - AlarmKit timer creation and its Live Activity remain iOS-only; unsupported tools are omitted from the macOS catalog.
@@ -143,11 +163,24 @@ iMLX/
 
 ---
 
+## Contributing and support
+
+Contributions are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before proposing substantial changes and follow the [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
+- General help and bug reports: [`SUPPORT.md`](SUPPORT.md)
+- Private vulnerability reports: [`SECURITY.md`](SECURITY.md)
+
+This repository intentionally has no hosted CI workflow; use the local Xcode build and test commands documented above and in `AGENTS.md`.
+
+---
+
 ## License
 
-Dual-licensed at your option:
+Original iMLX code is dual-licensed at your option under:
 
 - [Apache License 2.0](LICENSE-APACHE)
 - [MIT License](LICENSE-MIT)
+
+Vendored code, package dependencies, downloaded models, and third-party assets remain governed by their respective terms. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), [`NOTICE`](NOTICE), and [`TRADEMARKS.md`](TRADEMARKS.md).
 
 Copyright (c) 2026 Alan Beltran Pozo

@@ -82,32 +82,57 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		E7A1A10A2F9001000001A10A /* Exceptions for "iMLX" folder in "iMLXAlarmWidgetExtension" target */ = {
+		E7A1A10A2F9001000001A10A /* Exceptions for "Platforms/iOS" folder in "iMLXAlarmWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Services/Platform/IMLXTimerMetadata.swift,
+				Services/AlarmKit/IMLXTimerMetadata.swift,
 			);
 			target = E7A1A1022F9001000001A102 /* iMLXAlarmWidgetExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		E7306A022F7D21010061F6D5 /* iMLX */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				E7A1A10A2F9001000001A10A /* Exceptions for "iMLX" folder in "iMLXAlarmWidgetExtension" target */,
-			);
-			path = iMLX;
-			sourceTree = "<group>";
-		};
 		E7A1A1092F9001000001A109 /* iMLXAlarmWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = iMLXAlarmWidget;
 			sourceTree = "<group>";
 		};
-		E7C100042F9000010061F6D5 /* iMLXTests */ = {
+		E7E000012FA100000061F6D5 /* Shared */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = iMLXTests;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		E7E000022FA100000061F6D5 /* Platforms/iOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				E7A1A10A2F9001000001A10A /* Exceptions for "Platforms/iOS" folder in "iMLXAlarmWidgetExtension" target */,
+			);
+			path = Platforms/iOS;
+			sourceTree = "<group>";
+		};
+		E7E000032FA100000061F6D5 /* Platforms/macOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Platforms/macOS;
+			sourceTree = "<group>";
+		};
+		E7E000042FA100000061F6D5 /* Vendor */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Vendor;
+			sourceTree = "<group>";
+		};
+		E7E000052FA100000061F6D5 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		E7E000062FA100000061F6D5 /* Platforms/iOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Platforms/iOS;
+			sourceTree = "<group>";
+		};
+		E7E000072FA100000061F6D5 /* Platforms/macOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Platforms/macOS;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -206,6 +231,27 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		E7306A022F7D21010061F6D5 /* iMLX */ = {
+			isa = PBXGroup;
+			children = (
+				E7E000012FA100000061F6D5 /* Shared */,
+				E7E000022FA100000061F6D5 /* Platforms/iOS */,
+				E7E000032FA100000061F6D5 /* Platforms/macOS */,
+				E7E000042FA100000061F6D5 /* Vendor */,
+			);
+			path = iMLX;
+			sourceTree = "<group>";
+		};
+		E7C100042F9000010061F6D5 /* iMLXTests */ = {
+			isa = PBXGroup;
+			children = (
+				E7E000052FA100000061F6D5 /* Shared */,
+				E7E000062FA100000061F6D5 /* Platforms/iOS */,
+				E7E000072FA100000061F6D5 /* Platforms/macOS */,
+			);
+			path = iMLXTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -224,7 +270,9 @@
 				E7A1A10C2F9001000001A10C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				E7306A022F7D21010061F6D5 /* iMLX */,
+				E7E000012FA100000061F6D5 /* Shared */,
+				E7E000022FA100000061F6D5 /* Platforms/iOS */,
+				E7E000042FA100000061F6D5 /* Vendor */,
 			);
 			name = iMLX;
 			packageProductDependencies = (
@@ -278,7 +326,8 @@
 				E7C1000A2F9000010061F6D5 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				E7C100042F9000010061F6D5 /* iMLXTests */,
+				E7E000052FA100000061F6D5 /* Shared */,
+				E7E000062FA100000061F6D5 /* Platforms/iOS */,
 			);
 			name = iMLXTests;
 			packageProductDependencies = (
@@ -300,7 +349,9 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				E7306A022F7D21010061F6D5 /* iMLX */,
+				E7E000012FA100000061F6D5 /* Shared */,
+				E7E000032FA100000061F6D5 /* Platforms/macOS */,
+				E7E000042FA100000061F6D5 /* Vendor */,
 			);
 			name = iMLXMac;
 			packageProductDependencies = (
@@ -334,7 +385,8 @@
 				E7D400022FA000000061F6D5 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				E7C100042F9000010061F6D5 /* iMLXTests */,
+				E7E000052FA100000061F6D5 /* Shared */,
+				E7E000072FA100000061F6D5 /* Platforms/macOS */,
 			);
 			name = iMLXMacTests;
 			packageProductDependencies = (
@@ -652,6 +704,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -694,6 +748,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.iMLX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -106,14 +106,15 @@ xcodebuild -downloadComponent MetalToolchain
 - App state: `AppState` owns shared services, model and conversation selection, assistant generation settings (system prompt and temperature), and persisted app-level state.
 - Chat orchestration: `ChatViewModel` owns transcript state, send/generation flow, streaming UI state, attachments, tool traces, and save/update behavior.
 - Service boundaries: app-facing services remain stable façades. Domain folders contain focused policy, transport, parsing, persistence, and support types; callers should not assemble those internals directly.
-- Inference: `InferenceService` is the serialized MLX façade. Loading, streaming, profiling, input policy, and support code live under `Services/Inference/`; pure helpers must not own MLX state.
+- Source ownership: cross-platform code lives under `iMLX/Shared`; target-selected OS implementations live under `iMLX/Platforms/iOS` or `iMLX/Platforms/macOS`; vendored code remains under `iMLX/Vendor`. Follow `docs/cross-platform-source-boundaries.md`.
+- Inference: `InferenceService` is the serialized MLX façade. Loading, streaming, profiling, input policy, and support code live under `Shared/Services/Inference/`; pure helpers must not own MLX state.
 - Prompt/session policy: every generation rebuilds prompt/session state from visible conversation history instead of relying on hidden long-lived chat state.
-- UI: SwiftUI + `@Observable`. Root chat orchestration lives in `ChatView`; extracted chat UI lives under `iMLX/Views/Chat/Components`. iOS uses stack navigation while native macOS uses a shared-state `NavigationSplitView` shell and macOS commands/settings scenes.
+- UI: SwiftUI + `@Observable`. Root chat orchestration lives in shared `ChatView`; extracted chat UI lives under `iMLX/Shared/Views/Chat/Components`. iOS uses stack navigation while native macOS uses a shared-state `NavigationSplitView` shell and macOS commands/settings scenes.
 - Models: curated model entries live in `Constants.swift`. Assistant defaults (system prompt, temperature) live in `AppState` and are edited in `AssistantSettingsView`.
-- Model management: `ModelDownloadService` owns download-job state and background-session callbacks. Repository metadata, manifests, delegates, filesystem policy, and support types live under `Services/ModelManagement/`.
-- Documents and web: `DocumentLibraryService` and `WebSearchService` remain separate actor façades because their transport, language, embedding, and ranking policies differ. Exact shared text/scoring primitives live under `Services/Grounding/`.
-- Memory: `MemorySystem` is the app-facing façade over extraction, retrieval, and actor-backed GRDB persistence organized under `Services/Memory/`. Persist only facts grounded in user text.
-- Tool calling: `ToolCallingService` is the actor-backed façade used by chat orchestration. Tool definitions, routing policy, planner support, argument validation, temporal parsing, turn policy, and executors live under `iMLX/Services/ToolCalling/`. Deterministic preflight heuristics are a confident fast path; unmatched non-conversational turns deliberate with the currently loaded local model, which fails closed to normal generation on invalid planner output. Native macOS may execute up to two sequential tool calls per assistant turn; iOS/iPadOS remains limited to one. A turn may perform at most one explicitly requested mutation, and a mutation ends the tool loop.
+- Model management: shared `ModelDownloadService` owns download-job state and background-session callbacks. Repository metadata, manifests, delegates, filesystem policy, and support types live under `Shared/Services/ModelManagement/`; target-selected providers own background identifiers and macOS security-scoped folder bookmarks.
+- Documents and web: `DocumentLibraryService` and `WebSearchService` remain separate actor façades because their transport, language, embedding, and ranking policies differ. Exact shared text/scoring primitives live under `Shared/Services/Grounding/`.
+- Memory: `MemorySystem` is the app-facing façade over extraction, retrieval, and actor-backed GRDB persistence organized under `Shared/Services/Memory/`. Persist only facts grounded in user text.
+- Tool calling: `ToolCallingService` is the actor-backed façade used by chat orchestration. Tool definitions, routing policy, planner support, argument validation, temporal parsing, turn policy, and executors live under `iMLX/Shared/Services/ToolCalling/`. Deterministic preflight heuristics are a confident fast path; unmatched non-conversational turns deliberate with the currently loaded local model, which fails closed to normal generation on invalid planner output. Native macOS may execute up to two sequential tool calls per assistant turn; iOS/iPadOS remains limited to one. A turn may perform at most one explicitly requested mutation, and a mutation ends the tool loop.
 - Vision/OCR: vision-capable models must load through the VLM path. OCR is local via Vision and only reads images attached to the latest user turn in v1.
 - TTS: Kokoro checkpoint compatibility belongs in `Vendor/KokoroSwift` loader/factory code, not scattered through model math.
 
@@ -121,60 +122,57 @@ xcodebuild -downloadComponent MetalToolchain
 
 ```text
 iMLX/
-├── App/                  App entry and root navigation shell
-├── Models/               App state and persisted data models
-├── ViewModels/           Chat and model-management state
-├── Views/                SwiftUI screens and components
-│   └── Chat/
-│       ├── ChatView.swift Root chat shell, toolbar, sheets, and orchestration
-│       └── Components/    Transcript, composer, status, attachments, messages
-├── Services/             Stable app-facing service façades grouped by domain
-│   ├── Device/           Device capability policy
-│   ├── Documents/        Document import, indexing, persistence, retrieval
-│   ├── Grounding/        Shared text normalization and scoring primitives
-│   ├── Inference/        Serialized MLX inference, profiling, input policy
-│   ├── Memory/           Façade, extraction, retrieval, GRDB persistence, support
-│   ├── ModelManagement/  Downloads, manifests, background URLSession support
-│   ├── Persistence/      Conversation persistence
-│   ├── Platform/         Calendar, reminders, contacts, AlarmKit
-│   ├── Speech/           Speech assets, recognition, playback
-│   ├── ToolCalling/      Tool catalog, routing, planner, validation, executors
-│   ├── Vision/           Local OCR
-│   └── Web/              Web search, URL reading, page extraction, ranking
-├── Utilities/            Constants, localization, styling, helpers
-└── Assets.xcassets/
-iMLXAlarmWidget/          Widget Extension for AlarmKit timer Live Activity
-iMLX.xcodeproj/           iOS, native macOS, test, and widget targets/schemes
-iMLXInfo.plist            Main iOS app Info.plist for keys Xcode will not auto-inject
-iMLXAlarmWidgetInfo.plist Widget extension Info.plist
+├── Shared/                    Compiled into both app targets
+│   ├── App/                   Shared routes and lifecycle/detail composition
+│   ├── Models/                App state and persisted data models
+│   ├── Resources/             Assets and localization
+│   ├── Services/              Cross-platform façades and domain implementations
+│   ├── Utilities/             Platform-neutral utilities
+│   ├── ViewModels/            Chat and model-management state
+│   └── Views/                 Shared SwiftUI content and orchestration
+├── Platforms/
+│   ├── iOS/                   iOS app entry, UI adapters, AlarmKit, UIKit services
+│   └── macOS/                 Mac app entry, commands, UI adapters, AppKit services
+└── Vendor/                    Shared vendored implementations and resources
+iMLXTests/
+├── Shared/                    Tests run against both app targets
+└── Platforms/                iOS-only and macOS-only tests
+iMLXAlarmWidget/              Widget Extension for AlarmKit timer Live Activity
+iMLX.xcodeproj/               iOS, native macOS, test, and widget targets/schemes
+iMLXInfo.plist                Main iOS app Info.plist for keys Xcode will not auto-inject
+iMLXAlarmWidgetInfo.plist     Widget extension Info.plist
 ```
 
 High-value files and folders:
 
-- `iMLX/Models/AppState.swift`
-- `iMLX/Views/Settings/AssistantSettingsView.swift`
-- `iMLX/Models/ToolCallingModels.swift`
-- `iMLX/Models/MessageSource.swift`
-- `iMLX/Models/UserMemory.swift`
-- `iMLX/ViewModels/ChatViewModel.swift`
-- `iMLX/Services/Inference/`
-- `iMLX/Services/ToolCallingService.swift`
-- `iMLX/Services/ToolCalling/`
-- `iMLX/Services/ModelManagement/`
-- `iMLX/Services/Documents/`
-- `iMLX/Services/Web/`
-- `iMLX/Services/Grounding/`
-- `iMLX/Services/Memory/`
-- `iMLX/Services/Platform/`
-- `iMLX/Views/Chat/ChatView.swift`
-- `iMLX/Views/Chat/Components/`
-- `iMLX/Utilities/Constants.swift`
-- `iMLX/Localizable.xcstrings`
+- `docs/cross-platform-source-boundaries.md`
+- `iMLX/Shared/Models/AppState.swift`
+- `iMLX/Shared/Views/Settings/AssistantSettingsView.swift`
+- `iMLX/Shared/Models/ToolCallingModels.swift`
+- `iMLX/Shared/Models/MessageSource.swift`
+- `iMLX/Shared/Models/UserMemory.swift`
+- `iMLX/Shared/ViewModels/ChatViewModel.swift`
+- `iMLX/Shared/Services/Inference/`
+- `iMLX/Shared/Services/ToolCallingService.swift`
+- `iMLX/Shared/Services/ToolCalling/`
+- `iMLX/Shared/Services/ModelManagement/`
+- `iMLX/Shared/Services/Documents/`
+- `iMLX/Shared/Services/Web/`
+- `iMLX/Shared/Services/Grounding/`
+- `iMLX/Shared/Services/Memory/`
+- `iMLX/Shared/Services/PersonalData/`
+- `iMLX/Shared/Services/Timer/`
+- `iMLX/Shared/Views/Chat/ChatView.swift`
+- `iMLX/Shared/Views/Chat/Components/`
+- `iMLX/Shared/Utilities/Constants.swift`
+- `iMLX/Shared/Resources/Localizable.xcstrings`
+- `iMLX/Platforms/iOS/`
+- `iMLX/Platforms/macOS/`
 - `iMLXAlarmWidget/IMLXAlarmWidgetBundle.swift`
 - `iMLXAlarmWidget/IMLXAlarmLiveActivity.swift`
-- `iMLXTests/ToolPlannerParsingTests.swift`
-- `iMLXTests/ToolRegistryTests.swift`
-- `iMLXTests/ToolExecutionTests.swift`
+- `iMLXTests/Shared/ToolPlannerParsingTests.swift`
+- `iMLXTests/Shared/ToolRegistryTests.swift`
+- `iMLXTests/Shared/ToolExecutionTests.swift`
 
 ## Tool Calling Rules
 

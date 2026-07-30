@@ -1,12 +1,35 @@
+# macOS and editors
 .DS_Store
-.vscode
+.vscode/
+.idea/
+
+# Xcode and Swift build output
 .DerivedData/
-iMLX.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+build/
+xcuserdata/
+*.xcuserdatad/
 *.xcuserstate
+*.xcresult/
+*.xcarchive/
+*.dSYM/
+*.ipa
+
+# Signing credentials and local configuration
+.env
+.env.*
+!.env.example
+*.cer
+*.p12
+*.pem
+*.mobileprovision
+
+# Local tooling, datasets, and generated artifacts
 .venv*
-.hf-datasets-cache/*
-training/artifacts/*
-!training/artifacts/README.md
-training/runs/*
+.hf-datasets-cache/
 training/
 IFBench/
+.pi/
+*.log

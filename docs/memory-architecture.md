@@ -23,7 +23,7 @@ Under the hood, those operations now fan out through a more explicit architectur
 
 ### `MemorySystem`
 
-Defined in [iMLX/Services/MemoryService.swift](/Users/alan/Projects/iMLX/iMLX/Services/MemoryService.swift), `MemorySystem` is the facade used by `AppState`.
+Defined in [`iMLX/Shared/Services/Memory/MemoryService.swift`](../iMLX/Shared/Services/Memory/MemoryService.swift), `MemorySystem` is the facade used by `AppState`.
 
 Responsibilities:
 
@@ -36,7 +36,7 @@ It is intentionally thin. It should not become the place where persistence detai
 
 ### `MemoryStore`
 
-Defined in [iMLX/Services/MemoryStore.swift](/Users/alan/Projects/iMLX/iMLX/Services/MemoryStore.swift), `MemoryStore` is an `actor` and the persistence boundary for the memory system.
+Defined in [`iMLX/Shared/Services/Memory/Persistence/MemoryStore.swift`](../iMLX/Shared/Services/Memory/Persistence/MemoryStore.swift), `MemoryStore` is an `actor` and the persistence boundary for the memory system.
 
 Responsibilities:
 
@@ -51,7 +51,7 @@ Responsibilities:
 
 ### `MemoryDatabase`
 
-Defined in [iMLX/Services/MemoryDatabase.swift](/Users/alan/Projects/iMLX/iMLX/Services/MemoryDatabase.swift), this is the schema and migration owner.
+Defined in [`iMLX/Shared/Services/Memory/Persistence/MemoryDatabase.swift`](../iMLX/Shared/Services/Memory/Persistence/MemoryDatabase.swift), this is the schema and migration owner.
 
 Normalized tables:
 
@@ -76,7 +76,7 @@ Legacy sources are only moved aside after a successful import.
 
 ### `MemoryIngestionService`
 
-Defined in [iMLX/Services/MemoryService.swift](/Users/alan/Projects/iMLX/iMLX/Services/MemoryService.swift), this service turns extracted facts into persisted memories.
+Defined in [`iMLX/Shared/Services/Memory/MemoryService.swift`](../iMLX/Shared/Services/Memory/MemoryService.swift), this service turns extracted facts into persisted memories.
 
 Responsibilities:
 
@@ -91,7 +91,7 @@ This is the policy layer for what gets remembered.
 
 ### `MemoryService+Extraction`
 
-Defined in [iMLX/Services/MemoryService+Extraction.swift](/Users/alan/Projects/iMLX/iMLX/Services/MemoryService+Extraction.swift), this extension handles structured extraction parsing.
+Implemented in [`iMLX/Shared/Services/Memory/Extraction/MemoryExtraction.swift`](../iMLX/Shared/Services/Memory/Extraction/MemoryExtraction.swift), this extension handles structured extraction parsing.
 
 Responsibilities:
 
@@ -105,7 +105,7 @@ Extraction should remain source-grounded. The system must not turn assistant-gen
 
 ### `MemoryRetrievalService`
 
-Implemented in [iMLX/Services/MemoryService+Retrieval.swift](/Users/alan/Projects/iMLX/iMLX/Services/MemoryService+Retrieval.swift), this service handles forgetting and retrieval.
+Implemented across [`MemoryService.swift`](../iMLX/Shared/Services/Memory/MemoryService.swift) and [`MemoryRetrieval.swift`](../iMLX/Shared/Services/Memory/Retrieval/MemoryRetrieval.swift), this service handles forgetting and retrieval.
 
 Responsibilities:
 
@@ -126,7 +126,7 @@ Current reranking still uses existing local support code from `MemorySupport.swi
 
 ### `MemoryDiagnosticsService`
 
-Defined in [iMLX/Services/MemoryService.swift](/Users/alan/Projects/iMLX/iMLX/Services/MemoryService.swift), this service creates retrieval explanations and trace payloads used by the detail UI and event log.
+Defined in [`iMLX/Shared/Services/Memory/MemoryService.swift`](../iMLX/Shared/Services/Memory/MemoryService.swift), this service creates retrieval explanations and trace payloads used by the detail UI and event log.
 
 Responsibilities:
 
@@ -139,7 +139,7 @@ This keeps observability close to the retrieval path without forcing the UI to u
 
 The app still uses `UserMemory` in lists and chat-facing flows, but `UserMemory` is now a summary projection rather than the only model worth caring about.
 
-Primary types in [iMLX/Models/UserMemory.swift](/Users/alan/Projects/iMLX/iMLX/Models/UserMemory.swift):
+Primary types in [`iMLX/Shared/Models/UserMemory.swift`](../iMLX/Shared/Models/UserMemory.swift):
 
 - `UserMemory`: summary model used by UI and prompt assembly
 - `MemoryDetail`: enriched detail view model

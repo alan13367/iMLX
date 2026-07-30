@@ -1,0 +1,19 @@
+* text=auto
+
+*.swift text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.plist text eol=lf
+*.pbxproj text eol=lf
+*.xcstrings text eol=lf
+*.xcscheme text eol=lf
+*.sh text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.safetensors binary
+
+iMLX/Vendor/** linguist-vendored
+ThirdPartyLicenses/** linguist-vendored

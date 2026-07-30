@@ -9,6 +9,9 @@ actor ModelDownloadService {
 
     private static let defaultRevision = "main"
     private static let modelFileGlobs = ["*.safetensors", "*.json", "*.jinja", "*.txt", "*.model"]
+    #if os(macOS)
+    private static let additionalModelsBookmarkKey = "additionalModelsFolderBookmark"
+    #endif
 
     typealias SnapshotObserver = @Sendable ([String: ModelDownloadSnapshot]) async -> Void
 
@@ -28,6 +31,11 @@ actor ModelDownloadService {
     private var jobsByModelId: [String: ModelDownloadJob]
     private var snapshotObserver: SnapshotObserver?
     private var lastEmittedSnapshots: [String: ModelDownloadSnapshot] = [:]
+    private var additionalModelsByID: [String: DiscoveredAdditionalModel] = [:]
+    #if os(macOS)
+    private var additionalModelsBaseURL: URL?
+    private var isAccessingAdditionalModelsBaseURL = false
+    #endif
 
     init(manifestService: ManifestService) {
         self.manifestService = manifestService
@@ -82,6 +90,11 @@ actor ModelDownloadService {
             configuration: configuration, delegate: delegate, delegateQueue: nil)
         self.session = session
         self.jobsByModelId = Self.loadPersistedJobs(from: self.jobsFileURL)
+        #if os(macOS)
+        let restoredFolder = Self.restoreAdditionalModelsFolder()
+        self.additionalModelsBaseURL = restoredFolder.url
+        self.isAccessingAdditionalModelsBaseURL = restoredFolder.isAccessing
+        #endif
 
         delegate.service = self
 
@@ -319,6 +332,92 @@ actor ModelDownloadService {
     func localURL(for model: ModelInfo) -> URL {
         preferredModelDirectory(for: model) ?? modelsBaseURL.appendingPathComponent(model.id)
     }
+
+    func refreshAdditionalModels() -> [ModelInfo] {
+        #if os(macOS)
+        guard let additionalModelsBaseURL else {
+            additionalModelsByID = [:]
+            return []
+        }
+
+        let discovered = AdditionalModelDiscovery.discoverModels(in: additionalModelsBaseURL)
+        additionalModelsByID = Dictionary(
+            uniqueKeysWithValues: discovered.map { ($0.model.id, $0) }
+        )
+        return discovered.map(\.model)
+        #else
+        return []
+        #endif
+    }
+
+    func additionalModelsFolderURL() -> URL? {
+        #if os(macOS)
+        additionalModelsBaseURL
+        #else
+        nil
+        #endif
+    }
+
+    func externallyManagedModelIDs() -> Set<String> {
+        Set(additionalModelsByID.compactMap { modelID, discovered in
+            if discovered.matchesCuratedModel,
+               let curatedModel = Constants.ModelRegistry.curatedModels.first(where: { $0.id == modelID }),
+               internalModelDirectory(for: curatedModel) != nil {
+                return nil
+            }
+            return modelID
+        })
+    }
+
+    func isModelManagedExternally(modelID: String) -> Bool {
+        externallyManagedModelIDs().contains(modelID)
+    }
+
+    #if os(macOS)
+    func setAdditionalModelsFolder(_ folderURL: URL) throws {
+        let standardizedURL = folderURL.standardizedFileURL
+        let didStartAccessing = standardizedURL.startAccessingSecurityScopedResource()
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: standardizedURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            if didStartAccessing {
+                standardizedURL.stopAccessingSecurityScopedResource()
+            }
+            throw AdditionalModelsFolderError.notDirectory
+        }
+
+        do {
+            let bookmark = try standardizedURL.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            UserDefaults.standard.set(bookmark, forKey: Self.additionalModelsBookmarkKey)
+        } catch {
+            if didStartAccessing {
+                standardizedURL.stopAccessingSecurityScopedResource()
+            }
+            throw error
+        }
+
+        if isAccessingAdditionalModelsBaseURL {
+            additionalModelsBaseURL?.stopAccessingSecurityScopedResource()
+        }
+        additionalModelsBaseURL = standardizedURL
+        isAccessingAdditionalModelsBaseURL = didStartAccessing
+        additionalModelsByID = [:]
+    }
+
+    func clearAdditionalModelsFolder() {
+        if isAccessingAdditionalModelsBaseURL {
+            additionalModelsBaseURL?.stopAccessingSecurityScopedResource()
+        }
+        additionalModelsBaseURL = nil
+        isAccessingAdditionalModelsBaseURL = false
+        additionalModelsByID = [:]
+        UserDefaults.standard.removeObject(forKey: Self.additionalModelsBookmarkKey)
+    }
+    #endif
 
     private func buildJob(for model: ModelInfo) async throws -> ModelDownloadJob {
         let filenames = try await fetchRepositoryFilenames(for: model)
@@ -831,6 +930,19 @@ actor ModelDownloadService {
     }
 
     private func preferredModelDirectory(for model: ModelInfo) -> URL? {
+        if let internalDirectory = internalModelDirectory(for: model) {
+            return internalDirectory
+        }
+
+        if let externalDirectory = additionalModelsByID[model.id]?.directoryURL,
+           isUsableModelDirectory(externalDirectory, for: model) {
+            return externalDirectory
+        }
+
+        return nil
+    }
+
+    private func internalModelDirectory(for model: ModelInfo) -> URL? {
         let symlinkPath = modelsBaseURL.appendingPathComponent(model.id)
         if let symlinkTarget = usableSymlinkTarget(at: symlinkPath, for: model) {
             return symlinkTarget
@@ -1056,6 +1168,38 @@ actor ModelDownloadService {
             try? fileManager.removeItem(at: entry)
         }
     }
+
+    #if os(macOS)
+    private nonisolated static func restoreAdditionalModelsFolder() -> (url: URL?, isAccessing: Bool) {
+        guard let bookmark = UserDefaults.standard.data(forKey: additionalModelsBookmarkKey) else {
+            return (nil, false)
+        }
+
+        do {
+            var isStale = false
+            let url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ).standardizedFileURL
+            let isAccessing = url.startAccessingSecurityScopedResource()
+
+            if isStale,
+               let refreshedBookmark = try? url.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+               ) {
+                UserDefaults.standard.set(refreshedBookmark, forKey: additionalModelsBookmarkKey)
+            }
+            return (url, isAccessing)
+        } catch {
+            UserDefaults.standard.removeObject(forKey: additionalModelsBookmarkKey)
+            return (nil, false)
+        }
+    }
+    #endif
 
     private nonisolated static func loadPersistedJobs(from jobsFileURL: URL) -> [String:
         ModelDownloadJob]

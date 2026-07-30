@@ -98,7 +98,7 @@ extension ToolCallingService {
                 for: remindersCreateTool,
                 context: context
            ) {
-            Self.debugLog("contextual recovery completed pending reminders_create request")
+            ToolCallingDebugLog.line("recover", "reminders_create · pending clarification")
             return .call(
                 ToolCallRequest(
                     toolName: remindersCreateTool.name,
@@ -205,7 +205,7 @@ extension ToolCallingService {
         toolsByName: [String: ToolDefinition]
     ) -> ToolDecision? {
         guard let range = briefFollowUpRange(for: userMessage),
-              let previousTrace = history.reversed().compactMap(\.toolTrace).first(where: { $0.success }) else {
+              let previousTrace = latestSuccessfulToolTrace(in: history) else {
             return nil
         }
 
@@ -220,7 +220,7 @@ extension ToolCallingService {
                   ) else {
                 return nil
             }
-            Self.debugLog("preflight selected reminders_brief follow-up range=\(remindersRange.rawValue) (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "reminders_brief follow-up · \(remindersRange.rawValue)")
             return .call(ToolCallRequest(toolName: remindersTool.name, arguments: arguments))
 
         case "calendar_brief":
@@ -235,7 +235,7 @@ extension ToolCallingService {
                   ) else {
                 return nil
             }
-            Self.debugLog("preflight selected calendar_brief follow-up range=\(calendarRange.rawValue) (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "calendar_brief follow-up · \(calendarRange.rawValue)")
             return .call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments))
 
         default:
@@ -247,7 +247,7 @@ extension ToolCallingService {
         for userMessage: String,
         history: [ChatMessage]
     ) -> ToolCallTrace? {
-        guard let trace = history.reversed().compactMap(\.toolTrace).first(where: { $0.success }) else {
+        guard let trace = latestSuccessfulToolTrace(in: history) else {
             return nil
         }
 
@@ -341,7 +341,7 @@ extension ToolCallingService {
                   ) else {
                 return nil
             }
-            Self.debugLog("heuristic fallback selected web_search for contextual follow-up")
+            ToolCallingDebugLog.line("fallback", "web_search · follow-up")
             return .call(ToolCallRequest(toolName: webSearchTool.name, arguments: arguments))
 
         case "contacts_lookup":
@@ -355,12 +355,21 @@ extension ToolCallingService {
                   ) else {
                 return nil
             }
-            Self.debugLog("heuristic fallback reused contacts_lookup for contextual follow-up")
+            ToolCallingDebugLog.line("fallback", "contacts_lookup · follow-up")
             return .call(ToolCallRequest(toolName: contactsTool.name, arguments: arguments))
 
         default:
             return nil
         }
+    }
+
+    nonisolated func latestSuccessfulToolTrace(in history: [ChatMessage]) -> ToolCallTrace? {
+        for message in history.reversed() {
+            if let trace = message.toolTraces?.reversed().first(where: { $0.success }) {
+                return trace
+            }
+        }
+        return nil
     }
 
     nonisolated func briefFollowUpRange(for userMessage: String) -> String? {

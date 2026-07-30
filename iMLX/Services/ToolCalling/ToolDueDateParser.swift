@@ -1,11 +1,7 @@
 import Foundation
 
 enum ToolDueDateParser {
-    private static let isoDateFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-        return f
-    }()
+    private static let isoDateOnlyPattern = #"^\d{4}-\d{2}-\d{2}$"#
 
     static func parse(_ raw: String, referenceDate: Date, calendar: Calendar) -> Result<Date, ToolExecutionFailure> {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -85,22 +81,46 @@ enum ToolDueDateParser {
         }
 
         let compactDate = trimmed.replacingOccurrences(of: " ", with: "")
-        if let date = isoDateFormatter.date(from: compactDate) {
-            return .success(date)
+
+        // Full datetimes must be tried before date-only. ISO8601DateFormatter with
+        // `.withFullDate` alone will otherwise accept `2026-07-27T12:11:10+02:00` as
+        // midnight UTC, which re-encodes to 02:00 in +02 and corrupts relative dues.
+        if compactDate.contains("T") || trimmed.contains(" ") {
+            if let date = parseISO8601DateTime(compactDate) {
+                return .success(date)
+            }
+
+            let df = DateFormatter()
+            df.calendar = calendar
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.timeZone = calendar.timeZone
+            df.isLenient = false
+            for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm"] {
+                df.dateFormat = format
+                if let date = df.date(from: trimmed) ?? df.date(from: compactDate) {
+                    return .success(date)
+                }
+            }
         }
 
-        let dt = ISO8601DateFormatter()
-        dt.formatOptions = [.withInternetDateTime]
-        if let date = dt.date(from: compactDate) {
-            return .success(date)
-        }
-
-        let df = DateFormatter()
-        df.calendar = calendar
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.timeZone = calendar.timeZone
-        df.dateFormat = "yyyy-MM-dd'T'HH:mm"
-        if let date = df.date(from: compactDate) {
+        if lower.range(of: isoDateOnlyPattern, options: .regularExpression) != nil {
+            let parts = lower.split(separator: "-")
+            guard parts.count == 3,
+                  let year = Int(parts[0]),
+                  let month = Int(parts[1]),
+                  let day = Int(parts[2]) else {
+                return .failure(.invalidArguments("Argument `due` has an invalid ISO date."))
+            }
+            var comps = DateComponents()
+            comps.year = year
+            comps.month = month
+            comps.day = day
+            comps.hour = 23
+            comps.minute = 59
+            comps.second = 59
+            guard let date = calendar.date(from: comps) else {
+                return .failure(.invalidArguments("Could not resolve ISO date for `due`."))
+            }
             return .success(date)
         }
 
@@ -109,9 +129,33 @@ enum ToolDueDateParser {
 
     static func iso8601DueString(from date: Date, timeZone: TimeZone = .current) -> String {
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
+        formatter.formatOptions = [.withInternetDateTime, .withColonSeparatorInTimeZone]
         formatter.timeZone = timeZone
         return formatter.string(from: date)
+    }
+
+    static func parseISO8601DateTime(_ raw: String) -> Date? {
+        let compact = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+        guard !compact.isEmpty else { return nil }
+
+        let withColon = ISO8601DateFormatter()
+        withColon.formatOptions = [.withInternetDateTime, .withColonSeparatorInTimeZone]
+        if let date = withColon.date(from: compact) {
+            return date
+        }
+
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        if let date = plain.date(from: compact) {
+            return date
+        }
+
+        // Accept Zulu / offset forms without requiring a caller-chosen timezone.
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withColonSeparatorInTimeZone]
+        return fractional.date(from: compact)
     }
 
     private static func matchIntGroup(pattern: String, in text: String) -> Int? {

@@ -5,7 +5,8 @@ extension ToolCallingService {
         userMessage: String,
         history: [ChatMessage],
         tools: [ToolDefinition],
-        context: ToolInputContext
+        context: ToolInputContext,
+        completedSteps: [ToolTurnStep] = []
     ) -> String {
         let toolDescriptions = tools.map { tool in
             let arguments = tool.argumentSchema
@@ -25,19 +26,24 @@ extension ToolCallingService {
                     .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let boundedContent = String(compactContent.prefix(220))
+                let successfulTraces = (message.toolTraces ?? []).filter(\.success)
                 let toolSummary: String
-                if let trace = message.toolTrace, trace.success {
-                    let input = trace.displayInput.map {
-                        String($0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).prefix(100))
-                    }
-                    let inputSummary = input.map { ", input: \($0)" } ?? ""
-                    toolSummary = " [successful tool: \(trace.toolName)\(inputSummary)]"
-                } else {
+                if successfulTraces.isEmpty {
                     toolSummary = ""
+                } else {
+                    let summaries = successfulTraces.map { trace in
+                        let input = trace.displayInput.map {
+                            String($0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).prefix(100))
+                        }
+                        return input.map { "\(trace.toolName), input: \($0)" } ?? trace.toolName
+                    }
+                    toolSummary = " [successful tools: \(summaries.joined(separator: "; "))]"
                 }
                 return "\(message.role.rawValue): \(boundedContent)\(toolSummary)"
             }
             .joined(separator: "\n")
+
+        let completedToolCalls = plannerCompletedToolCallsBlock(completedSteps)
 
         let currentDateTimeFormatter = ISO8601DateFormatter()
         currentDateTimeFormatter.formatOptions = [.withInternetDateTime]
@@ -62,8 +68,48 @@ extension ToolCallingService {
         Recent conversation:
         \(recentHistory.isEmpty ? "(none)" : recentHistory)
 
+        Current-turn completed tool calls:
+        \(completedToolCalls)
+
         Latest user message:
         \(userMessage)
+        """
+    }
+
+    nonisolated func plannerCompletedToolCallsBlock(_ steps: [ToolTurnStep]) -> String {
+        guard !steps.isEmpty else { return "(none)" }
+
+        var remainingCharacters = Constants.ToolCalling.maxPlannerCombinedResultCharacters
+        return steps.enumerated().map { index, step in
+            let rawResult = step.result.contextBlock.isEmpty
+                ? (step.result.message ?? "No usable result content.")
+                : step.result.contextBlock
+            let resultLimit = min(
+                remainingCharacters,
+                Constants.ToolCalling.maxPlannerResultCharactersPerStep
+            )
+            let clippedResult = String(rawResult.prefix(max(0, resultLimit)))
+            remainingCharacters = max(0, remainingCharacters - clippedResult.count)
+            return """
+            \(index + 1). tool: \(step.call.toolName)
+               arguments: \(Self.formatted(arguments: step.call.arguments))
+               status: \(step.result.status.rawValue)
+               result: \(clippedResult.isEmpty ? "(none)" : clippedResult)
+            """
+        }
+        .joined(separator: "\n")
+    }
+
+    nonisolated func toolObservationPrompt(
+        userMessage: String,
+        completedSteps: [ToolTurnStep]
+    ) -> String {
+        """
+        Original user request:
+        \(userMessage)
+
+        Current-turn completed tool calls:
+        \(plannerCompletedToolCallsBlock(completedSteps))
         """
     }
 

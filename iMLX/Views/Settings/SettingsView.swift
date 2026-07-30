@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum SettingsNavigationDestination: String, Hashable {
     case memory
@@ -298,6 +299,8 @@ private struct MacSettingsPane<Content: View>: View {
 
 private struct MacGeneralSettingsView: View {
     @Bindable var appState: AppState
+    @State private var isChoosingModelsFolder = false
+    @State private var modelsFolderError: String?
 
     var body: some View {
         Form {
@@ -313,9 +316,102 @@ private struct MacGeneralSettingsView: View {
                     }
                 }
             }
+
+            Section {
+                LabeledContent(String.appLocalized("settings.models.additional_folder")) {
+                    Text(additionalModelsFolderDisplayPath)
+                        .foregroundStyle(appState.additionalModelsFolderURL == nil ? .secondary : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 300, alignment: .trailing)
+                }
+
+                HStack {
+                    Button(String.appLocalized("settings.models.choose_folder")) {
+                        modelsFolderError = nil
+                        isChoosingModelsFolder = true
+                    }
+
+                    if appState.additionalModelsFolderURL != nil {
+                        Button(String.appLocalized("settings.models.rescan")) {
+                            rescanAdditionalModels()
+                        }
+
+                        Button(
+                            String.appLocalized("settings.models.remove_folder"),
+                            role: .destructive
+                        ) {
+                            clearAdditionalModelsFolder()
+                        }
+                    }
+                }
+
+                if appState.additionalModelsFolderURL != nil {
+                    Text(
+                        String(
+                            format: String.appLocalized("settings.models.detected_count"),
+                            appState.additionalModelsCount
+                        )
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                if let modelsFolderError {
+                    Text(modelsFolderError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text(String.appLocalized("settings.models.section"))
+            } footer: {
+                Text(String.appLocalized("settings.models.additional_folder_help"))
+            }
         }
         .formStyle(.grouped)
         .navigationTitle(String.appLocalized("settings.section.general"))
+        .fileImporter(
+            isPresented: $isChoosingModelsFolder,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            chooseAdditionalModelsFolder(result)
+        }
+    }
+
+    private var additionalModelsFolderDisplayPath: String {
+        appState.additionalModelsFolderURL?.path
+            ?? String.appLocalized("settings.models.no_folder")
+    }
+
+    private func chooseAdditionalModelsFolder(_ result: Result<[URL], Error>) {
+        do {
+            guard let folderURL = try result.get().first else { return }
+            Task {
+                do {
+                    try await appState.setAdditionalModelsFolder(folderURL)
+                    modelsFolderError = nil
+                } catch {
+                    modelsFolderError = error.localizedDescription
+                }
+            }
+        } catch {
+            modelsFolderError = error.localizedDescription
+        }
+    }
+
+    private func rescanAdditionalModels() {
+        Task {
+            await appState.rescanAdditionalModelsFolder()
+            modelsFolderError = nil
+        }
+    }
+
+    private func clearAdditionalModelsFolder() {
+        Task {
+            await appState.clearAdditionalModelsFolder()
+            modelsFolderError = nil
+        }
     }
 }
 #endif

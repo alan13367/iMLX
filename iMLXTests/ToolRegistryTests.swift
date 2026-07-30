@@ -159,6 +159,21 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertTrue(tools.map(\.name).contains("current_datetime"))
     }
 
+    func testMutationMetadataMatchesCreateTools() async {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let tools = await service.enabledTools(webSearchEnabled: true, context: emptyContext)
+        let toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
+
+        XCTAssertTrue(toolsByName["calendar_create"]?.metadata.mutatesUserData == true)
+        XCTAssertTrue(toolsByName["reminders_create"]?.metadata.mutatesUserData == true)
+        XCTAssertEqual(
+            toolsByName["timer_create"]?.metadata.mutatesUserData,
+            TimerService.isSupported ? true : nil
+        )
+        XCTAssertFalse(toolsByName["calendar_brief"]?.metadata.mutatesUserData == true)
+        XCTAssertFalse(toolsByName["web_search"]?.metadata.mutatesUserData == true)
+    }
+
     func testRemindersToolsAreAvailable() async {
         let service = ToolCallingService(webSearchService: WebSearchService())
 

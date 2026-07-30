@@ -345,7 +345,7 @@ final class LiveVoiceSessionViewModel {
         guard let loadedModelId = appState.loadedModelId ?? suspendedModelForPlayback?.id else {
             return appState.selectedModel
         }
-        return Constants.ModelRegistry.curatedModels.first(where: { $0.id == loadedModelId }) ?? appState.selectedModel
+        return appState.modelInfo(id: loadedModelId) ?? appState.selectedModel
     }
 
     private var shouldSuspendConversationModelForVoicePlayback: Bool {

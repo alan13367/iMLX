@@ -91,6 +91,9 @@ struct ChatView: View {
         .task(id: appState.modelDownloadSnapshots.count) {
             await refreshDownloadedModels()
         }
+        .task(id: appState.modelCatalogRevision) {
+            await refreshDownloadedModels()
+        }
         .task {
             await refreshDownloadedModels()
             requestLaunchKeyboardIfReady()
@@ -195,7 +198,7 @@ struct ChatView: View {
                 isGenerating: chatViewModel.isGenerating,
                 parsedResponse: chatViewModel.currentParsedResponse,
                 toolActivityStatus: chatViewModel.toolActivityStatus,
-                currentToolTrace: chatViewModel.currentToolTrace,
+                currentToolTraces: chatViewModel.currentToolTraces,
                 lastFailedUserMessageId: chatViewModel.lastFailedUserMessageId,
                 conversationResetKey: appState.activeConversationId ?? conversationId,
                 onTranscriptTap: { isInputFocused = false },

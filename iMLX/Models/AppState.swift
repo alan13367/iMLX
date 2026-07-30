@@ -17,6 +17,9 @@ final class AppState {
     var isModelLoading: Bool = false
     var loadedModelId: String?
     var modelDownloadSnapshots: [String: ModelDownloadSnapshot] = [:]
+    var modelCatalogRevision = 0
+    var additionalModelsFolderURL: URL?
+    var additionalModelsCount = 0
     var speechAssetStatus: SpeechAssetStatus = .empty
     var hasCompletedOnboarding: Bool
     var pendingStarterModelId: String?
@@ -62,6 +65,7 @@ final class AppState {
         uniqueKeysWithValues: Constants.ModelRegistry.curatedModels.map { ($0.id, $0) }
     )
     private let userDefaults = UserDefaults.standard
+    private var additionalModelsByID: [String: ModelInfo] = [:]
     private var conversationsByID: [UUID: Conversation] = [:]
 
     init() {
@@ -415,9 +419,21 @@ final class AppState {
     @MainActor
     @discardableResult
     func reconcileModelCatalogState() async -> [ModelInfo] {
+        let additionalModels = await downloadService.refreshAdditionalModels()
+        let importedModels = additionalModels.filter { model in
+            Self.curatedModelsByID[model.id] == nil
+        }
+        additionalModelsByID = Dictionary(
+            uniqueKeysWithValues: importedModels.map { ($0.id, $0) }
+        )
+        additionalModelsFolderURL = await downloadService.additionalModelsFolderURL()
+        additionalModelsCount = additionalModels.count
+
+        let catalog = Constants.ModelRegistry.curatedModels + importedModels
+        let externallyManagedIDs = await downloadService.externallyManagedModelIDs()
         var downloadedById: [String: ModelInfo] = [:]
 
-        for model in Constants.ModelRegistry.curatedModels {
+        for model in catalog {
             let isDownloaded = await downloadService.isModelDownloaded(model)
             guard isDownloaded else { continue }
 
@@ -426,7 +442,11 @@ final class AppState {
             updated.localURL = await downloadService.localURL(for: model)
             downloadedById[model.id] = updated
 
-            if !manifestService.isDownloaded(modelId: model.id) {
+            if externallyManagedIDs.contains(model.id) {
+                if manifestService.isDownloaded(modelId: model.id) {
+                    manifestService.removeDownloaded(modelId: model.id)
+                }
+            } else if !manifestService.isDownloaded(modelId: model.id) {
                 let sizeOnDisk = await downloadService.sizeOfModel(model)
                 manifestService.addDownloaded(
                     modelId: model.id,
@@ -460,15 +480,52 @@ final class AppState {
         } else if let selectedId = selectedModel?.id,
                   downloadedById[selectedId] == nil {
             selectModel(nil)
+        } else if selectedModel == nil,
+                  let persistedSelectedID = userDefaults.string(forKey: Keys.selectedModelId),
+                  let restoredModel = downloadedById[persistedSelectedID] {
+            selectedModel = restoredModel
         }
 
         if let loadedModelId,
            downloadedById[loadedModelId] == nil {
+            await inferenceService.unload()
             setLoadedModel(id: nil)
         }
 
-        return Constants.ModelRegistry.curatedModels.compactMap { downloadedById[$0.id] }
+        return catalog.compactMap { downloadedById[$0.id] }
     }
+
+    #if os(macOS)
+    @MainActor
+    func setAdditionalModelsFolder(_ folderURL: URL) async throws {
+        if let loadedModelId,
+           await downloadService.isModelManagedExternally(modelID: loadedModelId) {
+            await inferenceService.unload()
+            setLoadedModel(id: nil)
+        }
+        try await downloadService.setAdditionalModelsFolder(folderURL)
+        _ = await reconcileModelCatalogState()
+        modelCatalogRevision += 1
+    }
+
+    @MainActor
+    func clearAdditionalModelsFolder() async {
+        if let loadedModelId,
+           await downloadService.isModelManagedExternally(modelID: loadedModelId) {
+            await inferenceService.unload()
+            setLoadedModel(id: nil)
+        }
+        await downloadService.clearAdditionalModelsFolder()
+        _ = await reconcileModelCatalogState()
+        modelCatalogRevision += 1
+    }
+
+    @MainActor
+    func rescanAdditionalModelsFolder() async {
+        _ = await reconcileModelCatalogState()
+        modelCatalogRevision += 1
+    }
+    #endif
 
     func clearModel() {
         selectModel(nil)
@@ -710,7 +767,7 @@ final class AppState {
 
     func modelInfo(id: String?) -> ModelInfo? {
         guard let id else { return nil }
-        return Self.curatedModelsByID[id]
+        return additionalModelsByID[id] ?? Self.curatedModelsByID[id]
     }
 
     @discardableResult

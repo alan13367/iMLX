@@ -26,6 +26,9 @@ extension ToolCallingService {
         tools: [ToolDefinition],
         context: ToolInputContext
     ) -> ToolPlannerOutcome {
+        // Thinking models may emit <think>…</think> before JSON. Strip that so
+        // the planner can still recover a tool decision from the remainder.
+        let text = Self.plannerTextByStrippingThinking(text)
         let toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
 
         for payload in jsonPayloads(in: text) {
@@ -199,7 +202,7 @@ extension ToolCallingService {
                       ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "read_url":
@@ -211,7 +214,7 @@ extension ToolCallingService {
                       ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "ocr_image_text":
@@ -222,7 +225,7 @@ extension ToolCallingService {
                 ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "document_synthesize":
@@ -234,7 +237,7 @@ extension ToolCallingService {
                 ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "calendar_brief":
@@ -246,7 +249,7 @@ extension ToolCallingService {
                       ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "calendar_create":
@@ -259,7 +262,7 @@ extension ToolCallingService {
                       ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "current_datetime":
@@ -270,7 +273,7 @@ extension ToolCallingService {
                 ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "reminders_brief":
@@ -282,7 +285,7 @@ extension ToolCallingService {
                       ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "reminders_create":
@@ -295,7 +298,7 @@ extension ToolCallingService {
                       ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "timer_create":
@@ -308,7 +311,7 @@ extension ToolCallingService {
                       ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             case "contacts_lookup":
@@ -321,7 +324,7 @@ extension ToolCallingService {
                       ) else {
                     continue
                 }
-                Self.debugLog("planner recovered prose decision for \(toolName)")
+                ToolCallingDebugLog.line("recover", "prose → \(toolName)")
                 return .call(ToolCallRequest(toolName: toolName, arguments: arguments))
 
             default:
@@ -414,5 +417,23 @@ extension ToolCallingService {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
-
+    nonisolated static func plannerTextByStrippingThinking(_ text: String) -> String {
+        let parsed = ParsedAssistantContent(text, isStreaming: false)
+        if !parsed.response.isEmpty {
+            return parsed.response
+        }
+        // Incomplete or think-only output: drop common think wrappers so JSON
+        // after a closed block can still be recovered from the raw string.
+        var cleaned = text
+        for tagName in ["think", "thinking", "reasoning"] {
+            cleaned = cleaned.replacingOccurrences(
+                of: #"(?is)<\#(tagName)\b[^>]*>.*?</\#(tagName)>"#,
+                with: " ",
+                options: .regularExpression
+            )
+        }
+        return cleaned
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

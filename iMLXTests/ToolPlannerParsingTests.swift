@@ -362,7 +362,9 @@ final class ToolPlannerParsingTests: XCTestCase {
             tools: [webSearchTool]
         )
 
-        XCTAssertEqual(decision, .skip(.none))
+        // Not a confident live-data heuristic, but not clearly tool-independent
+        // either — let the planner decide rather than forcing web_search.
+        XCTAssertEqual(decision, .deliberate)
     }
 
     func testPreflightForBroadSwiftQuestionUsesPlannerInsteadOfForcedWebSearch() {
@@ -1129,6 +1131,33 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
     }
 
+    func testCalendarHeuristicDoesNotHijackWaitDurationFollowUp() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Therefore how much time do i have to wait",
+            context: emptyContext,
+            tools: [calendarTool, currentDateTimeTool, webSearchTool]
+        )
+
+        XCTAssertEqual(decision, .skip(.none))
+    }
+
+    func testCalendarHeuristicStillMatchesDoIHaveAnyPlans() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Do I have any plans today?",
+            context: emptyContext,
+            tools: [calendarTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "calendar_brief", arguments: ["range": "today"])))
+        )
+    }
+
     func testCalendarHeuristicDoesNotHijackProgrammingEventQuestion() {
         let service = ToolCallingService(webSearchService: WebSearchService())
 
@@ -1138,7 +1167,8 @@ final class ToolPlannerParsingTests: XCTestCase {
             tools: [calendarTool]
         )
 
-        XCTAssertEqual(decision, .skip(.none))
+        // Must not force calendar_brief; planner may still run and return .none.
+        XCTAssertEqual(decision, .deliberate)
     }
 
     func testCalendarHeuristicDoesNotHijackConceptualCalendarQuestion() {
@@ -1150,7 +1180,7 @@ final class ToolPlannerParsingTests: XCTestCase {
             tools: [calendarTool]
         )
 
-        XCTAssertEqual(decision, .skip(.none))
+        XCTAssertEqual(decision, .deliberate)
     }
 
     func testCalendarCreateAdjacentButIncompleteRequestUsesPlanner() {
@@ -1174,7 +1204,8 @@ final class ToolPlannerParsingTests: XCTestCase {
             tools: [remindersBriefTool]
         )
 
-        XCTAssertEqual(decision, .skip(.none))
+        // Must not force reminders_brief; planner may still run and return .none.
+        XCTAssertEqual(decision, .deliberate)
     }
 
     func testPreflightRangeFollowUpDoesNotReuseUnrelatedTool() {
@@ -1202,7 +1233,9 @@ final class ToolPlannerParsingTests: XCTestCase {
             history: history
         )
 
-        XCTAssertEqual(decision, .skip(.none))
+        // Must not reuse contacts or invent a reminders brief via heuristic;
+        // planner may still deliberate on the ambiguous follow-up.
+        XCTAssertEqual(decision, .deliberate)
     }
 
     func testResolvedDecisionDoesNotConfuseRemindMeToWithMemory() {
@@ -1216,6 +1249,63 @@ final class ToolPlannerParsingTests: XCTestCase {
         )
 
         XCTAssertEqual(decision, .none)
+    }
+
+    func testReminderCreateWithoutTaskDoesNotCreatePlaceholderTitle() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let message = "Set a reminder for tomorrow"
+
+        XCTAssertNil(service.heuristicRemindersCreateRawArguments(for: message))
+        XCTAssertEqual(
+            service.preflightDecision(
+                userMessage: message,
+                context: emptyContext,
+                tools: [remindersCreateTool, currentDateTimeTool]
+            ),
+            .deliberate
+        )
+
+        let plannerDecision = service.parsePlannerDecision(
+            from: #"{"tool":"reminders_create","args":{"title":"for","due":"tomorrow"}}"#,
+            userMessage: message,
+            tools: [remindersCreateTool],
+            context: emptyContext
+        )
+        XCTAssertEqual(plannerDecision, .none)
+    }
+
+    func testMisspelledReminderRequestUsesPlannerInsteadOfSkipping() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+        let message = "I want you to look into the time and set a remider to brush my teeth in 1 hour"
+
+        XCTAssertNil(service.heuristicRemindersCreateRawArguments(for: message))
+        XCTAssertTrue(service.messageLooksReminderCreateAdjacent(message))
+        XCTAssertEqual(
+            service.preflightDecision(
+                userMessage: message,
+                context: emptyContext,
+                tools: [remindersCreateTool, currentDateTimeTool]
+            ),
+            .deliberate
+        )
+    }
+
+    func testCorrectReminderRequestStillUsesHeuristicFastPath() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "Set a reminder to brush my teeth in 1 hour",
+            context: emptyContext,
+            tools: [remindersCreateTool]
+        )
+
+        guard case .skip(.call(let request)) = decision else {
+            return XCTFail("Expected heuristic fast path for correctly spelled reminder")
+        }
+        XCTAssertEqual(request.toolName, "reminders_create")
+        XCTAssertEqual(request.arguments["title"], "brush my teeth")
+        XCTAssertNotNil(request.arguments["due"])
+        XCTAssertTrue(request.arguments["due"]?.contains("T") == true)
     }
 
     func testPreflightReminderCreateExtractsDueDateFromTail() {
@@ -1418,6 +1508,21 @@ final class ToolPlannerParsingTests: XCTestCase {
             userMessage: "What timezone am I in?",
             context: emptyContext,
             tools: [currentDateTimeTool]
+        )
+
+        XCTAssertEqual(
+            decision,
+            .skip(.call(ToolCallRequest(toolName: "current_datetime", arguments: [:])))
+        )
+    }
+
+    func testPreflightCompoundTimeAndCalendarStartsWithDateTime() {
+        let service = ToolCallingService(webSearchService: WebSearchService())
+
+        let decision = service.preflightDecision(
+            userMessage: "What time is it, and what do I have on my calendar today?",
+            context: emptyContext,
+            tools: [calendarTool, currentDateTimeTool]
         )
 
         XCTAssertEqual(

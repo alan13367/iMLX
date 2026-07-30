@@ -43,10 +43,15 @@ protocol ToolExecutor: Sendable {
     func execute(arguments: [String: String], context: ToolInputContext) async throws -> ToolExecutionResult
 }
 
+nonisolated struct ToolTurnStep: Equatable, Sendable {
+    let call: ToolCallRequest
+    let result: ToolExecutionResult
+}
+
 /// Result of the synchronous preflight that decides whether a turn even needs the
-/// LLM-backed planner. `skip` carries a final decision (either a confident tool
-/// call or `.none`); `deliberate` means the planner should run because the turn
-/// is ambiguous enough that an LLM round-trip might add value.
+/// LLM-backed planner. `skip` carries a final decision (either a confident heuristic
+/// tool call or `.none` for clearly tool-independent turns); `deliberate` means the
+/// planner should run so the model can choose a tool when heuristics did not match.
 nonisolated enum ToolPreflight: Equatable, Sendable {
     case skip(ToolDecision)
     case deliberate

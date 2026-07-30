@@ -66,35 +66,49 @@ actor ToolCallingService {
         history: [ChatMessage],
         tools: [ToolDefinition],
         context: ToolInputContext,
+        completedSteps: [ToolTurnStep] = [],
+        thinkingEnabled: Bool = false,
         using inferenceService: InferenceService
     ) async throws -> ToolPlannerOutcome {
         guard !tools.isEmpty else {
-            Self.debugLog("planner skipped: no enabled tools")
+            ToolCallingDebugLog.line("planner", "skipped · no enabled tools")
             return .decision(.none)
         }
 
-        Self.debugLog(
-            "planner start: tools=\(tools.map(\.name).joined(separator: ",")) " +
-            "historyCount=\(history.count) images=\(context.attachedImages.count) " +
-            "urls=\(context.detectedPublicURLs.count) userMessage=\(Self.sanitizedSnippet(userMessage))"
-        )
+        let plannerMaxTokens = thinkingEnabled
+            ? Constants.ToolCalling.plannerThinkingMaxTokens
+            : Constants.ToolCalling.plannerMaxTokens
+
+        ToolCallingDebugLog.line("planner", "start · thinking=\(thinkingEnabled ? "on" : "off")")
+        ToolCallingDebugLog.line("tools", ToolCallingDebugLog.joinedNames(tools.map(\.name)))
+        ToolCallingDebugLog.line("history", "\(history.count)")
+        if !completedSteps.isEmpty {
+            ToolCallingDebugLog.line("prior", ToolCallingDebugLog.joinedNames(completedSteps.map(\.call.toolName)))
+        }
+        ToolCallingDebugLog.line("message", ToolCallingDebugLog.sanitized(userMessage))
 
         let stream = await inferenceService.generate(
-            prompt: planningPrompt(userMessage: userMessage, history: history, tools: tools, context: context),
-            thinkingEnabled: false,
+            prompt: planningPrompt(
+                userMessage: userMessage,
+                history: history,
+                tools: tools,
+                context: context,
+                completedSteps: completedSteps
+            ),
+            thinkingEnabled: thinkingEnabled,
             history: [],
             systemPrompt: Constants.ToolCalling.plannerSystemPrompt,
-            maxTokens: Constants.ToolCalling.plannerMaxTokens,
+            maxTokens: plannerMaxTokens,
             temperature: Constants.ToolCalling.plannerTemperature,
             topP: Constants.ToolCalling.plannerTopP,
             repetitionPenalty: 1.0,
             profileRunLabel: "Tool Planning",
             profilingContext: LLMProfilingRunContext(
-                maxTokens: Constants.ToolCalling.plannerMaxTokens,
+                maxTokens: plannerMaxTokens,
                 temperature: Constants.ToolCalling.plannerTemperature,
                 topP: Constants.ToolCalling.plannerTopP,
                 repetitionPenalty: 1.0,
-                thinkingEnabled: false
+                thinkingEnabled: thinkingEnabled
             )
         )
 
@@ -124,21 +138,27 @@ actor ToolCallingService {
                 tools: tools,
                 context: context
             )
-            Self.debugLog(
-                "planner output: raw=\(Self.sanitizedSnippet(rawOutput, limit: 280)) " +
-                "earlyStop=\(sawCompleteToolDecisionJSON) outcome=\(Self.describe(outcome))"
+            ToolCallingDebugLog.line(
+                "planner",
+                ToolCallingDebugLog.describe(outcome)
             )
+            ToolCallingDebugLog.line(
+                "earlyStop",
+                sawCompleteToolDecisionJSON ? "yes" : "no"
+            )
+            ToolCallingDebugLog.line("raw", ToolCallingDebugLog.sanitized(rawOutput, limit: 220))
             return outcome
         } catch is CancellationError {
-            Self.debugLog("planner cancelled")
+            ToolCallingDebugLog.line("planner", "cancelled")
             throw CancellationError()
         } catch {
-            Self.debugLog("planner failed with error: \(String(describing: error))")
+            ToolCallingDebugLog.line("planner", "failed · \(error.localizedDescription)")
             return .unusable
         }
     }
 
     private nonisolated func containsCompleteToolDecisionJSON(_ rawOutput: String) -> Bool {
+        let rawOutput = Self.plannerTextByStrippingThinking(rawOutput)
         // Cheap pre-reject: no closing brace yet → cannot have a complete object.
         guard rawOutput.contains("}") else { return false }
 
@@ -162,7 +182,7 @@ actor ToolCallingService {
     ) async throws -> ToolExecutionResult {
         let startTime = Date()
         guard let toolDefinition = registeredTools.first(where: { $0.name == call.toolName }) else {
-            Self.debugLog("execution skipped: no tool definition registered for \(call.toolName)")
+            ToolCallingDebugLog.line("execute", "skipped · \(call.toolName) not registered")
             return failureResult(
                 toolName: call.toolName,
                 status: .unavailable,
@@ -178,10 +198,9 @@ actor ToolCallingService {
             context: context
         ) {
         case .failure(let failure):
-            Self.debugLog(
-                "execution rejected: tool=\(call.toolName) status=\(failure.status.rawValue) " +
-                "message=\(Self.sanitizedSnippet(failure.message))"
-            )
+            ToolCallingDebugLog.line("execute", "rejected · \(call.toolName)")
+            ToolCallingDebugLog.line("status", failure.status.rawValue)
+            ToolCallingDebugLog.line("reason", ToolCallingDebugLog.sanitized(failure.message))
             return failureResult(
                 toolName: call.toolName,
                 status: failure.status,
@@ -193,7 +212,7 @@ actor ToolCallingService {
         }
 
         guard let executor = tools[call.toolName] else {
-            Self.debugLog("execution skipped: no executor registered for \(call.toolName)")
+            ToolCallingDebugLog.line("execute", "skipped · \(call.toolName) has no executor")
             return failureResult(
                 toolName: call.toolName,
                 status: .unavailable,
@@ -203,7 +222,8 @@ actor ToolCallingService {
         }
 
         do {
-            Self.debugLog("execution start: tool=\(call.toolName) args=\(Self.formatted(arguments: normalizedArguments))")
+            ToolCallingDebugLog.line("execute", call.toolName)
+            ToolCallingDebugLog.line("args", ToolCallingDebugLog.formatted(arguments: normalizedArguments))
             let result = try await withTimeout(seconds: toolExecutionTimeoutSeconds) {
                 try await executor.execute(arguments: normalizedArguments, context: context)
             }
@@ -220,18 +240,19 @@ actor ToolCallingService {
                 sources: result.status == .success && !clippedContext.isEmpty ? result.sources : [],
                 durationSeconds: result.durationSeconds
             )
-            Self.debugLog(
-                "execution finished: tool=\(call.toolName) status=\(finalResult.status.rawValue) " +
-                "sources=\(finalResult.sources.count) contextChars=\(finalResult.contextBlock.count) " +
-                "message=\(Self.sanitizedSnippet(finalResult.message ?? "nil")) " +
-                "duration=\(String(format: "%.2f", finalResult.durationSeconds))s"
+            ToolCallingDebugLog.line(
+                "result",
+                "\(finalResult.status.rawValue) · \(String(format: "%.2fs", finalResult.durationSeconds)) · \(finalResult.sources.count) sources · \(finalResult.contextBlock.count) chars"
             )
+            if let message = finalResult.message, !message.isEmpty {
+                ToolCallingDebugLog.line("detail", ToolCallingDebugLog.sanitized(message))
+            }
             return finalResult
         } catch is CancellationError {
-            Self.debugLog("execution cancelled: tool=\(call.toolName)")
+            ToolCallingDebugLog.line("execute", "cancelled · \(call.toolName)")
             throw CancellationError()
         } catch ToolExecutionError.timedOut {
-            Self.debugLog("execution timed out: tool=\(call.toolName)")
+            ToolCallingDebugLog.line("execute", "timed out · \(call.toolName)")
             return failureResult(
                 toolName: call.toolName,
                 status: .timedOut,
@@ -239,10 +260,9 @@ actor ToolCallingService {
                 durationSeconds: Date().timeIntervalSince(startTime)
             )
         } catch let failure as ToolExecutionFailure {
-            Self.debugLog(
-                "execution failed: tool=\(call.toolName) status=\(failure.status.rawValue) " +
-                "message=\(Self.sanitizedSnippet(failure.message))"
-            )
+            ToolCallingDebugLog.line("execute", "failed · \(call.toolName)")
+            ToolCallingDebugLog.line("status", failure.status.rawValue)
+            ToolCallingDebugLog.line("reason", ToolCallingDebugLog.sanitized(failure.message))
             return failureResult(
                 toolName: call.toolName,
                 status: failure.status,
@@ -250,7 +270,8 @@ actor ToolCallingService {
                 durationSeconds: Date().timeIntervalSince(startTime)
             )
         } catch {
-            Self.debugLog("execution failed: tool=\(call.toolName) error=\(String(describing: error))")
+            ToolCallingDebugLog.line("execute", "failed · \(call.toolName)")
+            ToolCallingDebugLog.line("reason", error.localizedDescription)
             return failureResult(
                 toolName: call.toolName,
                 status: .executionFailed,
@@ -264,46 +285,22 @@ actor ToolCallingService {
 
 extension ToolCallingService {
     static func debugLog(_ message: String) {
-#if DEBUG
-        print("[ToolCalling] \(message)")
-#endif
+        ToolCallingDebugLog.note(message)
     }
 
     static func sanitizedSnippet(_ text: String, limit: Int = 180) -> String {
-        let compact = text
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if compact.count <= limit {
-            return compact
-        }
-        return String(compact.prefix(limit)) + "..."
+        ToolCallingDebugLog.sanitized(text, limit: limit)
     }
 
     static func describe(_ decision: ToolDecision) -> String {
-        switch decision {
-        case .none:
-            return "none"
-        case .call(let request):
-            return "call(tool=\(request.toolName), args=\(formatted(arguments: request.arguments)))"
-        }
+        ToolCallingDebugLog.describe(decision)
     }
 
     static func describe(_ outcome: ToolPlannerOutcome) -> String {
-        switch outcome {
-        case .decision(let decision):
-            return describe(decision)
-        case .unusable:
-            return "unusable"
-        }
+        ToolCallingDebugLog.describe(outcome)
     }
 
     static func formatted(arguments: [String: String]) -> String {
-        let pairs = arguments
-            .sorted { $0.key < $1.key }
-            .map { key, value in
-                "\(key)=\(sanitizedSnippet(value, limit: 120))"
-            }
-            .joined(separator: ", ")
-        return "{\(pairs)}"
+        ToolCallingDebugLog.formatted(arguments: arguments)
     }
 }

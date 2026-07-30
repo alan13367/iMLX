@@ -217,8 +217,8 @@ extension ToolCallingService {
                     return .failure(.invalidArguments("Argument `title` must be a string."))
                 }
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else {
-                    return .failure(.invalidArguments("Argument `title` must not be empty."))
+                guard isActionableReminderTitle(trimmed) else {
+                    return .failure(.invalidArguments("Argument `title` must describe what the user should be reminded about."))
                 }
                 let clamped = String(trimmed.prefix(Constants.ToolCalling.maxReminderTitleLength))
                 return .success(clamped)

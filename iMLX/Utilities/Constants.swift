@@ -452,7 +452,7 @@ nonisolated enum Constants {
         Be concise.
         """
         static let toolActionGroundingInstruction = """
-        Never claim that you searched, read, created, changed, scheduled, started, sent, or saved anything unless a tool result in the current request confirms that action succeeded. If no confirming tool result is present, do not imply success; ask for any missing detail or explain that the action was not performed. Treat normalized dates and times in a successful tool result as authoritative and do not ask the user to clarify information that result already resolved.
+        Never claim that you searched, read, created, changed, scheduled, started, sent, or saved anything unless a tool result in the current request confirms that action succeeded. If no confirming tool result is present, do not imply success; ask for any missing detail or explain that the action was not performed. Treat normalized dates and times in a successful tool result as authoritative and do not ask the user to clarify information that result already resolved. The app resolves relative dates such as today and tomorrow from the device clock, so never ask for the current calendar date merely to resolve those words. If a reminder request provides only a date and no reminder subject, ask what the user wants to be reminded about.
         """
         static let finalAnswerOnlyInstruction = """
         Provide only the final answer to the user's last request. Do not include reasoning, planning, hidden thoughts, or meta commentary.
@@ -532,9 +532,13 @@ nonisolated enum Constants {
 
     enum ToolCalling {
         static let plannerMaxTokens = 64
+        static let plannerThinkingMaxTokens = 256
         static let plannerTemperature: Float = 0.0
         static let plannerTopP: Float = 1.0
-        static let maxToolCallsPerTurn = 1
+        static let toolObservationMaxTokens = 96
+        static let toolObservationTemperature: Float = 0.2
+        static let maxMobileToolCallsPerTurn = 1
+        static let maxDesktopToolCallsPerTurn = 2
         static let maxQueryLength = 120
         static let maxReminderTitleLength = 200
         static let maxReminderNotesLength = 500
@@ -545,14 +549,22 @@ nonisolated enum Constants {
         static let maxContactQueryLength = 80
         static let maxContactLookupResults = 10
         static let maxToolResultContextCharacters = 6_000
+        static let maxPlannerResultCharactersPerStep = 1_500
+        static let maxPlannerCombinedResultCharacters = 2_500
+        static let maxCombinedToolResultContextCharacters = 8_000
         static let toolExecutionTimeoutSeconds: TimeInterval = 30
+        static let toolObservationSystemPrompt = """
+        You are iMLX. A tool just returned results mid-turn. Write one short sentence the user can read now about what those results show relative to their question. Speak as a normal assistant reply, not a status note. Do not mention tools, outline next steps, promise another lookup, analyze instructions, or output lists, JSON, or hidden reasoning.
+        """
         static let plannerSystemPrompt = """
         You are a tool-use planner for an on-device AI assistant. Given the user's message and available tools, decide whether a tool call is needed.
 
         OUTPUT:
-        - Return ONLY a single JSON object, nothing else. No prose, no markdown, no code fences.
+        - Return a single JSON object as the final answer, nothing else after it. No markdown, no code fences.
+        - If reasoning/thinking is enabled for this pass, keep that reasoning brief and hidden, then end with the JSON object.
         - If a tool call is needed, return: {"tool":"TOOL_NAME","args":{"ARG_NAME":"VALUE"}}
         - If no tool call is needed, return: {"tool":"none"}
+        - Return at most one tool call in this planner pass.
         - Stop generating immediately after the closing brace.
 
         DEFAULT BEHAVIOR:
@@ -563,6 +575,13 @@ nonisolated enum Constants {
         - Only call non-internet tools when the message clearly requires: the contents of an attached image/document, the user's local calendar, reminders, contacts, a timer, or the device's current date and time.
         - Do NOT call tools for greetings, thanks, casual chat, math, opinions, coding help, or translations the model can handle directly.
         - Do NOT invent missing required arguments. Return {"tool":"none"} when the user must clarify.
+        - When Current-turn completed tool calls are present, inspect their results before deciding. Return {"tool":"none"} only when every part of the original user request is already covered by those results or no remaining available tool can help.
+        - Call another tool only when it contributes information or performs an action explicitly required by the original user request. Never repeat an identical tool call with identical arguments.
+        - If the original request asked for the current time/date and current_datetime has not run yet in this turn, call current_datetime before returning none.
+        - If the original request asked about the calendar/schedule and calendar_brief has not run yet in this turn, call calendar_brief before returning none.
+        - If the original request uses a relative day/time such as today, tomorrow, tonight, this weekend, or next week, and current_datetime has not run yet in this turn, call current_datetime before returning none — even after web_search — so the final answer can resolve that relative day against the device clock.
+        - Tools that create or change user data may be called only when the original user request explicitly asks for that action.
+        - If current_datetime already ran in this turn and the user asked for a relative reminder or event time (e.g. "in 1 hour"), prefer an absolute local ISO-8601 datetime in args.due / start computed from that tool result instead of a relative phrase.
 
         TOOL GUIDANCE:
         - read_url: the latest message includes exactly one specific public URL and the user wants that page read, checked, explained, or summarized. Do not use it merely because a URL appears. If multiple URLs appear, return none so the assistant can ask which one to read.
@@ -571,13 +590,13 @@ nonisolated enum Constants {
         - calendar_brief: the user asks about their schedule, agenda, availability, conflicts, events, appointments, or meetings. Range must be one of: today, tomorrow, this_week, next_7_days.
         - calendar_create: the user explicitly asks to create/schedule/add one calendar event, and title, start datetime, and end time or duration are explicit. Args: title (required), start (required: ISO datetime, yyyy-MM-dd HH:mm, today HH:mm, or tomorrow HH:mm), end_or_duration (required: explicit end datetime or duration), location (optional), notes (optional), alert_minutes_before (optional integer). Skip if any required field is vague or missing.
         - reminders_brief: the user asks about todos, tasks, or reminders (not calendar events). Range must be one of: all, today, tomorrow, this_week, next_7_days, overdue. Use all when the user does not specify a date or range.
-        - reminders_create: the user explicitly asks to create or add a reminder or todo (e.g. "remind me to …" or "remind me on Tuesday to …"). Args: title (required), due (optional: today, tomorrow, tonight, a named weekday with an explicit time, ISO date/datetime, or "in N hours/minutes/days"), notes (optional). If an earlier turn supplied the title/day and the latest reply supplies the missing time, combine them and call this tool.
+        - reminders_create: the user explicitly asks to create or add a reminder or todo (e.g. "remind me to …" or "remind me on Tuesday to …"). Args: title (required: what the user should be reminded about), due (optional: today, tomorrow, tonight, a named weekday with an explicit time, ISO date/datetime, or "in N hours/minutes/days"), notes (optional). Prefer absolute ISO-8601 local datetimes for due when the current time is already known from current_datetime in this turn. A date or phrase such as "for tomorrow" is not a title; return none so the assistant can ask what to remind the user about. If an earlier turn supplied the title/day and the latest reply supplies the missing time, combine them and call this tool.
         - timer_create: the user explicitly asks to set/start/create one timer and gives a concrete duration. Args: duration (required: e.g. "10 minutes", "1 hour 30 minutes", "05:00", seconds), title (optional). Skip alarms, reminders, and calendar events.
         - contacts_lookup: the user asks to search local Contacts, asks whether someone is in their contacts/phone/address book, or asks for a contact's phone number or email address. Args: query (required name). Return none if the request needs postal addresses, birthdays, notes, photos, or full contact cards.
         - current_datetime: when the user asks for the current time, date, day of week, or timezone on this device. Skip otherwise — the model knows historical dates and eras from training.
         - web_search: for any factual question where the model's training data may be outdated, incomplete, or unreliable. Produce a concise search query, but NEVER drop named entities, locations, dates, timeframes, negations, or qualifiers from the user's request or its conversation context. Use web_search generously — internet results prevent hallucination and provide grounded, up-to-date answers.
 
-        At most one tool call is allowed per turn.
+        A bounded runtime outside this planner controls the total number of calls in the turn.
         """
     }
 }

@@ -10,6 +10,7 @@ struct ModelCardView: View {
     let progress: Float
     let isDownloading: Bool
     let anyModelDownloading: Bool
+    let isExternallyManaged: Bool
     let onDownload: () -> Void
     let onCancelDownload: () -> Void
     let onDelete: () -> Void
@@ -29,7 +30,8 @@ struct ModelCardView: View {
                     quantization: model.quantization,
                     estimatedSizeGB: model.estimatedSizeGB,
                     supportsThinking: model.supportsThinking,
-                    supportsVision: model.supportsVision
+                    supportsVision: model.supportsVision,
+                    isExternallyManaged: isExternallyManaged
                 )
 
                 Spacer(minLength: 8)
@@ -40,6 +42,7 @@ struct ModelCardView: View {
                     isDownloaded: model.isDownloaded,
                     isDownloading: isDownloading,
                     anyModelDownloading: anyModelDownloading,
+                    isExternallyManaged: isExternallyManaged,
                     onDownload: onDownload,
                     onCancelDownload: onCancelDownload,
                     onDelete: onDelete
@@ -80,6 +83,7 @@ private struct ModelCardIdentity: View {
     let estimatedSizeGB: Double
     let supportsThinking: Bool
     let supportsVision: Bool
+    let isExternallyManaged: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -114,6 +118,9 @@ private struct ModelCardIdentity: View {
         if supportsVision {
             pieces.append(String.appLocalized("models.card.vision"))
         }
+        if isExternallyManaged {
+            pieces.append(String.appLocalized("models.external.folder_badge"))
+        }
         return pieces.joined(separator: " · ")
     }
 }
@@ -124,6 +131,7 @@ private struct ModelCardActionButton: View {
     let isDownloaded: Bool
     let isDownloading: Bool
     let anyModelDownloading: Bool
+    let isExternallyManaged: Bool
     let onDownload: () -> Void
     let onCancelDownload: () -> Void
     let onDelete: () -> Void
@@ -162,28 +170,34 @@ private struct ModelCardActionButton: View {
     }
 
     private var role: ButtonRole? {
-        isDownloading || isDownloaded ? .destructive : nil
+        isDownloading || (isDownloaded && !isExternallyManaged) ? .destructive : nil
     }
 
     private var systemImage: String {
         if isDownloading { return "stop.circle" }
+        if isDownloaded && isExternallyManaged { return "externaldrive.fill" }
         if isDownloaded { return "trash" }
         return "arrow.down.circle"
     }
 
     private var foregroundStyle: Color {
         if isDownloading { return .orange }
+        if isDownloaded && isExternallyManaged { return .secondary }
         if isDownloaded { return .red }
         return isEnabled ? BrandPalette.accent : .secondary
     }
 
     private var isEnabled: Bool {
-        isDownloading || isDownloaded || !anyModelDownloading
+        if isDownloaded && isExternallyManaged { return false }
+        return isDownloading || isDownloaded || !anyModelDownloading
     }
 
     private var accessibilityLabel: String {
         if isDownloading {
             return String.appLocalized("models.card.stop_download_a11y")
+        }
+        if isDownloaded && isExternallyManaged {
+            return String.appLocalized("models.external.folder_badge")
         }
         if isDownloaded {
             return String.appLocalized("models.card.delete_a11y")

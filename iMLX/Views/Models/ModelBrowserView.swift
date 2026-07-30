@@ -57,6 +57,9 @@ struct ModelBrowserView: View {
         .task(id: appState.modelDownloadSnapshots.count) {
             refreshDownloadStatus()
         }
+        .task(id: appState.modelCatalogRevision) {
+            refreshDownloadStatus()
+        }
     }
 
     private func refreshDownloadStatus() {
@@ -175,6 +178,7 @@ struct FamilyModelsView: View {
                         progress: progressByModelID[model.id] ?? 0,
                         isDownloading: downloadingByModelID[model.id] ?? false,
                         anyModelDownloading: isAnyModelDownloading,
+                        isExternallyManaged: viewModel.externallyManagedModelIDs.contains(model.id),
                         onDownload: {
                             viewModel.errorMessage = nil
                             viewModel.download(model: model)

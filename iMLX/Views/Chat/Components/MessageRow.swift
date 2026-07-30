@@ -83,25 +83,45 @@ struct MessageRow: View, Equatable {
 
     private var assistantContent: some View {
         VStack(alignment: .leading, spacing: ChatMetrics.messageSectionSpacing) {
-            if hasActivity {
-                MessageActivityView(
-                    toolPhase: activityToolPhase,
-                    thinking: resolvedParsed.thinking,
-                    isStreaming: isStreaming,
-                    isWaitingForAnswer: resolvedParsed.response.isEmpty,
-                    isThinkingExpanded: thinkingBinding
-                )
-            }
-
-            if !resolvedParsed.response.isEmpty || isStreaming {
-                AssistantMessageText(
-                    text: resolvedParsed.response,
-                    isStreaming: isStreaming,
-                    streamID: message.id,
-                    linkPhoneNumbers: shouldLinkPhoneNumbers
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contextMenu { assistantContextMenu }
+            ForEach(Array(agenticSegments.enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .tools(let phases):
+                    MessageActivityView(
+                        toolPhases: phases,
+                        thinking: nil,
+                        isStreaming: false,
+                        isWaitingForAnswer: false,
+                        isThinkingExpanded: .constant(false)
+                    )
+                case .prose(let text, let streaming):
+                    AssistantMessageText(
+                        text: text,
+                        isStreaming: streaming,
+                        streamID: message.id,
+                        linkPhoneNumbers: shouldLinkPhoneNumbers
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contextMenu {
+                        if !streaming {
+                            Button {
+                                onCopy(text)
+                            } label: {
+                                Label(String.appLocalized("message.copy"), systemImage: "doc.on.doc")
+                            }
+                            ShareLink(item: text.isEmpty ? shareableText : text) {
+                                Label(String.appLocalized("message.share"), systemImage: "square.and.arrow.up")
+                            }
+                        }
+                    }
+                case .thinking(let text):
+                    MessageActivityView(
+                        toolPhases: [],
+                        thinking: text,
+                        isStreaming: isStreaming,
+                        isWaitingForAnswer: resolvedParsed.response.isEmpty,
+                        isThinkingExpanded: thinkingBinding
+                    )
+                }
             }
 
             if !isStreaming {
@@ -116,21 +136,36 @@ struct MessageRow: View, Equatable {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - Context menus
+    private enum AgenticSegment: Equatable {
+        case tools([MessageActivityToolPhase])
+        case prose(String, isStreaming: Bool)
+        case thinking(String)
+    }
 
-    @ViewBuilder
-    private var assistantContextMenu: some View {
-        if !isStreaming {
-            Button {
-                onCopy(resolvedParsed.copyableText)
-            } label: {
-                Label(String.appLocalized("message.copy"), systemImage: "doc.on.doc")
-            }
-            ShareLink(item: shareableText) {
-                Label(String.appLocalized("message.share"), systemImage: "square.and.arrow.up")
+    /// Agentic layout: tool → assistant prose → tool → … → final answer.
+    private var agenticSegments: [AgenticSegment] {
+        var segments: [AgenticSegment] = []
+        let traces = isStreaming ? [] : (message.toolTraces ?? [])
+
+        for trace in traces {
+            segments.append(.tools([.completed(trace)]))
+            if let note = trace.followUpReasoning, !note.isEmpty {
+                segments.append(.prose(note, isStreaming: false))
             }
         }
+
+        if let thinking = resolvedParsed.thinking, !thinking.isEmpty {
+            segments.append(.thinking(thinking))
+        }
+
+        if !resolvedParsed.response.isEmpty || isStreaming {
+            segments.append(.prose(resolvedParsed.response, isStreaming: isStreaming))
+        }
+
+        return segments
     }
+
+    // MARK: - Context menus
 
     @ViewBuilder
     private var userContextMenu: some View {
@@ -161,18 +196,6 @@ struct MessageRow: View, Equatable {
         (message.attachedDocuments?.isEmpty == false) || (message.attachedImages?.isEmpty == false)
     }
 
-    /// Completed traces only. In-flight tool activity is rendered by the list
-    /// section, which owns the live `ToolActivityStatus`.
-    private var activityToolPhase: MessageActivityToolPhase? {
-        guard !isStreaming, let trace = message.toolTrace else { return nil }
-        return .completed(trace)
-    }
-
-    private var hasActivity: Bool {
-        if activityToolPhase != nil { return true }
-        return !(resolvedParsed.thinking?.isEmpty ?? true)
-    }
-
     private var resolvedParsed: ParsedAssistantContent {
         parsedAssistantContent ?? ParsedAssistantContent(message.content, isStreaming: isStreaming)
     }
@@ -183,15 +206,26 @@ struct MessageRow: View, Equatable {
 
     private var shareableText: String {
         if message.role == .assistant {
-            return resolvedParsed.copyableText
+            var parts: [String] = []
+            for trace in message.toolTraces ?? [] {
+                if let note = trace.followUpReasoning, !note.isEmpty {
+                    parts.append(note)
+                }
+            }
+            let finalText = resolvedParsed.copyableText
+            if !finalText.isEmpty {
+                parts.append(finalText)
+            }
+            return parts.joined(separator: "\n\n")
         }
         return message.content
     }
 
     private var shouldLinkPhoneNumbers: Bool {
         !isStreaming
-            && message.toolTrace?.toolName == "contacts_lookup"
-            && message.toolTrace?.success == true
+            && (message.toolTraces ?? []).contains { trace in
+                trace.toolName == "contacts_lookup" && trace.success
+            }
     }
 }
 

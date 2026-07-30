@@ -37,19 +37,41 @@ nonisolated struct ToolMetadata: Codable, Hashable, Sendable {
     let requiresAttachedDocuments: Bool
     let requiresSinglePublicURL: Bool
     let executionClass: ToolExecutionClass
+    let mutatesUserData: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case requiresWebAccessToggle
+        case requiresAttachedImages
+        case requiresAttachedDocuments
+        case requiresSinglePublicURL
+        case executionClass
+        case mutatesUserData
+    }
 
     init(
         requiresWebAccessToggle: Bool = false,
         requiresAttachedImages: Bool = false,
         requiresAttachedDocuments: Bool = false,
         requiresSinglePublicURL: Bool = false,
-        executionClass: ToolExecutionClass = .local
+        executionClass: ToolExecutionClass = .local,
+        mutatesUserData: Bool = false
     ) {
         self.requiresWebAccessToggle = requiresWebAccessToggle
         self.requiresAttachedImages = requiresAttachedImages
         self.requiresAttachedDocuments = requiresAttachedDocuments
         self.requiresSinglePublicURL = requiresSinglePublicURL
         self.executionClass = executionClass
+        self.mutatesUserData = mutatesUserData
+    }
+
+    init(from decoder: any Swift.Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        requiresWebAccessToggle = try container.decodeIfPresent(Bool.self, forKey: .requiresWebAccessToggle) ?? false
+        requiresAttachedImages = try container.decodeIfPresent(Bool.self, forKey: .requiresAttachedImages) ?? false
+        requiresAttachedDocuments = try container.decodeIfPresent(Bool.self, forKey: .requiresAttachedDocuments) ?? false
+        requiresSinglePublicURL = try container.decodeIfPresent(Bool.self, forKey: .requiresSinglePublicURL) ?? false
+        executionClass = try container.decodeIfPresent(ToolExecutionClass.self, forKey: .executionClass) ?? .local
+        mutatesUserData = try container.decodeIfPresent(Bool.self, forKey: .mutatesUserData) ?? false
     }
 }
 
@@ -153,6 +175,8 @@ nonisolated struct ToolCallTrace: Codable, Hashable, Sendable {
     let durationSeconds: TimeInterval?
     let success: Bool
     let sourceCount: Int
+    /// Short model note produced after this tool and before the next tool call.
+    var followUpReasoning: String?
 
     private enum CodingKeys: String, CodingKey {
         case toolName
@@ -162,6 +186,7 @@ nonisolated struct ToolCallTrace: Codable, Hashable, Sendable {
         case durationSeconds
         case success
         case sourceCount
+        case followUpReasoning
     }
 
     init(
@@ -170,7 +195,8 @@ nonisolated struct ToolCallTrace: Codable, Hashable, Sendable {
         status: ToolExecutionStatus?,
         durationSeconds: TimeInterval?,
         success: Bool,
-        sourceCount: Int
+        sourceCount: Int,
+        followUpReasoning: String? = nil
     ) {
         self.toolName = toolName
         self.displayInput = displayInput
@@ -178,6 +204,7 @@ nonisolated struct ToolCallTrace: Codable, Hashable, Sendable {
         self.durationSeconds = durationSeconds
         self.success = success
         self.sourceCount = sourceCount
+        self.followUpReasoning = Self.normalizedFollowUpReasoning(followUpReasoning)
     }
 
     init(from decoder: any Swift.Decoder) throws {
@@ -189,6 +216,9 @@ nonisolated struct ToolCallTrace: Codable, Hashable, Sendable {
         durationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .durationSeconds)
         success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
         sourceCount = try container.decodeIfPresent(Int.self, forKey: .sourceCount) ?? 0
+        followUpReasoning = Self.normalizedFollowUpReasoning(
+            try container.decodeIfPresent(String.self, forKey: .followUpReasoning)
+        )
     }
 
     func encode(to encoder: any Swift.Encoder) throws {
@@ -199,5 +229,12 @@ nonisolated struct ToolCallTrace: Codable, Hashable, Sendable {
         try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
         try container.encode(success, forKey: .success)
         try container.encode(sourceCount, forKey: .sourceCount)
+        try container.encodeIfPresent(followUpReasoning, forKey: .followUpReasoning)
+    }
+
+    private static func normalizedFollowUpReasoning(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

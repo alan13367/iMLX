@@ -1,16 +1,21 @@
 import SwiftUI
 
-/// Tool phase driving the activity region: the model is choosing a tool, a tool
-/// is executing, or a finalized trace is being shown.
+/// Tool / activity phase driving the activity region.
 enum MessageActivityToolPhase: Equatable {
     case planning
     case running(toolName: String, displayInput: String?)
     case completed(ToolCallTrace)
+    /// Hidden-reasoning / thinking toggle content.
+    case reasoning(text: String, isLive: Bool)
 
     var isLive: Bool {
         switch self {
-        case .planning, .running: true
-        case .completed: false
+        case .planning, .running:
+            return true
+        case .reasoning(_, let isLive):
+            return isLive
+        case .completed:
+            return false
         }
     }
 }
@@ -18,42 +23,45 @@ enum MessageActivityToolPhase: Equatable {
 /// Surface-less activity region rendered above an assistant answer.
 ///
 /// Replaces the container roles of the old tool-call card and thinking panel.
-/// Tool activity and reasoning are two entries in one column of quiet text
-/// lines sharing a leading symbol gutter, so the transcript reads as continuous
-/// prose rather than a stack of floating panels. Nothing here draws a
-/// background, border, or capsule; expanded bodies indent under a hairline.
+/// Tool rows stay in this column; mid-turn assistant prose is rendered as
+/// normal response text between tools by the message/list layout.
 struct MessageActivityView: View {
-    let toolPhase: MessageActivityToolPhase?
+    let toolPhases: [MessageActivityToolPhase]
     let thinking: String?
     let isStreaming: Bool
     let isWaitingForAnswer: Bool
     @Binding var isThinkingExpanded: Bool
     var onToggleThinking: (() -> Void)?
 
-    @State private var isToolExpanded = false
+    @State private var expandedToolIndices: Set<Int> = []
+    @State private var expandedReasoningIndices: Set<Int> = []
     @State private var hapticSelectionTrigger = 0
 
-    private var hasThinking: Bool {
-        guard let thinking else { return false }
-        return !thinking.isEmpty
+    private var timelineEntries: [MessageActivityToolPhase] {
+        var entries = toolPhases
+        if let thinking, !thinking.isEmpty,
+           !toolPhases.contains(where: {
+               if case .reasoning(let text, _) = $0 { return text == thinking }
+               return false
+           }) {
+            entries.append(.reasoning(text: thinking, isLive: isStreaming && isWaitingForAnswer))
+        }
+        return entries
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ChatMetrics.activityRowSpacing) {
-            if let toolPhase {
-                toolEntry(toolPhase)
-            }
-            if hasThinking {
-                thinkingEntry
+            ForEach(Array(timelineEntries.enumerated()), id: \.offset) { index, phase in
+                timelineEntry(phase, index: index)
             }
         }
         .sensoryFeedback(.selection, trigger: hapticSelectionTrigger)
     }
 
-    // MARK: - Tool activity
+    // MARK: - Timeline
 
     @ViewBuilder
-    private func toolEntry(_ phase: MessageActivityToolPhase) -> some View {
+    private func timelineEntry(_ phase: MessageActivityToolPhase, index: Int) -> some View {
         switch phase {
         case .planning, .running:
             ActivityRow(
@@ -77,21 +85,31 @@ struct MessageActivityView: View {
                         success: trace.success
                     ),
                     trailing: durationLabel(trace.durationSeconds),
-                    disclosure: ActivityDisclosure(isExpanded: isToolExpanded) {
+                    disclosure: ActivityDisclosure(isExpanded: expandedToolIndices.contains(index)) {
                         withAnimation(.easeInOut(duration: 0.18)) {
-                            isToolExpanded.toggle()
+                            if expandedToolIndices.contains(index) {
+                                expandedToolIndices.remove(index)
+                            } else {
+                                expandedToolIndices.insert(index)
+                            }
                         }
                         hapticSelectionTrigger += 1
                     }
                 )
 
-                if isToolExpanded {
+                if expandedToolIndices.contains(index) {
                     ActivityDetailBody {
                         toolSteps(for: trace)
                     }
                     .transition(.opacity)
                 }
             }
+        case .reasoning(let text, let isLive):
+            noteEntry(
+                text: text,
+                isLive: isLive,
+                index: index
+            )
         }
     }
 
@@ -133,7 +151,7 @@ struct MessageActivityView: View {
                 toolName: toolName,
                 displayInput: displayInput
             )?.text ?? toolName
-        case .completed:
+        case .completed, .reasoning:
             return ""
         }
     }
@@ -143,38 +161,45 @@ struct MessageActivityView: View {
         return String(format: "%.1fs", duration)
     }
 
-    // MARK: - Reasoning
-
     @ViewBuilder
-    private var thinkingEntry: some View {
+    private func noteEntry(text: String, isLive: Bool, index: Int) -> some View {
+        let isExpanded = isLive || expandedReasoningIndices.contains(index)
         VStack(alignment: .leading, spacing: ChatMetrics.activityRowSpacing) {
             ActivityRow(
-                leading: isThinkingLive ? .progress : .symbol("brain", tint: .secondary),
-                label: thinkingLabel,
+                leading: isLive ? .progress : .symbol("brain", tint: .secondary),
+                label: isLive
+                    ? String.appLocalized("message.thinking")
+                    : String.appLocalized("message.thinking.summary"),
                 trailing: nil,
-                disclosure: ActivityDisclosure(isExpanded: isThinkingExpanded) {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        isThinkingExpanded.toggle()
+                disclosure: isLive
+                    ? nil
+                    : ActivityDisclosure(isExpanded: isExpanded) {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            if expandedReasoningIndices.contains(index) {
+                                expandedReasoningIndices.remove(index)
+                            } else {
+                                expandedReasoningIndices.insert(index)
+                            }
+                        }
+                        hapticSelectionTrigger += 1
+                        if index == timelineEntries.count - 1 {
+                            onToggleThinking?()
+                            isThinkingExpanded = !isExpanded
+                        }
                     }
-                    hapticSelectionTrigger += 1
-                    onToggleThinking?()
-                }
             )
-            .accessibilityLabel(thinkingLabel)
-            .accessibilityValue(isThinkingExpanded ? Text("Expanded") : Text("Collapsed"))
-            .accessibilityHint(
-                Text(
-                    isThinkingExpanded
-                        ? String.appLocalized("Hide reasoning")
-                        : String.appLocalized("Show reasoning")
-                )
+            .accessibilityLabel(
+                isLive
+                    ? String.appLocalized("message.thinking")
+                    : String.appLocalized("message.thinking.summary")
             )
+            .accessibilityAddTraits(isLive ? .updatesFrequently : [])
 
-            if isThinkingExpanded, let thinking, !thinking.isEmpty {
+            if isExpanded, !text.isEmpty {
                 ActivityDetailBody {
                     MessageMarkdownText(
-                        text: thinking,
-                        isStreaming: isStreaming,
+                        text: text,
+                        isStreaming: isLive,
                         linkTint: BrandPalette.accent
                     )
                     .font(.callout)
@@ -183,16 +208,21 @@ struct MessageActivityView: View {
                 .transition(.opacity)
             }
         }
-    }
-
-    private var isThinkingLive: Bool {
-        isStreaming && isWaitingForAnswer
-    }
-
-    private var thinkingLabel: String {
-        isThinkingLive
-            ? String.appLocalized("message.thinking")
-            : String.appLocalized("message.thinking.summary")
+        .onAppear {
+            if isLive == false,
+               index == timelineEntries.count - 1,
+               isThinkingExpanded {
+                expandedReasoningIndices.insert(index)
+            }
+        }
+        .onChange(of: isThinkingExpanded) { _, expanded in
+            guard index == timelineEntries.count - 1 else { return }
+            if expanded {
+                expandedReasoningIndices.insert(index)
+            } else {
+                expandedReasoningIndices.remove(index)
+            }
+        }
     }
 }
 
@@ -472,7 +502,7 @@ enum MessageToolPresentation {
 
 #Preview("Activity — running") {
     MessageActivityView(
-        toolPhase: .running(toolName: "web_search", displayInput: "tallest building in the world 2026"),
+        toolPhases: [.running(toolName: "web_search", displayInput: "tallest building in the world 2026")],
         thinking: nil,
         isStreaming: true,
         isWaitingForAnswer: true,
@@ -484,7 +514,7 @@ enum MessageToolPresentation {
 #Preview("Activity — completed with reasoning") {
     ActivityPreviewWrapper(false) { binding in
         MessageActivityView(
-            toolPhase: .completed(
+            toolPhases: [.completed(
                 ToolCallTrace(
                     toolName: "web_search",
                     displayInput: "tallest building in the world 2026",
@@ -493,8 +523,42 @@ enum MessageToolPresentation {
                     success: true,
                     sourceCount: 3
                 )
-            ),
+            )],
             thinking: "The user wants a current fact, so a web lookup is warranted.",
+            isStreaming: false,
+            isWaitingForAnswer: false,
+            isThinkingExpanded: binding
+        )
+        .padding()
+    }
+}
+
+#Preview("Activity — interleaved tools and reasoning") {
+    ActivityPreviewWrapper(true) { binding in
+        MessageActivityView(
+            toolPhases: [
+                .completed(
+                    ToolCallTrace(
+                        toolName: "current_datetime",
+                        displayInput: nil,
+                        status: .success,
+                        durationSeconds: 0.0,
+                        success: true,
+                        sourceCount: 0
+                    )
+                ),
+                .completed(
+                    ToolCallTrace(
+                        toolName: "calendar_brief",
+                        displayInput: "today",
+                        status: .noContent,
+                        durationSeconds: 0.2,
+                        success: true,
+                        sourceCount: 0
+                    )
+                )
+            ],
+            thinking: "No events were returned, so I can answer both parts now.",
             isStreaming: false,
             isWaitingForAnswer: false,
             isThinkingExpanded: binding
@@ -505,7 +569,7 @@ enum MessageToolPresentation {
 
 #Preview("Activity — failed tool") {
     MessageActivityView(
-        toolPhase: .completed(
+        toolPhases: [.completed(
             ToolCallTrace(
                 toolName: "read_url",
                 displayInput: "https://example.com",
@@ -514,7 +578,7 @@ enum MessageToolPresentation {
                 success: false,
                 sourceCount: 0
             )
-        ),
+        )],
         thinking: nil,
         isStreaming: false,
         isWaitingForAnswer: false,

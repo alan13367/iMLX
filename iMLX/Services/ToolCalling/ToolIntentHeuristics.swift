@@ -201,7 +201,18 @@ extension ToolCallingService {
             "my events",
             "what do i have",
             "what s on",
-            "do i have",
+            // Keep these specific: bare "do i have" matches duration follow-ups
+            // such as "how much time do i have to wait".
+            "do i have anything",
+            "do i have any",
+            "do i have a meeting",
+            "do i have meetings",
+            "do i have an appointment",
+            "do i have appointments",
+            "do i have an event",
+            "do i have events",
+            "do i have plans",
+            "do i have something",
             "am i free",
             "am i busy",
             "am i available",
@@ -465,9 +476,36 @@ extension ToolCallingService {
             break
         }
 
-        guard !title.isEmpty else { return nil }
+        guard isActionableReminderTitle(title) else { return nil }
         arguments["title"] = title
         return arguments
+    }
+
+    nonisolated func isActionableReminderTitle(_ candidate: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(candidate)
+        guard !normalized.isEmpty else { return false }
+
+        let nonActionableTitles: Set<String> = [
+            "a",
+            "an",
+            "the",
+            "for",
+            "on",
+            "at",
+            "to",
+            "about",
+            "reminder",
+            "a reminder",
+            "today",
+            "tomorrow",
+            "tonight",
+            "for today",
+            "for tomorrow",
+            "for tonight",
+            "on today",
+            "on tomorrow"
+        ]
+        return !nonActionableTitles.contains(normalized)
     }
 
     nonisolated func shouldForceCurrentDateTime(for userMessage: String) -> Bool {
@@ -500,6 +538,44 @@ extension ToolCallingService {
         let temporal = Set(["time", "date", "day", "weekday", "year", "timezone"])
         let anchor = Set(["current", "now", "today"])
         return !tokens.intersection(temporal).isEmpty && !tokens.intersection(anchor).isEmpty
+    }
+
+    /// True when answering depends on the device's local "now" to interpret a
+    /// relative day/time in the user request (e.g. "playing tomorrow").
+    nonisolated func messageNeedsDeviceDateAnchor(for userMessage: String) -> Bool {
+        let normalized = normalizeForHeuristicMatching(userMessage)
+        guard !normalized.isEmpty else { return false }
+
+        let strongRelativePhrases = [
+            "tomorrow",
+            "tonight",
+            "yesterday",
+            "this morning",
+            "this afternoon",
+            "this evening",
+            "this weekend",
+            "this week",
+            "next week",
+            "next month",
+            "in an hour",
+            "in 1 hour",
+            "in one hour"
+        ]
+        if strongRelativePhrases.contains(where: { normalized.contains($0) }) {
+            return true
+        }
+
+        // Bare "today" is common in casual chat; only treat it as a date anchor
+        // when paired with schedule/event language.
+        guard normalized.contains("today") else { return false }
+        let eventTokens = Set([
+            "game", "match", "matches", "playing", "fixture", "fixtures",
+            "flight", "flights", "train", "event", "events", "meeting",
+            "appointment", "deadline", "due", "open", "closed", "hours",
+            "schedule", "kickoff", "kick off"
+        ])
+        let tokens = Set(normalized.split(separator: " ").map(String.init))
+        return !tokens.intersection(eventTokens).isEmpty
     }
 
     nonisolated func heuristicReminderRange(for userMessage: String) -> RemindersRange? {

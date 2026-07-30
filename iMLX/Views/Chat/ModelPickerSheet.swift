@@ -84,7 +84,7 @@ struct ModelPickerSheet: View {
     }
 
     private func loadedModelRow(modelId: String) -> some View {
-        let model = Constants.ModelRegistry.curatedModels.first(where: { $0.id == modelId })
+        let model = appState.modelInfo(id: modelId)
         return Group {
             if let model {
                 HStack(spacing: 12) {

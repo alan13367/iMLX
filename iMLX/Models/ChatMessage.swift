@@ -17,8 +17,13 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
     var attachedImages: [ChatAttachmentImage]?
     var attachedDocuments: [ConversationDocumentReference]?
     var retrievedSources: [MessageSource]?
-    var toolTrace: ToolCallTrace?
+    var toolTraces: [ToolCallTrace]?
     var generationStats: GenerationStats?
+
+    var toolTrace: ToolCallTrace? {
+        get { toolTraces?.last }
+        set { toolTraces = newValue.map { [$0] } }
+    }
     let timestamp: Date
 
     enum Role: String, Codable, Equatable {
@@ -35,6 +40,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         case attachedDocuments
         case retrievedSources
         case toolTrace
+        case toolTraces
         case generationStats
         case timestamp
     }
@@ -47,6 +53,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         attachedDocuments: [ConversationDocumentReference]? = nil,
         retrievedSources: [MessageSource]? = nil,
         toolTrace: ToolCallTrace? = nil,
+        toolTraces: [ToolCallTrace]? = nil,
         generationStats: GenerationStats? = nil,
         timestamp: Date = Date()
     ) {
@@ -56,7 +63,11 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         self.attachedImages = attachedImages
         self.attachedDocuments = attachedDocuments
         self.retrievedSources = retrievedSources
-        self.toolTrace = toolTrace
+        if let toolTraces, !toolTraces.isEmpty {
+            self.toolTraces = toolTraces
+        } else {
+            self.toolTraces = toolTrace.map { [$0] }
+        }
         self.generationStats = generationStats
         self.timestamp = timestamp
     }
@@ -83,7 +94,14 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         } else {
             retrievedSources = nil
         }
-        toolTrace = try container.decodeIfPresent(ToolCallTrace.self, forKey: .toolTrace)
+        if let decodedTraces = try container.decodeIfPresent([ToolCallTrace].self, forKey: .toolTraces),
+           !decodedTraces.isEmpty {
+            toolTraces = decodedTraces
+        } else if let legacyTrace = try container.decodeIfPresent(ToolCallTrace.self, forKey: .toolTrace) {
+            toolTraces = [legacyTrace]
+        } else {
+            toolTraces = nil
+        }
         generationStats = try container.decodeIfPresent(GenerationStats.self, forKey: .generationStats)
         timestamp = try container.decode(Date.self, forKey: .timestamp)
     }
@@ -96,7 +114,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(attachedImages, forKey: .attachedImages)
         try container.encodeIfPresent(attachedDocuments, forKey: .attachedDocuments)
         try container.encodeIfPresent(retrievedSources, forKey: .retrievedSources)
-        try container.encodeIfPresent(toolTrace, forKey: .toolTrace)
+        try container.encodeIfPresent(toolTraces, forKey: .toolTraces)
         try container.encodeIfPresent(generationStats, forKey: .generationStats)
         try container.encode(timestamp, forKey: .timestamp)
     }

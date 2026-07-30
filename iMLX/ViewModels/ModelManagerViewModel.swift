@@ -3,6 +3,7 @@ import Foundation
 @Observable
 final class ModelManagerViewModel {
     var availableModels: [ModelInfo] = []
+    var externallyManagedModelIDs: Set<String> = []
     var errorMessage: String?
 
     private let appState: AppState
@@ -29,20 +30,26 @@ final class ModelManagerViewModel {
             let downloadedModels = await appState.reconcileModelCatalogState()
             let downloadedById = Dictionary(
                 uniqueKeysWithValues: downloadedModels.map { ($0.id, $0) })
+            let externallyManagedModelIDs = await downloadService.externallyManagedModelIDs()
 
             await MainActor.run {
-                var refreshedModels = self.availableModels
+                var refreshedModels = Constants.ModelRegistry.curatedModels
+                let importedModels = downloadedModels.filter { downloaded in
+                    !refreshedModels.contains(where: { $0.id == downloaded.id })
+                }
+                refreshedModels.append(contentsOf: importedModels)
+
                 for index in refreshedModels.indices {
                     let modelId = refreshedModels[index].id
                     if let downloaded = downloadedById[modelId] {
-                        refreshedModels[index].isDownloaded = true
-                        refreshedModels[index].localURL = downloaded.localURL
+                        refreshedModels[index] = downloaded
                     } else {
                         refreshedModels[index].isDownloaded = false
                         refreshedModels[index].localURL = nil
                     }
                 }
                 self.availableModels = refreshedModels
+                self.externallyManagedModelIDs = externallyManagedModelIDs
             }
         }
     }
@@ -125,6 +132,13 @@ final class ModelManagerViewModel {
 
     func delete(model: ModelInfo) {
         Task {
+            if await downloadService.isModelManagedExternally(modelID: model.id) {
+                await MainActor.run {
+                    self.errorMessage = String.appLocalized("models.external.delete_unavailable")
+                }
+                return
+            }
+
             if appState.loadedModelId == model.id {
                 await appState.inferenceService.unload()
                 await MainActor.run {

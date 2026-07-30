@@ -127,7 +127,7 @@ nonisolated struct ToolCatalog {
                     description: "Optional alert offset in minutes before the event."
                 )
             ],
-            metadata: ToolMetadata(executionClass: .local)
+            metadata: ToolMetadata(executionClass: .local, mutatesUserData: true)
         )
         let currentDateTimeTool = ToolDefinition(
             name: "current_datetime",
@@ -171,7 +171,7 @@ nonisolated struct ToolCatalog {
                     description: "Optional notes."
                 )
             ],
-            metadata: ToolMetadata(executionClass: .local)
+            metadata: ToolMetadata(executionClass: .local, mutatesUserData: true)
         )
         let timerCreateTool = ToolDefinition(
             name: "timer_create",
@@ -190,7 +190,7 @@ nonisolated struct ToolCatalog {
                     description: "Optional short timer title."
                 )
             ],
-            metadata: ToolMetadata(executionClass: .local)
+            metadata: ToolMetadata(executionClass: .local, mutatesUserData: true)
         )
         let contactsLookupTool = ToolDefinition(
             name: "contacts_lookup",

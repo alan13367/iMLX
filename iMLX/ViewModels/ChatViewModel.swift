@@ -22,6 +22,7 @@ struct ChatMemoryNotice: Equatable, Identifiable {
 enum ToolActivityStatus: Equatable {
     case planning
     case running(toolName: String, displayInput: String?)
+    case observing(text: String)
 }
 
 private enum ChatGenerationAbort: LocalizedError {
@@ -61,7 +62,7 @@ final class ChatViewModel {
     var isWebSearchEnabled: Bool = false
     var toolNotice: String?
     var toolActivityStatus: ToolActivityStatus?
-    var currentToolTrace: ToolCallTrace?
+    var currentToolTraces: [ToolCallTrace] = []
     var lastFailedUserMessageId: UUID?
 
     var canUseThinking: Bool {
@@ -117,7 +118,7 @@ final class ChatViewModel {
         isWebSearchEnabled = conversation.webSearchEnabled
         toolNotice = nil
         toolActivityStatus = nil
-        currentToolTrace = nil
+        currentToolTraces = []
         lastFailedUserMessageId = nil
         updateThinkingAvailability(for: resolvedCurrentModel())
     }
@@ -184,10 +185,11 @@ final class ChatViewModel {
     private func performSendMessage(_ text: String, allowPostReplyTasks: Bool, replyMode: ReplyMode) async -> ChatMessage? {
         let loadedModel = resolvedCurrentModel()
         let history = promptHistory(from: messages, for: loadedModel)
-        Self.debugToolLog(
-            "send start: model=\(loadedModel?.displayName ?? "none") webSearchEnabled=\(isWebSearchEnabled) " +
-            "historyCount=\(history.count) userMessage=\(Self.sanitizedToolLogSnippet(text))"
-        )
+        ToolCallingDebugLog.section("send")
+        ToolCallingDebugLog.line("model", loadedModel?.displayName ?? "none")
+        ToolCallingDebugLog.line("webSearch", isWebSearchEnabled ? "on" : "off")
+        ToolCallingDebugLog.line("history", "\(history.count)")
+        ToolCallingDebugLog.line("message", ToolCallingDebugLog.sanitized(text))
         let userMessage = ChatMessage(
             role: .user,
             content: text,
@@ -208,6 +210,7 @@ final class ChatViewModel {
         errorMessage = nil
         toolNotice = nil
         toolActivityStatus = nil
+        currentToolTraces = []
         lastFailedUserMessageId = nil
         pendingImages.removeAll()
         pendingDocuments.removeAll()
@@ -228,8 +231,9 @@ final class ChatViewModel {
         var lastResponseFlush = Date.distantPast
         var shouldForceFinalAnswerFollowUp = false
         var peakMemoryMB = await self.currentMemoryUsage()
-        var toolResult: ToolExecutionResult?
-        var toolTrace: ToolCallTrace?
+        var toolTraces: [ToolCallTrace] = []
+        var completedToolSteps: [ToolTurnStep] = []
+        var aggregatedToolTurnResult = AggregatedToolTurnResult(contextBlock: "", sources: [])
 
         @MainActor
         func enforceMemorySafety() throws {
@@ -280,6 +284,64 @@ final class ChatViewModel {
             lastResponseFlush = now
         }
 
+        @MainActor
+        func streamToolObservation(
+            userMessage: String,
+            completedSteps: [ToolTurnStep]
+        ) async throws {
+            ToolCallingDebugLog.line("observe", "start · after \(completedSteps.last?.call.toolName ?? "tool")")
+            var rawObservation = ""
+            toolActivityStatus = .observing(text: "")
+            let prompt = appState.toolCallingService.toolObservationPrompt(
+                userMessage: userMessage,
+                completedSteps: completedSteps
+            )
+            let stream = await self.inferenceService.generate(
+                prompt: prompt,
+                thinkingEnabled: false,
+                history: [],
+                systemPrompt: Constants.ToolCalling.toolObservationSystemPrompt,
+                maxTokens: Constants.ToolCalling.toolObservationMaxTokens,
+                temperature: Constants.ToolCalling.toolObservationTemperature,
+                topP: topP,
+                repetitionPenalty: repetitionPenalty,
+                modelName: loadedModel?.displayName,
+                profileRunLabel: "Tool Observation",
+                profilingContext: LLMProfilingRunContext(
+                    model: loadedModel,
+                    maxTokens: Constants.ToolCalling.toolObservationMaxTokens,
+                    temperature: Constants.ToolCalling.toolObservationTemperature,
+                    topP: topP,
+                    repetitionPenalty: repetitionPenalty,
+                    thinkingEnabled: false
+                )
+            )
+
+            for try await token in stream {
+                try Task.checkCancellation()
+                rawObservation += token
+                let visible = Self.sanitizedToolObservationText(rawObservation, isStreaming: true)
+                toolActivityStatus = .observing(text: visible)
+                tokenCount += 1
+            }
+
+            let cleaned = Self.sanitizedToolObservationText(rawObservation, isStreaming: false)
+            if !cleaned.isEmpty,
+               !toolTraces.isEmpty {
+                toolTraces[toolTraces.count - 1].followUpReasoning = cleaned
+                currentToolTraces = toolTraces
+            }
+            toolActivityStatus = nil
+            await updatePeakMemoryUsage()
+            try enforceMemorySafety()
+            ToolCallingDebugLog.line(
+                "observe",
+                cleaned.isEmpty
+                    ? "done · (empty after sanitize)"
+                    : "done · \(ToolCallingDebugLog.sanitized(cleaned, limit: 120))"
+            )
+        }
+
         var completedAssistantMessage: ChatMessage?
 
         do {
@@ -290,14 +352,8 @@ final class ChatViewModel {
                 context: toolContext
             )
             if !tools.isEmpty {
-                Self.debugToolLog("tool stage enabled: registeredTools=\(tools.map(\.name).joined(separator: ","))")
+                ToolCallingDebugLog.line("tools", ToolCallingDebugLog.joinedNames(tools.map(\.name)))
 
-                // Run the synchronous preflight first. For high-confidence
-                // turns (pasted URL, calendar/doc/OCR/live-data phrases) and
-                // for clearly tool-irrelevant turns (greetings, math, casual
-                // questions) this returns a final decision without paying for
-                // a planner inference round-trip — the dominant source of
-                // perceived "thinking" lag on simple prompts.
                 let preflight = appState.toolCallingService.preflightDecision(
                     userMessage: text,
                     context: toolContext,
@@ -305,49 +361,64 @@ final class ChatViewModel {
                     history: history
                 )
 
-                let decision: ToolDecision
+                let initialDecision: ToolDecision
                 switch preflight {
                 case .skip(let resolved):
-                    Self.debugToolLog("planner stage skipped via preflight decision=\(Self.describeDecision(resolved))")
-                    decision = resolved
+                    // Fast-path / skip reasons are logged inside preflightDecision.
+                    initialDecision = resolved
 
                 case .deliberate:
+                    ToolCallingDebugLog.line("preflight", "deliberate → planner")
                     toolActivityStatus = .planning
                     let plannerOutcome = try await appState.toolCallingService.plan(
                         userMessage: text,
                         history: history,
                         tools: tools,
                         context: toolContext,
+                        thinkingEnabled: thinkingEnabled,
                         using: inferenceService
                     )
-                    decision = appState.toolCallingService.resolvedDecision(
+                    initialDecision = appState.toolCallingService.resolvedDecision(
                         plannerOutcome: plannerOutcome,
                         userMessage: text,
                         context: toolContext,
                         tools: tools,
                         history: history
                     )
+                    ToolCallingDebugLog.line("resolved", ToolCallingDebugLog.describe(initialDecision))
                 }
 
-                switch decision {
-                case .none:
-                    Self.debugToolLog("planner decision: none")
-                    toolActivityStatus = nil
+                var nextDecision = appState.toolCallingService.validatedTurnDecision(
+                    initialDecision,
+                    originalUserMessage: text,
+                    context: toolContext,
+                    tools: tools,
+                    completedSteps: completedToolSteps,
+                    authorizationHistory: history
+                )
+                if nextDecision != initialDecision {
+                    ToolCallingDebugLog.line("validated", ToolCallingDebugLog.describe(nextDecision))
+                }
+                let executors = await appState.toolCallingService.executors()
+                let toolTurnPolicy = deviceCapabilityService.toolTurnPolicy
 
-                case .call(let request):
+                while toolTurnPolicy.allowsAnotherCall(after: completedToolSteps.count),
+                      case .call(let request) = nextDecision {
+                    try Task.checkCancellation()
                     let displayInput = self.toolDisplayInput(for: request, context: toolContext)
-                    Self.debugToolLog(
-                        "planner decision: call tool=\(request.toolName) input=\(Self.sanitizedToolLogSnippet(displayInput ?? "(none)"))"
+                    ToolCallingDebugLog.line(
+                        "call",
+                        "\(request.toolName) · \(ToolCallingDebugLog.sanitized(displayInput ?? "(none)", limit: 100))"
                     )
                     toolActivityStatus = .running(toolName: request.toolName, displayInput: displayInput)
-                    let executors = await appState.toolCallingService.executors()
                     let executionResult = try await appState.toolCallingService.execute(
                         call: request,
                         tools: executors,
                         context: toolContext
                     )
-                    toolResult = executionResult
-                    toolTrace = ToolCallTrace(
+                    let step = ToolTurnStep(call: request, result: executionResult)
+                    completedToolSteps.append(step)
+                    let trace = ToolCallTrace(
                         toolName: request.toolName,
                         displayInput: displayInput,
                         status: executionResult.status,
@@ -355,22 +426,72 @@ final class ChatViewModel {
                         success: executionResult.success,
                         sourceCount: executionResult.sources.count
                     )
-                    Self.debugToolLog(
-                        "tool result: tool=\(request.toolName) status=\(executionResult.status.rawValue) " +
-                        "sources=\(executionResult.sources.count) contextChars=\(executionResult.contextBlock.count) " +
-                        "message=\(Self.sanitizedToolLogSnippet(executionResult.message ?? "nil"))"
-                    )
+                    toolTraces.append(trace)
                     if executionResult.status != .success {
                         toolNotice = self.toolFailureNotice(result: executionResult, context: toolContext)
                     }
-                    currentToolTrace = toolTrace
+                    currentToolTraces.append(trace)
                     toolActivityStatus = nil
+                    await updatePeakMemoryUsage()
+                    try enforceMemorySafety()
+
+                    if let definition = tools.first(where: { $0.name == request.toolName }),
+                       toolTurnPolicy.shouldStop(after: definition) {
+                        ToolCallingDebugLog.line("turn", "stop · mutation completed")
+                        break
+                    }
+                    guard toolTurnPolicy.allowsAnotherCall(after: completedToolSteps.count) else {
+                        break
+                    }
+
+                    let continuationTools = appState.toolCallingService.continuationTools(
+                        from: tools,
+                        originalUserMessage: text,
+                        completedSteps: completedToolSteps,
+                        authorizationHistory: history
+                    )
+                    guard !continuationTools.isEmpty else { break }
+
+                    toolActivityStatus = .planning
+                    let plannerOutcome = try await appState.toolCallingService.plan(
+                        userMessage: text,
+                        history: history,
+                        tools: continuationTools,
+                        context: toolContext,
+                        completedSteps: completedToolSteps,
+                        thinkingEnabled: thinkingEnabled,
+                        using: inferenceService
+                    )
+                    nextDecision = appState.toolCallingService.resolvedContinuationDecision(
+                        plannerOutcome: plannerOutcome,
+                        originalUserMessage: text,
+                        context: toolContext,
+                        tools: continuationTools,
+                        completedSteps: completedToolSteps,
+                        authorizationHistory: history
+                    )
+                    ToolCallingDebugLog.line("continue", ToolCallingDebugLog.describe(nextDecision))
+
+                    // Only narrate mid-turn when another tool will run. Observing before
+                    // the planner decides produces a duplicate answer on single-tool turns.
+                    if case .call = nextDecision {
+                        try await streamToolObservation(
+                            userMessage: text,
+                            completedSteps: completedToolSteps
+                        )
+                    }
                 }
+                toolActivityStatus = nil
             } else {
-                Self.debugToolLog("tool stage skipped: no eligible tools")
+                ToolCallingDebugLog.line("tools", "(none eligible)")
             }
 
             try Task.checkCancellation()
+
+            aggregatedToolTurnResult = appState.toolCallingService.aggregatedResults(
+                for: completedToolSteps,
+                maxCharacters: self.toolContextCharacterLimit(for: loadedModel)
+            )
 
             let memoryRetrievalResult = await self.appState.retrieveMemoryContext(
                 for: text,
@@ -384,18 +505,7 @@ final class ChatViewModel {
                 memoryRetrievalResult.contextBlock,
                 for: loadedModel
             )
-            let toolContextBlock: String
-            if let toolResult = toolResult,
-               toolResult.status == .noContent,
-               let message = toolResult.message,
-               !message.isEmpty {
-                toolContextBlock = message
-            } else {
-                toolContextBlock = self.promptToolContext(
-                    toolResult?.contextBlock ?? "",
-                    for: loadedModel
-                )
-            }
+            let toolContextBlock = aggregatedToolTurnResult.contextBlock
             let toolAugmentedUserPrompt = self.promptWithToolContext(
                 userPrompt: text,
                 toolContext: toolContextBlock
@@ -406,9 +516,9 @@ final class ChatViewModel {
                 userPrompt: toolAugmentedUserPrompt,
                 memoryContext: memoryContext
             )
-            Self.debugToolLog(
-                "generation context: tool=\(toolResult?.toolName ?? "none") toolSources=\(toolResult?.sources.count ?? 0) " +
-                "toolContextChars=\(toolContextBlock.count)"
+            ToolCallingDebugLog.line(
+                "generate",
+                "tools=\(ToolCallingDebugLog.joinedNames(completedToolSteps.map(\.call.toolName))) · sources=\(aggregatedToolTurnResult.sources.count) · context=\(toolContextBlock.count) chars"
             )
             let effectiveSystemPrompt = self.mergedSystemPrompt(
                 base: systemPrompt,
@@ -546,14 +656,19 @@ final class ChatViewModel {
                 let assistantMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
-                        retrievedSources: combinedSources(toolResult?.sources ?? []),
-                        toolTrace: toolTrace,
+                        retrievedSources: combinedSources(aggregatedToolTurnResult.sources),
+                        toolTraces: toolTraces.isEmpty ? nil : toolTraces,
                         generationStats: generationStats
                     )
-                Self.debugToolLog(
-                    "send complete: responseChars=\(accumulatedResponse.count) " +
-                    "toolTrace=\(toolTrace.map(Self.describeToolTrace(_:)) ?? "nil")"
-                )
+                ToolCallingDebugLog.section("done")
+                ToolCallingDebugLog.line("response", "\(accumulatedResponse.count) chars")
+                if toolTraces.isEmpty {
+                    ToolCallingDebugLog.line("traces", "(none)")
+                } else {
+                    for trace in toolTraces {
+                        ToolCallingDebugLog.line("trace", ToolCallingDebugLog.describe(trace: trace))
+                    }
+                }
                 self.messages.append(assistantMessage)
                 if allowPostReplyTasks {
                     self.scheduleMemoryExtraction(
@@ -572,12 +687,13 @@ final class ChatViewModel {
                     )
                 }
             } else {
-                Self.debugToolLog("send complete: empty assistant response")
+                ToolCallingDebugLog.section("done")
+                ToolCallingDebugLog.line("response", "empty")
                 self.saveCurrentConversation()
             }
             Haptics.impactMedium()
         } catch is CancellationError {
-            Self.debugToolLog("send cancelled")
+            ToolCallingDebugLog.section("cancelled")
             await syncLatestLLMExecutionProfile()
             toolActivityStatus = nil
             flushResponseToUI(force: true)
@@ -587,8 +703,8 @@ final class ChatViewModel {
                 let partialMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
-                        retrievedSources: combinedSources(toolResult?.sources ?? []),
-                        toolTrace: toolTrace,
+                        retrievedSources: combinedSources(aggregatedToolTurnResult.sources),
+                        toolTraces: toolTraces.isEmpty ? nil : toolTraces,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                             totalTokens: tokenCount,
@@ -602,7 +718,8 @@ final class ChatViewModel {
             }
             self.saveCurrentConversation()
         } catch {
-            Self.debugToolLog("send failed: \(String(describing: error))")
+            ToolCallingDebugLog.section("failed")
+            ToolCallingDebugLog.line("error", String(describing: error))
             await syncLatestLLMExecutionProfile()
             toolActivityStatus = nil
             flushResponseToUI(force: true)
@@ -612,8 +729,8 @@ final class ChatViewModel {
                 let partialMessage = ChatMessage(
                         role: .assistant,
                         content: accumulatedResponse,
-                        retrievedSources: combinedSources(toolResult?.sources ?? []),
-                        toolTrace: toolTrace,
+                        retrievedSources: combinedSources(aggregatedToolTurnResult.sources),
+                        toolTraces: toolTraces.isEmpty ? nil : toolTraces,
                         generationStats: GenerationStats(
                             tokensPerSecond: Double(tokenCount) / max(elapsed, 0.001),
                             totalTokens: tokenCount,
@@ -634,7 +751,7 @@ final class ChatViewModel {
         self.currentResponse = ""
         self.currentParsedResponse = .empty
         self.toolActivityStatus = nil
-        self.currentToolTrace = nil
+        self.currentToolTraces = []
         self.isGenerating = false
         self.generationTask = nil
         self.shouldDiscardCancelledGeneration = false
@@ -1073,36 +1190,6 @@ final class ChatViewModel {
         }
     }
 
-    private static func debugToolLog(_ message: String) {
-#if DEBUG
-        print("[ChatTooling] \(message)")
-#endif
-    }
-
-    private static func sanitizedToolLogSnippet(_ text: String, limit: Int = 180) -> String {
-        let compact = text
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if compact.count <= limit {
-            return compact
-        }
-        return String(compact.prefix(limit)) + "..."
-    }
-
-    private static func describeDecision(_ decision: ToolDecision) -> String {
-        switch decision {
-        case .none:
-            return "none"
-        case .call(let request):
-            return "call(\(request.toolName))"
-        }
-    }
-
-    private static func describeToolTrace(_ trace: ToolCallTrace) -> String {
-        "tool=\(trace.toolName), input=\(trace.displayInput ?? "nil"), status=\(trace.status?.rawValue ?? "nil"), success=\(trace.success), " +
-        "sources=\(trace.sourceCount), duration=\(trace.durationSeconds.map { String(format: "%.2f", $0) } ?? "nil")s"
-    }
-
     /// Explicit memory commands use "remember …" / "forget …". Reminder creation is routed separately via
     /// ToolCallingService using phrases like "remind me to …" (requires `to`), which avoids colliding with
     /// "remind me of …" style memory prompts.
@@ -1474,26 +1561,53 @@ final class ChatViewModel {
             }
     }
 
-    private func promptToolContext(_ context: String, for model: ModelInfo?) -> String {
-        guard isMemoryConstrainedLargeModel(model) else { return context }
-        let characterLimit = Constants.Generation.memoryConstrainedDocumentContextCharacters
-        guard context.count > characterLimit else { return context }
-        return String(context.prefix(characterLimit))
+    private func toolContextCharacterLimit(for model: ModelInfo?) -> Int {
+        isMemoryConstrainedLargeModel(model)
+            ? Constants.Generation.memoryConstrainedDocumentContextCharacters
+            : Constants.ToolCalling.maxCombinedToolResultContextCharacters
     }
 
-    private func promptWithToolContext(userPrompt: String, toolContext: String) -> String {
+    private func promptWithToolContext(
+        userPrompt: String,
+        toolContext: String
+    ) -> String {
         let trimmedToolContext = toolContext.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedToolContext.isEmpty else { return userPrompt }
 
         return """
-        Use the tool result below to answer the user's request. The tool result is available content; do not ask the user to provide it again. If the tool result is insufficient, say what is missing.
+        Use the tool results below to answer the user's request. The results are available content; do not ask the user to provide them again. If the results are insufficient, say what is missing. Answer directly in plain prose — do not narrate analysis steps, system instructions, or hidden reasoning.
 
-        Tool result:
+        Tool results:
         \(trimmedToolContext)
 
         User request:
         \(userPrompt)
         """
+    }
+
+    /// Mid-turn observations must stay short and user-facing. Thinking models often
+    /// emit `<think>` wrappers even when thinking is disabled for the call.
+    private static func sanitizedToolObservationText(_ raw: String, isStreaming: Bool) -> String {
+        let parsed = ParsedAssistantContent(raw, isStreaming: isStreaming)
+        let candidate: String
+        if !parsed.response.isEmpty {
+            candidate = parsed.response
+        } else if let thinking = parsed.thinking, !thinking.isEmpty {
+            candidate = thinking
+        } else {
+            candidate = raw
+        }
+
+        let compact = candidate
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !compact.isEmpty else { return "" }
+
+        let limit = 220
+        if compact.count <= limit {
+            return compact
+        }
+        return String(compact.prefix(limit)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
     }
 
     private func promptWithMemoryContext(userPrompt: String, memoryContext: String) -> String {

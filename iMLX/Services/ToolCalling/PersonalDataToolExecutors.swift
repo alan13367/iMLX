@@ -84,10 +84,7 @@ struct RemindersCreateToolExecutor: ToolExecutor {
 
         let dueDate: Date?
         if let due = arguments["due"]?.trimmingCharacters(in: .whitespacesAndNewlines), !due.isEmpty {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime]
-            formatter.timeZone = .current
-            dueDate = formatter.date(from: due)
+            dueDate = ToolDueDateParser.parseISO8601DateTime(due)
         } else {
             dueDate = nil
         }

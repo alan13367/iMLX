@@ -24,6 +24,7 @@ nonisolated final class DeviceCapabilityService {
     let physicalMemoryGB: Int
     let tier: DeviceTier
     let usableMemoryEstimateGB: Int
+    let toolTurnPolicy: ToolTurnPolicy
 
     init(hostMemoryProfile: HostMemoryProfile = .current) {
         let physicalGB = hostMemoryProfile.physicalMemoryGB
@@ -31,6 +32,7 @@ nonisolated final class DeviceCapabilityService {
         self.usableMemoryEstimateGB = Int(
             hostMemoryProfile.usableMemoryEstimateBytes / HostMemoryProfile.gigabyte
         )
+        self.toolTurnPolicy = ToolTurnPolicy(platformClass: hostMemoryProfile.platformClass)
 
         if physicalGB >= 20 {
             self.tier = .tier24GB

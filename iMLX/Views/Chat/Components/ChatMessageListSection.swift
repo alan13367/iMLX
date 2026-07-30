@@ -6,7 +6,7 @@ struct ChatMessageListSection: View {
     let isGenerating: Bool
     let parsedResponse: ParsedAssistantContent
     let toolActivityStatus: ToolActivityStatus?
-    let currentToolTrace: ToolCallTrace?
+    let currentToolTraces: [ToolCallTrace]
     let lastFailedUserMessageId: UUID?
     let conversationResetKey: UUID
     let onTranscriptTap: () -> Void
@@ -51,17 +51,10 @@ struct ChatMessageListSection: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
 
-                        if let liveToolPhase {
-                            MessageActivityView(
-                                toolPhase: liveToolPhase,
-                                thinking: nil,
-                                isStreaming: true,
-                                isWaitingForAnswer: true,
-                                isThinkingExpanded: .constant(false)
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id("toolActivity")
-                            .transition(.opacity)
+                        if !liveAgenticSegments.isEmpty {
+                            liveAgenticTurn
+                                .id("toolActivity")
+                                .transition(.opacity)
                         }
 
                         if !currentResponse.isEmpty {
@@ -120,7 +113,9 @@ struct ChatMessageListSection: View {
                 .task(id: streamingAutoscrollKey) {
                     guard streamingAutoscrollEnabled else { return }
                     guard isGenerating else { return }
-                    guard !currentResponse.isEmpty else { return }
+                    guard !currentResponse.isEmpty || liveObservationCharacterCount > 0 || !liveAgenticSegments.isEmpty else {
+                        return
+                    }
                     scheduleAutoscroll(using: proxy)
                 }
                 .task(id: isGenerating) {
@@ -162,28 +157,89 @@ struct ChatMessageListSection: View {
         )
     }
 
-    /// In-flight tool activity. Falls back to the just-completed trace so the
-    /// summary line stays visible while the answer streams in behind it.
-    private var liveToolPhase: MessageActivityToolPhase? {
+    private enum LiveAgenticSegment: Equatable {
+        case tools([MessageActivityToolPhase])
+        case prose(String, isStreaming: Bool)
+    }
+
+    /// Live agentic turn: tool → assistant prose → tool → … (final answer streams separately).
+    private var liveAgenticSegments: [LiveAgenticSegment] {
+        guard isGenerating else { return [] }
+        var segments: [LiveAgenticSegment] = []
+
+        for (index, trace) in currentToolTraces.enumerated() {
+            segments.append(.tools([.completed(trace)]))
+            if case .observing = toolActivityStatus,
+               index == currentToolTraces.count - 1 {
+                continue
+            }
+            if let note = trace.followUpReasoning, !note.isEmpty {
+                segments.append(.prose(note, isStreaming: false))
+            }
+        }
+
         if let toolActivityStatus {
             switch toolActivityStatus {
             case .planning:
-                return .planning
+                segments.append(.tools([.planning]))
             case .running(let toolName, let displayInput):
-                return .running(toolName: toolName, displayInput: displayInput)
+                segments.append(.tools([.running(toolName: toolName, displayInput: displayInput)]))
+            case .observing(let text):
+                if !text.isEmpty {
+                    segments.append(.prose(text, isStreaming: true))
+                }
             }
         }
-        if let currentToolTrace, isGenerating {
-            return .completed(currentToolTrace)
+
+        return segments
+    }
+
+    private var liveAgenticTurn: some View {
+        VStack(alignment: .leading, spacing: ChatMetrics.messageSectionSpacing) {
+            ForEach(Array(liveAgenticSegments.enumerated()), id: \.offset) { index, segment in
+                switch segment {
+                case .tools(let phases):
+                    MessageActivityView(
+                        toolPhases: phases,
+                        thinking: nil,
+                        isStreaming: true,
+                        isWaitingForAnswer: true,
+                        isThinkingExpanded: .constant(false)
+                    )
+                case .prose(let text, let streaming):
+                    AssistantMessageText(
+                        text: text,
+                        isStreaming: streaming,
+                        streamID: streaming ? streamingMessageId : liveProseID(index),
+                        linkPhoneNumbers: false
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
-        return nil
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func liveProseID(_ index: Int) -> UUID {
+        UUID(uuidString: String(format: "00000000-0B5E-4000-8000-%012x", index)) ?? streamingMessageId
+    }
+
+    private var liveObservationCharacterCount: Int {
+        guard case .observing(let text) = toolActivityStatus else { return 0 }
+        return text.count
     }
 
     private var streamingAutoscrollKey: Int {
-        guard !currentResponse.isEmpty else { return 0 }
-        let visibleCharacterCount = parsedResponse.response.isEmpty
-            ? currentResponse.count
-            : parsedResponse.response.count
+        let visibleCharacterCount: Int
+        if !currentResponse.isEmpty {
+            visibleCharacterCount = parsedResponse.response.isEmpty
+                ? currentResponse.count
+                : parsedResponse.response.count
+        } else if liveObservationCharacterCount > 0 {
+            visibleCharacterCount = liveObservationCharacterCount
+        } else {
+            return liveAgenticSegments.count
+        }
         let stride = visibleCharacterCount >= Constants.UI.streamingLongResponseCharacterThreshold
             ? Constants.UI.streamingAutoscrollLongCharacterStride
             : Constants.UI.streamingAutoscrollCharacterStride
@@ -245,7 +301,7 @@ struct ChatMessageListSection: View {
 
     private func shouldResumeAutoscrollWhenPinned(_ state: ChatScrollState? = nil) -> Bool {
         guard isGenerating else { return false }
-        guard !currentResponse.isEmpty else { return false }
+        guard !currentResponse.isEmpty || liveObservationCharacterCount > 0 else { return false }
         guard !streamingAutoscrollEnabled else { return false }
         return state?.isPinnedToBottom ?? scrollPinnedToBottom
     }

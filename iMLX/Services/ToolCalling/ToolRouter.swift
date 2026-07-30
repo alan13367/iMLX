@@ -20,7 +20,7 @@ extension ToolCallingService {
             return nil
         }
 
-        Self.debugLog("heuristic fallback selected web_search for obvious live-data request")
+        ToolCallingDebugLog.line("fallback", "web_search · live-data")
         return .call(ToolCallRequest(toolName: "web_search", arguments: arguments))
     }
 
@@ -41,7 +41,7 @@ extension ToolCallingService {
                 for: readURLTool,
                 context: context
            ) {
-            Self.debugLog("deterministic arbitration selected read_url for pasted URL")
+            ToolCallingDebugLog.line("resolve", "read_url · pasted URL")
             return .call(ToolCallRequest(toolName: readURLTool.name, arguments: arguments))
         }
 
@@ -52,7 +52,7 @@ extension ToolCallingService {
                 for: documentTool,
                 context: context
            ) {
-            Self.debugLog("deterministic arbitration selected document_synthesize for attached document request")
+            ToolCallingDebugLog.line("resolve", "document_synthesize · attached docs")
             return .call(ToolCallRequest(toolName: documentTool.name, arguments: arguments))
         }
 
@@ -98,7 +98,7 @@ extension ToolCallingService {
                 for: ocrTool,
                 context: context
            ) {
-            Self.debugLog("heuristic fallback selected ocr_image_text for text-focused image request")
+            ToolCallingDebugLog.line("fallback", "ocr_image_text")
             return .call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments))
         }
 
@@ -109,7 +109,7 @@ extension ToolCallingService {
                 for: timerCreateTool,
                 context: context
            ) {
-            Self.debugLog("heuristic fallback selected timer_create for explicit timer request")
+            ToolCallingDebugLog.line("fallback", "timer_create")
             return .call(ToolCallRequest(toolName: timerCreateTool.name, arguments: arguments))
         }
 
@@ -120,7 +120,7 @@ extension ToolCallingService {
                 for: calendarCreateTool,
                 context: context
            ) {
-            Self.debugLog("heuristic fallback selected calendar_create for explicit event request")
+            ToolCallingDebugLog.line("fallback", "calendar_create")
             return .call(ToolCallRequest(toolName: calendarCreateTool.name, arguments: arguments))
         }
 
@@ -131,7 +131,7 @@ extension ToolCallingService {
                 for: remindersCreateTool,
                 context: context
            ) {
-            Self.debugLog("heuristic fallback selected reminders_create for explicit reminder request")
+            ToolCallingDebugLog.line("fallback", "reminders_create")
             return .call(ToolCallRequest(toolName: remindersCreateTool.name, arguments: arguments))
         }
 
@@ -142,7 +142,7 @@ extension ToolCallingService {
                 for: contactsLookupTool,
                 context: context
            ) {
-            Self.debugLog("heuristic fallback selected contacts_lookup for contact request")
+            ToolCallingDebugLog.line("fallback", "contacts_lookup")
             return .call(ToolCallRequest(toolName: contactsLookupTool.name, arguments: arguments))
         }
 
@@ -154,14 +154,14 @@ extension ToolCallingService {
                 for: calendarTool,
                 context: context
            ) {
-            Self.debugLog("heuristic fallback selected calendar_brief for schedule request")
+            ToolCallingDebugLog.line("fallback", "calendar_brief")
             return .call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments))
         }
 
         if let dateTimeTool = toolsByName["current_datetime"],
            shouldForceCurrentDateTime(for: userMessage),
            case .success(let arguments) = validatedArguments([:], for: dateTimeTool, context: context) {
-            Self.debugLog("heuristic fallback selected current_datetime for time/date question")
+            ToolCallingDebugLog.line("fallback", "current_datetime")
             return .call(ToolCallRequest(toolName: dateTimeTool.name, arguments: arguments))
         }
 
@@ -173,7 +173,7 @@ extension ToolCallingService {
                 for: remindersBriefTool,
                 context: context
            ) {
-            Self.debugLog("heuristic fallback selected reminders_brief for todo/reminder request")
+            ToolCallingDebugLog.line("fallback", "reminders_brief")
             return .call(ToolCallRequest(toolName: remindersBriefTool.name, arguments: arguments))
         }
 
@@ -197,10 +197,9 @@ extension ToolCallingService {
     ///
     /// Runs deterministic arbitration first (pasted URL, document/OCR/calendar/
     /// live-data heuristics) and short-circuits to a final `ToolDecision` when
-    /// the answer is unambiguous. Returns `.deliberate` only when the turn has
-    /// genuinely ambiguous context that an LLM might disambiguate (attached
-    /// docs/images without a clear request, an ambiguous single URL,
-    /// web-search-leaning language without a strong heuristic match).
+    /// the answer is unambiguous. Returns `.deliberate` for any remaining turn
+    /// that is not clearly tool-independent, so the planner can choose a tool
+    /// when heuristics did not confidently match.
     ///
     /// This keeps short, simple questions ("hi", "what's 2+2") from paying for
     /// a full planner inference round-trip just to be told `.none`.
@@ -211,7 +210,7 @@ extension ToolCallingService {
         history: [ChatMessage] = []
     ) -> ToolPreflight {
         guard !tools.isEmpty else {
-            Self.debugLog("preflight skip: no enabled tools (decision=none)")
+            ToolCallingDebugLog.line("reason", "no enabled tools")
             return .skip(.none)
         }
 
@@ -221,7 +220,7 @@ extension ToolCallingService {
         // another web tool arbitrarily choose one; normal generation can ask
         // the user which URL they want read.
         if context.detectedPublicURLs.count > 1 {
-            Self.debugLog("preflight skipped tools: multiple URLs require clarification")
+            ToolCallingDebugLog.line("reason", "multiple URLs · ask which to read")
             return .skip(.none)
         }
 
@@ -234,7 +233,7 @@ extension ToolCallingService {
                 for: readURLTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected read_url for pasted URL (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "read_url · pasted URL")
             return .skip(.call(ToolCallRequest(toolName: readURLTool.name, arguments: arguments)))
         }
 
@@ -248,7 +247,7 @@ extension ToolCallingService {
                 for: webSearchTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected web_search for explicit search request (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "web_search · explicit")
             return .skip(.call(ToolCallRequest(toolName: webSearchTool.name, arguments: arguments)))
         }
 
@@ -260,7 +259,7 @@ extension ToolCallingService {
                 for: documentTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected document_synthesize (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "document_synthesize")
             return .skip(.call(ToolCallRequest(toolName: documentTool.name, arguments: arguments)))
         }
 
@@ -272,7 +271,7 @@ extension ToolCallingService {
                 for: ocrTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected ocr_image_text (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "ocr_image_text")
             return .skip(.call(ToolCallRequest(toolName: ocrTool.name, arguments: arguments)))
         }
 
@@ -284,7 +283,7 @@ extension ToolCallingService {
                 for: timerCreateTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected timer_create (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "timer_create")
             return .skip(.call(ToolCallRequest(toolName: timerCreateTool.name, arguments: arguments)))
         }
 
@@ -296,7 +295,7 @@ extension ToolCallingService {
                 for: calendarCreateTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected calendar_create (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "calendar_create")
             return .skip(.call(ToolCallRequest(toolName: calendarCreateTool.name, arguments: arguments)))
         }
 
@@ -310,7 +309,7 @@ extension ToolCallingService {
                 for: remindersCreateTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected reminders_create (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "reminders_create")
             return .skip(.call(ToolCallRequest(toolName: remindersCreateTool.name, arguments: arguments)))
         }
 
@@ -322,11 +321,13 @@ extension ToolCallingService {
                 for: contactsLookupTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected contacts_lookup (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "contacts_lookup")
             return .skip(.call(ToolCallRequest(toolName: contactsLookupTool.name, arguments: arguments)))
         }
 
-        // 5d. Calendar-shaped request.
+        // 5d. Calendar-shaped request. If the user also asked for the device
+        // clock, prefer current_datetime first so a multi-tool turn can answer
+        // both parts instead of fast-pathing only the calendar brief.
         if let calendarTool = toolsByName["calendar_brief"],
            let range = heuristicCalendarRange(for: userMessage),
            case .success(let arguments) = validatedArguments(
@@ -334,7 +335,17 @@ extension ToolCallingService {
                 for: calendarTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected calendar_brief range=\(range.rawValue) (planner skipped)")
+            if let dateTimeTool = toolsByName["current_datetime"],
+               shouldForceCurrentDateTime(for: userMessage),
+               case .success(let dateTimeArguments) = validatedArguments(
+                    [:],
+                    for: dateTimeTool,
+                    context: context
+               ) {
+                ToolCallingDebugLog.line("preflight", "compound time+calendar → current_datetime first")
+                return .skip(.call(ToolCallRequest(toolName: dateTimeTool.name, arguments: dateTimeArguments)))
+            }
+            ToolCallingDebugLog.line("fast-path", "calendar_brief · \(range.rawValue)")
             return .skip(.call(ToolCallRequest(toolName: calendarTool.name, arguments: arguments)))
         }
 
@@ -346,7 +357,7 @@ extension ToolCallingService {
                 for: dateTimeTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected current_datetime (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "current_datetime")
             return .skip(.call(ToolCallRequest(toolName: dateTimeTool.name, arguments: arguments)))
         }
 
@@ -358,7 +369,17 @@ extension ToolCallingService {
                 for: remindersBriefTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected reminders_brief range=\(range.rawValue) (planner skipped)")
+            if let dateTimeTool = toolsByName["current_datetime"],
+               shouldForceCurrentDateTime(for: userMessage),
+               case .success(let dateTimeArguments) = validatedArguments(
+                    [:],
+                    for: dateTimeTool,
+                    context: context
+               ) {
+                ToolCallingDebugLog.line("preflight", "compound time+reminders → current_datetime first")
+                return .skip(.call(ToolCallRequest(toolName: dateTimeTool.name, arguments: dateTimeArguments)))
+            }
+            ToolCallingDebugLog.line("fast-path", "reminders_brief · \(range.rawValue)")
             return .skip(.call(ToolCallRequest(toolName: remindersBriefTool.name, arguments: arguments)))
         }
 
@@ -385,19 +406,20 @@ extension ToolCallingService {
                 for: webSearchTool,
                 context: context
            ) {
-            Self.debugLog("preflight selected web_search via explicit/live-data heuristic (planner skipped)")
+            ToolCallingDebugLog.line("fast-path", "web_search · live-data")
             return .skip(.call(ToolCallRequest(toolName: webSearchTool.name, arguments: arguments)))
         }
 
-        // 7. Quick reject: nothing in the turn could plausibly need a tool.
-        //    Skip the planner entirely and let the model answer directly.
+        // 7. Quick reject only for turns that clearly do not need tools.
+        //    Heuristics above are a confident fast path; everything else with
+        //    enabled tools deliberates so the planner can decide.
         if !mightBenefitFromPlanner(
             userMessage: userMessage,
             context: context,
             toolsByName: toolsByName,
             history: history
         ) {
-            Self.debugLog("preflight skip: no actionable context or heuristic match (decision=none)")
+            ToolCallingDebugLog.line("reason", "tool-independent turn")
             return .skip(.none)
         }
 
@@ -431,46 +453,17 @@ extension ToolCallingService {
         ) != nil {
             return true
         }
-        if isClearlyToolIndependentTurn(userMessage) {
-            return false
-        }
-        // Web-search-leaning language that didn't satisfy the strong force.
-        if toolsByName["web_search"] != nil,
-           messageLooksWebSearchAdjacent(userMessage) {
-            return true
-        }
-        // When web_search is available and the message looks like a factual
-        // question, route to the planner so the new bias-toward-search prompt
-        // can decide instead of skipping straight to model-only generation.
-        if toolsByName["web_search"] != nil,
-           messageLooksLikeFactualQuestion(userMessage) {
-            return true
-        }
         if let trace = contextualFollowUpToolTrace(for: userMessage, history: history),
            toolsByName[trace.toolName] != nil {
             return true
         }
-        if toolsByName["current_datetime"] != nil,
-           messageLooksDateTimeAdjacent(userMessage) {
-            return true
+        // Heuristics remain the confident fast path (handled before this), but
+        // unmatched turns default to the planner unless they are clearly just
+        // chat, math, or local creative writing.
+        if isClearlyToolIndependentTurn(userMessage) {
+            return false
         }
-        if toolsByName["calendar_create"] != nil,
-           messageLooksCalendarCreateAdjacent(userMessage) {
-            return true
-        }
-        if toolsByName["reminders_create"] != nil,
-           messageLooksReminderCreateAdjacent(userMessage) {
-            return true
-        }
-        if toolsByName["timer_create"] != nil,
-           messageLooksTimerCreateAdjacent(userMessage) {
-            return true
-        }
-        if toolsByName["contacts_lookup"] != nil,
-           messageLooksContactsLookupAdjacent(userMessage) {
-            return true
-        }
-        return false
+        return true
     }
 
     nonisolated func isClearlyToolIndependentTurn(_ userMessage: String) -> Bool {
@@ -521,7 +514,84 @@ extension ToolCallingService {
             "fix the grammar",
             "translate this"
         ]
-        return localCreationPhrases.contains(where: { normalized.hasPrefix($0) })
+        if localCreationPhrases.contains(where: { normalized.hasPrefix($0) }) {
+            return true
+        }
+
+        // Duration / wait follow-ups that refer to earlier chat facts ("therefore
+        // how much time do i have to wait") should not open calendar/reminder tools.
+        if looksLikeContextDurationFollowUp(normalized) {
+            return true
+        }
+
+        // Ultra-short replies without tool vocabulary are almost never tool
+        // requests ("Green", "Brush teeth"), so skip the planner cost.
+        let tokens = normalized.split(separator: " ").map(String.init)
+        if tokens.count <= 2,
+           !tokens.contains(where: { tokenLooksToolRelated($0) }) {
+            return true
+        }
+
+        return false
+    }
+
+    /// True for asks that compute an interval from prior conversation dates,
+    /// not from the user's device calendar.
+    nonisolated func looksLikeContextDurationFollowUp(_ normalizedMessage: String) -> Bool {
+        let durationPhrases = [
+            "how much time",
+            "how much longer",
+            "how long do i have",
+            "how long until",
+            "how long till",
+            "how long to wait",
+            "how long will i wait",
+            "how long do i wait",
+            "time do i have to wait",
+            "time left until",
+            "time left till",
+            "days until",
+            "days till",
+            "weeks until",
+            "weeks till"
+        ]
+        guard durationPhrases.contains(where: { normalizedMessage.contains($0) })
+            || (normalizedMessage.contains("to wait")
+                && (normalizedMessage.contains("how long")
+                    || normalizedMessage.contains("how much")
+                    || normalizedMessage.contains("therefore")
+                    || normalizedMessage.contains("so then")
+                    || normalizedMessage.hasPrefix("so "))) else {
+            return false
+        }
+
+        let personalScheduleTokens = Set([
+            "calendar", "schedule", "agenda", "appointment", "appointments",
+            "meeting", "meetings", "event", "events", "reminder", "reminders",
+            "todo", "todos", "task", "tasks", "timer", "alarm"
+        ])
+        let tokens = Set(normalizedMessage.split(separator: " ").map(String.init))
+        return tokens.isDisjoint(with: personalScheduleTokens)
+    }
+
+    nonisolated func tokenLooksToolRelated(_ token: String) -> Bool {
+        let exact = Set([
+            "reminder", "reminders", "remind", "todo", "todos", "task", "tasks",
+            "calendar", "event", "events", "meeting", "meetings",
+            "appointment", "appointments", "schedule", "agenda",
+            "timer", "alarm",
+            "search", "google", "web", "online", "news", "weather", "forecast",
+            "contact", "contacts", "phone", "email",
+            "time", "date", "timezone", "clock",
+            "document", "pdf", "ocr", "image", "photo", "screenshot",
+            "url", "http", "https",
+            "set", "create", "add", "make", "start", "put",
+            "lookup", "find"
+        ])
+        if exact.contains(token) {
+            return true
+        }
+        return looksLikeReminderNoun(token)
     }
 
     nonisolated func messageLooksWebSearchAdjacent(_ userMessage: String) -> Bool {
@@ -713,8 +783,49 @@ extension ToolCallingService {
         let tokens = Set(normalized.split(separator: " ").map(String.init))
         let createHints = Set(["set", "create", "add", "make"])
         let reminderHints = Set(["reminder", "reminders", "todo", "todos"])
-        return !tokens.intersection(createHints).isEmpty
-            && !tokens.intersection(reminderHints).isEmpty
+        let hasCreateCue = !tokens.intersection(createHints).isEmpty
+        let hasReminderNoun = !tokens.intersection(reminderHints).isEmpty
+            || tokens.contains(where: { looksLikeReminderNoun($0) })
+        return hasCreateCue && hasReminderNoun
+    }
+
+    /// Accepts common near-miss spellings of reminder nouns so mutation
+    /// authorization and adjacency gates do not fail closed on typos.
+    nonisolated func looksLikeReminderNoun(_ token: String) -> Bool {
+        if token.hasPrefix("remind") {
+            return true
+        }
+        let targets = ["reminder", "reminders"]
+        for target in targets {
+            guard abs(token.count - target.count) <= 2 else { continue }
+            if editDistance(token, target) <= 2 {
+                return true
+            }
+        }
+        return false
+    }
+
+    nonisolated func editDistance(_ lhs: String, _ rhs: String) -> Int {
+        let left = Array(lhs)
+        let right = Array(rhs)
+        if left.isEmpty { return right.count }
+        if right.isEmpty { return left.count }
+
+        var previous = Array(0...right.count)
+        var current = Array(repeating: 0, count: right.count + 1)
+        for i in 1...left.count {
+            current[0] = i
+            for j in 1...right.count {
+                let cost = left[i - 1] == right[j - 1] ? 0 : 1
+                current[j] = min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + cost
+                )
+            }
+            previous = current
+        }
+        return previous[right.count]
     }
 
     nonisolated func messageLooksTimerCreateAdjacent(_ userMessage: String) -> Bool {

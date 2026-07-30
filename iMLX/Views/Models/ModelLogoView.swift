@@ -7,6 +7,14 @@ struct ModelLogoView: View {
     var body: some View {
         Group {
             switch family {
+            case .custom:
+                Circle()
+                    .fill(Color.secondary.opacity(0.12))
+                    .overlay {
+                        Image(systemName: "externaldrive.fill")
+                            .font(.system(size: size * 0.42, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
             case .mistral3:
                 Image(family.logoName)
                     .resizable()

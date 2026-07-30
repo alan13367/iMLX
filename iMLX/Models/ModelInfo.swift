@@ -1,6 +1,6 @@
 import Foundation
 
-struct ModelInfo: Identifiable, Codable {
+struct ModelInfo: Identifiable, Codable, Sendable {
     let id: String
     let displayName: String
     let huggingFaceId: String
@@ -17,7 +17,8 @@ struct ModelInfo: Identifiable, Codable {
     var isDownloaded: Bool = false
     var localURL: URL?
 
-    enum ModelFamily: String, Codable, CaseIterable {
+    enum ModelFamily: String, Codable, CaseIterable, Sendable {
+        case custom
         case imlx
         case qwen3
         case qwen35
@@ -30,8 +31,9 @@ struct ModelInfo: Identifiable, Codable {
         case lfm25
         case bonsai
 
-        var displayName: String {
+        nonisolated var displayName: String {
             switch self {
+            case .custom: return "Imported"
             case .imlx: return "iMLX"
             case .qwen3: return "Qwen 3"
             case .qwen35: return "Qwen 3.5"
@@ -46,8 +48,10 @@ struct ModelInfo: Identifiable, Codable {
             }
         }
 
-        var familyDescription: String {
+        nonisolated var familyDescription: String {
             switch self {
+            case .custom:
+                return "Compatible MLX models discovered in the additional models folder."
             case .imlx:
                 return "iMLX custom models, specifically fine-tuned for the iMLX app to enable perfect tool-calling and system awareness."
             case .qwen3:
@@ -73,8 +77,9 @@ struct ModelInfo: Identifiable, Codable {
             }
         }
 
-        var logoName: String {
+        nonisolated var logoName: String {
             switch self {
+            case .custom: return "externaldrive.fill"
             case .imlx: return "BrandLogo"
             case .minicpm: return "openbmb_logo"
             case .qwen3, .qwen35, .qwen2vl: return "qwen_logo"
@@ -85,7 +90,7 @@ struct ModelInfo: Identifiable, Codable {
             }
         }
 
-        var sortOrder: Int {
+        nonisolated var sortOrder: Int {
             switch self {
             case .imlx: return 0
             case .qwen3: return 1
@@ -98,6 +103,7 @@ struct ModelInfo: Identifiable, Codable {
             case .lfm2: return 8
             case .lfm25: return 9
             case .bonsai: return 10
+            case .custom: return 11
             }
         }
     }
